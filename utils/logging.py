@@ -1,6 +1,7 @@
 import logging
 import sys
 from datetime import datetime
+from pathlib import Path
 
 def setup_logger(log_location: str,level: str = "INFO") -> logging.Logger:
     """
@@ -31,6 +32,12 @@ def setup_logger(log_location: str,level: str = "INFO") -> logging.Logger:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
+    if log_location:
+        Path(log_location).parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_location)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
     return logger
 
 
