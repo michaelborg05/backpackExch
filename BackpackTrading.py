@@ -3,6 +3,8 @@ import time
 import random
 import logging
 from datetime import datetime
+import os
+from dotenv import load_dotenv
 
 # Set up logging
 logging.basicConfig(
@@ -45,6 +47,14 @@ def check_SOL_Price():
         return False
 
 def main():
+    # Load environment variables from .env file
+    load_dotenv()
+    api_key = os.getenv("BACKPACK_API_KEY")  
+    if not api_key:
+        logging.error("BACKPACK_API_KEY not found in environment variables.")
+        return
+    
+    print(f"Using API Key: {api_key[:4]}****")  # Print partial key for verification    
     """
     Main loop that continuously makes API calls with random delays
     """
