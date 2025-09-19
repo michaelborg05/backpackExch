@@ -1,1 +1,2 @@
 *.env #Ignore config files
+__pycache__/
