@@ -27,10 +27,11 @@ def main():
         while True:
             call_count += 1
             main_logger.info(f"Beginning loop #{call_count}")
-            #get_prices("SOL_USDC")
+            get_prices("SOL_USDC")
             #get_prices("ETH_USDC")
-            get_balances()
+            balances = get_balances()
             # Generate random wait time between 30-180 seconds
+            main_logger.info(balances.summary())
             wait_time = random.randint(30, 180)
             main_logger.info(f"Waiting {wait_time} seconds until next call...")
             

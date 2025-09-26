@@ -39,27 +39,38 @@ class BackpackTicker:
         return None
     
     def formatted_summary(self) -> str:
+        RED =    '\033[31m'
+        GREEN =  '\033[32m'
+        RESET =  '\033[0m'
+        YELLOW = '\033[33m'
+        BLUE =   '\033[34m'
+
         if not self.is_valid():
             return "No price data available"
         
         results = f"{self.symbol} Price Summary ({data_converter.timestamp_to_readable(self.timestamp)}):\n" 
-        results +=     f"  Current Price: {data_converter.convert_to_price(self.last_price)}\n"
-        if self.first_price is not None:
-            results += f"    First Price: {data_converter.convert_to_price(self.first_price)}\n"
+        results +=     f"  Current Price: {data_converter.convert_to_price(self.last_price)}"
         if self.high is not None:
-            results += f"           High: {data_converter.convert_to_price(self.high)}\n" 
+            results += f"     High: {data_converter.convert_to_price(self.high)}\n" 
+        if self.first_price is not None:
+            results += f"    First Price: {data_converter.convert_to_price(self.first_price)}"
         if self.low is not None:                       
-            results += f"            Low: {data_converter.convert_to_price((self.low))}\n"
+            results += f"     Low: {data_converter.convert_to_price((self.low))}\n"
         if self.price_change is not None:
+            if data_converter.convert_to_float(self.price_change) >= 0:
+                results += GREEN
+            else:
+                results += RED
             results += f"   Price Change: {data_converter.convert_to_price(self.price_change)} " 
         price_change_percent_float = data_converter.convert_to_percent(self.price_change_percent)
         if price_change_percent_float is not None:
             sign = "+" if price_change_percent_float >= 0 else ""
             results += f" ({sign}{price_change_percent_float:.2f}%)\n"
-        if self.trades is not None:
-            results += f"         Trades: {self.trades}\n" 
-        if self.volume is not None:
-            results += f"         Volume: {data_converter.convert_volume(self.volume, self.first_price)}\n" 
+        results += RESET
+        #if self.trades is not None:
+        #    results += f"         Trades: {self.trades}\n" 
+        #if self.volume is not None:
+        #    results += f"         Volume: {data_converter.convert_volume(self.volume, self.first_price)}\n" 
         
         return results
     

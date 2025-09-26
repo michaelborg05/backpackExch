@@ -7,10 +7,10 @@ class AssetBalance:
     
     def __init__(self, symbol: str, available: str, locked: str, staked: str):
         self.symbol = symbol
-        self.available = Decimal(available)
-        self.locked = Decimal(locked)
-        self.staked = Decimal(staked)
-    
+        self.available = round(Decimal(available),3) if symbol not in ['BTC', 'ETH'] else Decimal(available)
+        self.locked = round(Decimal(locked),3) if symbol not in ['BTC', 'ETH'] else Decimal(locked)
+        self.staked = round(Decimal(staked),3) if symbol not in ['BTC', 'ETH'] else Decimal(staked)
+
     @property
     def total(self) -> Decimal:
         """Total balance across all states"""
@@ -22,7 +22,7 @@ class AssetBalance:
         return self.total == 0
     
     def __str__(self) -> str:
-        return f"{self.symbol}: Available={self.available}, Locked={self.locked}, Staked={self.staked}, Total={self.total}"
+        return f"{self.symbol:>12}: Available={self.available}, Locked={self.locked}, Staked={self.staked}, Total={self.total}"
     
     def __repr__(self) -> str:
         return f"AssetBalance(symbol='{self.symbol}', available={self.available}, locked={self.locked}, staked={self.staked})"

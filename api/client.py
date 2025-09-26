@@ -8,6 +8,7 @@ from models.backpack_ticker import BackpackTicker
 from utils.logging import log_manager
 from api.endpoints import APIEndpoints
 from utils import data_converter
+from models.backpack_balance import BalanceReader
 
 config = Config()
 client_logger = log_manager.get_logger("client")
@@ -129,7 +130,7 @@ def get_prices(ticker:str):
 
 
 
-def get_balances():
+def get_balances() -> Optional[BalanceReader]:
     url = APIEndpoints.backpack_balances()
     headers=data_converter.build_authorisation_header(
         api_key=config.api_key,
@@ -139,11 +140,13 @@ def get_balances():
         instruction="balanceQuery",
         window=60000
     )
-    
 
     balances = api_request(url, headers)
     
     if balances:
         client_logger.info("API call for balances completed successfully")
+        return BalanceReader(balances)
+        #active_assets = balancelist.get_non_zero_balances()
+        #print(balancelist.summary())
     else:
         client_logger.error("API call for balances failed")
