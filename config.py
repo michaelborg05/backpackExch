@@ -7,9 +7,7 @@ class Config:
     load_dotenv()
     def __init__(self):
         self.api_key = os.getenv('BACKPACK_API_KEY')
-        if self.api_key:
-            print(f"Using API Key: {self.api_key[:4]}****")  # Print partial key for verification    
-
+        self.secret = os.getenv('SECRET')
         self.debug_mode = os.getenv('DEBUG_MODE', 'False').lower() == 'true'
         self.log_level = os.getenv('LOG_LEVEL', 'INFO').upper()    
         self.log_location = os.getenv('LOG_LOCATION', 'app.log')

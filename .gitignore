@@ -3,5 +3,4 @@ __pycache__/
 logs/
 *.__pycache__
 *.pyc
-__pycache__/config.cpython-312.pyc
-utils/__pycache__/logging.cpython-312.pyc
+.env

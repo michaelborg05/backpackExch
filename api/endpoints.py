@@ -7,12 +7,12 @@ class APIEndpoints:
     
 
     @classmethod
-    def backpack_ticker(cls, ticker: str = "SOL_USDC") -> str:
+    def backpack_ticker(cls, ticker: str = "SOL_USDC", interval: str = "1d") -> str:
         """backpack price endpoint"""
-        return f"{cls.BACKPACK_BASE}/api/v1/ticker?symbol={ticker}&interval=1d"
+        return f"{cls.BACKPACK_BASE}/api/v1/ticker?symbol={ticker}&interval={interval}"
     
     @classmethod
-    def binance_ticker(cls, symbol: str = "SOLUSDT") -> str:
-        """Binance ticker endpoint"""
-        return f"{cls.BINANCE_BASE}/ticker/price?symbol={symbol}"
+    def backpack_balances(cls) -> str:
+        """Backpack balances endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/capital"
 
