@@ -1,0 +1,78 @@
+import time
+from typing import Dict, Optional, Any
+from utils.config import Config
+from exchange_client.models.ticker import BackpackTicker,TickerDepth
+from utils.logging import log_manager
+from utils.endpoints import APIEndpoints
+from utils import data_converters
+from exchange_client.models.balance import BalanceReader
+from client import api_request
+
+config = Config()
+market_logger = log_manager.get_logger("MarketBuilder")
+
+def check_ticker(endpoint: str) -> BackpackTicker:
+    """
+    Get current Solana price from API
+    
+    Args:
+        api_endpoint: API endpoint URL
+        api_key: Optional API key
+        
+    Returns:
+        Current SOL price or None if failed
+    """
+    headers = {"User-Agent": "Python-Script/1.0"}
+    
+    #response = requests.get(url, headers=headers, timeout=10)
+    price_response = api_request(endpoint, headers)
+    if not price_response:
+        print("Failed to get data from API")
+        return BackpackTicker()    
+    
+    #print(f"Response data: {price_response.get('firstPrice','firstPrice not found')}")
+    
+    return BackpackTicker(
+        symbol=price_response.get('symbol'),
+        first_price=price_response.get('firstPrice'),  # Adjust field names
+        last_price=price_response.get('lastPrice'),
+        high=price_response.get('high'),
+        low=price_response.get('low'),
+        price_change= price_response.get('priceChange'),
+        price_change_percent=price_response.get('priceChangePercent'),
+        trades=price_response.get('trades'),
+        volume=price_response.get('volume'),
+        timestamp=int(time.time())
+    )
+
+def get_prices(ticker:str):
+    url = APIEndpoints.backpack_ticker(ticker,"1d")
+    ticker = check_ticker(url)
+    
+    if ticker:
+        market_logger.info("API call completed successfully")
+    else:
+        market_logger.error("API call failed")
+    print(f"Summary: {ticker.formatted_summary()}")
+    return ticker
+
+def get_depth() -> Optional[TickerDepth]:
+    url = APIEndpoints.backpack_balances()
+    headers=data_converters.build_authorisation_header(
+        api_key=config.api_key,
+        secret=config.secret,
+        query_params={},
+        body=None,
+        instruction="balanceQuery",
+        window=60000
+    )
+
+    balances = api_request(url, headers)
+    
+    if balances:
+        market_logger.info("API call for balances completed successfully")
+        return BalanceReader(balances)
+        #active_assets = balancelist.get_non_zero_balances()
+        #print(balancelist.summary())
+    else:
+        market_logger.error("API call for balances failed")

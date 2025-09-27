@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from config import Config
+from utils.config import Config
 
 class LoggingManager:
     def __init__(self):

@@ -1,4 +1,3 @@
-*.env #Ignore config files
 __pycache__/
 logs/
 *.__pycache__

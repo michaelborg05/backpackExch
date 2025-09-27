@@ -2,8 +2,9 @@ import time
 import random
 from utils.logging import log_manager
 from datetime import datetime
-from config import Config
-from api.client import get_prices, get_balances
+from utils.config import Config
+from api_builders.account_builder import get_balances
+from api_builders.market_builder import get_prices
 from pathlib import Path
 
 project_root = Path(__file__).parent
@@ -27,7 +28,7 @@ def main():
         while True:
             call_count += 1
             main_logger.info(f"Beginning loop #{call_count}")
-            get_prices("SOL_USDC")
+            sol_details = get_prices("SOL_USDC")
             #get_prices("ETH_USDC")
             balances = get_balances()
             # Generate random wait time between 30-180 seconds
