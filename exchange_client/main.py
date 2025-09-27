@@ -23,12 +23,13 @@ def main():
     """
     main_logger.info("Starting continuous API caller...")
     call_count = 0
-    
+    ticker = "SOL_USDC"
+
     try:
         while True:
             call_count += 1
             main_logger.info(f"Beginning loop #{call_count}")
-            sol_details = get_prices("SOL_USDC")
+            sol_details = get_prices(ticker)
             #get_prices("ETH_USDC")
             balances = get_balances()
             # Generate random wait time between 30-180 seconds

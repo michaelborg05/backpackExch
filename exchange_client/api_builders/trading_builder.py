@@ -4,11 +4,9 @@ import urllib.error
 import json
 from typing import Dict, Optional, Any
 from utils.config import Config
-from exchange_client.models.ticker import BackpackTicker
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
-from exchange_client.models.balance import BalanceReader
 
 config = Config()
 trader_logger = log_manager.get_logger("trader")

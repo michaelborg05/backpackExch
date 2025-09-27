@@ -1,11 +1,10 @@
 import time
 from typing import Dict, Optional, Any
 from utils.config import Config
-from exchange_client.models.ticker import BackpackTicker,TickerDepth
+from models import BackpackTicker, TickerDepth, BalanceReader
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
-from exchange_client.models.balance import BalanceReader
 from client import api_request
 
 config = Config()
@@ -45,19 +44,8 @@ def check_ticker(endpoint: str) -> BackpackTicker:
         timestamp=int(time.time())
     )
 
-def get_prices(ticker:str):
-    url = APIEndpoints.backpack_ticker(ticker,"1d")
-    ticker = check_ticker(url)
-    
-    if ticker:
-        market_logger.info("API call completed successfully")
-    else:
-        market_logger.error("API call failed")
-    print(f"Summary: {ticker.formatted_summary()}")
-    return ticker
-
-def get_depth() -> Optional[TickerDepth]:
-    url = APIEndpoints.backpack_balances()
+def get_depth(symbol: str) -> Optional[TickerDepth]:
+    url = APIEndpoints.backpack_depth("SOL_USDC", "5")
     headers=data_converters.build_authorisation_header(
         api_key=config.api_key,
         secret=config.secret,
@@ -76,3 +64,15 @@ def get_depth() -> Optional[TickerDepth]:
         #print(balancelist.summary())
     else:
         market_logger.error("API call for balances failed")
+    return None
+
+def get_prices(symbol:str):
+    url = APIEndpoints.backpack_ticker(symbol,"1d")
+    ticker = check_ticker(url)
+    
+    if ticker:
+        market_logger.info("API call completed successfully")
+    else:
+        market_logger.error("API call failed")
+    print(f"Summary: {ticker.formatted_summary()}")
+    return ticker
