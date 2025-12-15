@@ -74,3 +74,32 @@ class BackpackTicker:
         
         return results
 
+    def simple_summary(self) -> str:
+        RED =    '\033[31m'
+        GREEN =  '\033[32m'
+        RESET =  '\033[0m'
+        YELLOW = '\033[33m'
+        BLUE =   '\033[34m'
+
+        if not self.is_valid():
+            return "No price data available"
+        
+        results = f"{self.symbol} Current Price: {data_converters.convert_to_price(self.last_price)}"
+        if self.price_change is not None:
+            if data_converters.convert_to_float(self.price_change) >= 0:
+                results += GREEN
+            else:
+                results += RED
+            results += f"   Price Change: {data_converters.convert_to_price(self.price_change)} " 
+        price_change_percent_float = data_converters.convert_to_percent(self.price_change_percent)
+        if price_change_percent_float is not None:
+            sign = "+" if price_change_percent_float >= 0 else ""
+            results += f" ({sign}{price_change_percent_float:.2f}%)"
+        results += RESET
+        #if self.trades is not None:
+        #    results += f"         Trades: {self.trades}\n" 
+        #if self.volume is not None:
+        #    results += f"         Volume: {data_converter.convert_volume(self.volume, self.first_price)}\n" 
+        
+        return results
+

@@ -45,7 +45,7 @@ def check_ticker(endpoint: str) -> BackpackTicker:
     )
 
 def get_depth(symbol: str) -> Optional[TickerDepth]:
-    url = APIEndpoints.backpack_depth("SOL_USDC", "5")
+    url = APIEndpoints.backpack_depth(symbol, "5")
     headers=data_converters.build_authorisation_header(
         api_key=config.api_key,
         secret=config.secret,
@@ -58,7 +58,7 @@ def get_depth(symbol: str) -> Optional[TickerDepth]:
     balances = api_request(url, headers)
     
     if balances:
-        market_logger.info("API call for balances completed successfully")
+        market_logger.debug("API call for balances completed successfully")
         return BalanceReader(balances)
         #active_assets = balancelist.get_non_zero_balances()
         #print(balancelist.summary())
@@ -66,13 +66,13 @@ def get_depth(symbol: str) -> Optional[TickerDepth]:
         market_logger.error("API call for balances failed")
     return None
 
-def get_prices(symbol:str):
+def get_price(symbol:str):
     url = APIEndpoints.backpack_ticker(symbol,"1d")
     ticker = check_ticker(url)
     
     if ticker:
-        market_logger.info("API call completed successfully")
+        market_logger.debug("API call successful")
     else:
         market_logger.error("API call failed")
-    print(f"Summary: {ticker.formatted_summary()}")
+    print(ticker.simple_summary())
     return ticker

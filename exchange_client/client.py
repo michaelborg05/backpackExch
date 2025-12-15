@@ -25,7 +25,7 @@ def api_request(url: str, headers: Optional[Dict[str, str]] = None, timeout: int
             headers = {"User-Agent": "Backpack trader/1.0"}
         
         if config.debug_mode == True:
-            client_logger.info(f"DEBUG: Making request to {url}")
+            client_logger.debug(f"DEBUG: Making request to {url}")
 
         req = urllib.request.Request(url, headers=headers)
         
@@ -41,7 +41,7 @@ def api_request(url: str, headers: Optional[Dict[str, str]] = None, timeout: int
                     resp_text = repr(resp_bytes)
 
                 # Keep a short, single-line preview for logs/console
-                client_logger.info(f"DEBUG: Response body: {resp_text}")
+                client_logger.debug(f"DEBUG: Response body: {resp_text}")
 
             if response.status == 200:
                 try:

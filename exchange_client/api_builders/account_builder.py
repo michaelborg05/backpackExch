@@ -23,7 +23,7 @@ def get_balances() -> Optional[BalanceReader]:
     balances = api_request(url, headers)
     
     if balances:
-        account_logger.info("API call for balances completed successfully")
+        account_logger.debug("API call for balances completed successfully")
         return BalanceReader(balances)
         #active_assets = balancelist.get_non_zero_balances()
         #print(balancelist.summary())
