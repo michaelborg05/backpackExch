@@ -1,3 +1,6 @@
+import uvicorn
+import threading
+from api_server import app
 import time
 import random
 from utils.logging import log_manager
@@ -7,20 +10,22 @@ from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from pathlib import Path
 
+
 project_root = Path(__file__).parent
 config = Config()
 main_logger = log_manager.get_logger("main")
 
-def main():
+def monitoring_loop():
     # Setup
     main_logger.debug("App starting...")
-
-    main_logger.debug(f"Debug mode is {'on' if config.debug_mode else 'off'}")
-    main_logger.debug(f"Log level set to {config.log_level}")
 
     """
     Main loop that continuously makes API calls with random delays
     """
+
+    main_logger.debug(f"Debug mode is {'on' if config.debug_mode else 'off'}")
+    main_logger.debug(f"Log level set to {config.log_level}")
+
     main_logger.debug("Starting continuous API caller...")
     call_count = 0
     tickers = ["SOL_USDC","ETH_USDC","HYPE_USDC"]   # Comma-separated list of tickers
@@ -47,6 +52,8 @@ def main():
         main_logger.error(f"Unexpected error in main loop: {e}")
 
 if __name__ == "__main__":
-    main()
+    #monitoring_loop()
+    monitor_thread = threading.Thread(target=monitoring_loop, daemon=True)
+    monitor_thread.start()
 
-
+    uvicorn.run(app, host="0.0.0.0", port=8000)

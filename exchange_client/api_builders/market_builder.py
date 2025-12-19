@@ -75,4 +75,4 @@ def get_price(symbol:str):
     else:
         market_logger.error("API call failed")
     print(ticker.simple_summary())
-    return ticker
+    return ticker.last_price

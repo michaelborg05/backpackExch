@@ -1,0 +1,16 @@
+__pycache__/
+*.__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+env
+config.ini
+secrets.json
+*_secret*
+logs/
+*.pyc
+.env
