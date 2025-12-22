@@ -11,7 +11,7 @@ class Config:
         self.debug_mode = os.getenv('DEBUG_MODE', 'False').lower() == 'true'
         self.log_level = os.getenv('LOG_LEVEL', 'INFO').upper()    
         self.log_location = os.getenv('LOG_LOCATION', 'app.log')
-        
+        self.monitor_delay_interval = int(os.getenv('MONITORLOOP_DELAY_INTERVAL', '10'))
         if self.log_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
             raise ValueError(f"Invalid LOG_LEVEL: {self.log_level}")
         
