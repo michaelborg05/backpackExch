@@ -17,7 +17,7 @@ main_logger = log_manager.get_logger("main")
 
 def monitoring_loop():
     # Setup
-    main_logger.debug("App starting...")
+    main_logger.debug("monitoring app starting...")
 
     """
     Main loop that continuously makes API calls with random delays
@@ -37,11 +37,11 @@ def monitoring_loop():
             for ticker in tickers:
                 get_price(ticker)
             #get_prices("ETH_USDC")
-            balances = get_balances()
+            balances = get_balances(source = "GUI")
             # Generate random wait time between 30-180 seconds
             if balances:
                 main_logger.info(balances.summary())
-            wait_time = random.randint(30, 180)
+            wait_time = random.randint(130, 1180)
             main_logger.info(f"Waiting {wait_time} seconds until next call...")
             
             time.sleep(wait_time)

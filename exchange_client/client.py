@@ -4,78 +4,135 @@ import json
 from typing import Dict, Optional, Any
 from utils.config import Config
 from utils.logging import log_manager
+import socket
+from utils.constants import HttpMethod
 
 config = Config()
 client_logger = log_manager.get_logger("client")
 
-def api_request(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 10) -> Optional[Dict[str, Any]]:
+
+def api_request(
+    url: str, 
+    headers: Optional[Dict[str, str]] = None, 
+    body: Optional[Dict[str, Any]] = None,
+    timeout: int = 10, 
+    requestType: str = HttpMethod.GET
+) -> Optional[Dict[str, Any]]:
     """
     Generic API request function
     
     Args:
         url: API endpoint URL
         headers: Optional HTTP headers
+        body: Optional request body (will be JSON encoded)
         timeout: Request timeout in seconds
+        requestType: HTTP method (GET, POST, DELETE, etc.)
         
     Returns:
         JSON response data or None if failed
     """
     try:
+        # Set default headers
         if headers is None:
             headers = {"User-Agent": "Backpack trader/1.0"}
         
-        if config.debug_mode == True:
-            client_logger.debug(f"DEBUG: Making request to {url}")
-
-        req = urllib.request.Request(url, headers=headers)
+        # Prepare request body
+        data = None
+        if body is not None:
+            # Add content-type header if body is present
+            if "Content-Type" not in headers:
+                headers["Content-Type"] = "application/json"
+            
+            # Encode body as JSON bytes
+            data = json.dumps(body).encode('utf-8')
+            
+            if config.debug_mode:
+                client_logger.debug(f"DEBUG: Request body: {json.dumps(body, indent=2)}")
         
+        if config.debug_mode:
+            client_logger.debug(f"DEBUG: {requestType.value} request to {url}")
+            client_logger.debug(f"DEBUG: Headers: {headers}")
+
+        # Create request with optional body
+        req = urllib.request.Request(
+            url, 
+            data=data,  # Add body data
+            headers=headers, 
+            method=requestType.value
+        )
+
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            # Read response bytes once to avoid consuming the stream twice
+            # Read response bytes once
             resp_bytes = response.read()
 
             if config.debug_mode:
-                # Try to decode as text, fall back to repr of bytes
                 try:
                     resp_text = resp_bytes.decode('utf-8')
+                    # Pretty print JSON if possible
+                    try:
+                        parsed = json.loads(resp_text)
+                        resp_text = json.dumps(parsed, indent=2)
+                    except:
+                        pass
+                    client_logger.debug(f"DEBUG: Response ({response.status}): {resp_text}")
                 except Exception:
-                    resp_text = repr(resp_bytes)
+                    client_logger.debug(f"DEBUG: Response ({response.status}): {repr(resp_bytes)}")
 
-                # Keep a short, single-line preview for logs/console
-                client_logger.debug(f"DEBUG: Response body: {resp_text}")
-
-            if response.status == 200:
+            # Check for successful status codes (200-299)
+            if 200 <= response.status < 300:
+                # Handle empty responses
+                if not resp_bytes:
+                    return {}
+                
                 try:
                     return json.loads(resp_bytes.decode('utf-8'))
-                except json.JSONDecodeError:
-                    client_logger.error("Failed to decode JSON from response")
+                except json.JSONDecodeError as e:
+                    client_logger.error(f"Failed to decode JSON from response: {e}")
+                    client_logger.error(f"Response text: {resp_bytes.decode('utf-8', errors='replace')}")
                     return None
             else:
-                #print(f"API request failed with status: {response.status}")
-                client_logger.error("API request failed with status: {response.status}")
+                client_logger.error(f"API request failed with status: {response.status}")
+                # Try to parse error response
+                try:
+                    error_data = json.loads(resp_bytes.decode('utf-8'))
+                    client_logger.error(f"Error details: {error_data}")
+                except:
+                    client_logger.error(f"Response: {resp_bytes.decode('utf-8', errors='replace')}")
                 return None
                 
     except urllib.error.HTTPError as e:
-        # HTTPError contains the response body which we should decode safely
-        body = None
+        # HTTPError contains the response body
+        body_text = None
         try:
-            body = e.read().decode('utf-8')
-        except Exception:
+            body_bytes = e.read()
+            body_text = body_bytes.decode('utf-8')
+            
+            # Try to parse as JSON for better error messages
             try:
-                body = repr(e.read())
-            except Exception:
-                body = '<unable to read body>'
-
-        print(f"HTTP Error: {e.code} - {e.reason}")
-        client_logger.error(f"HTTP Error: {e.code} - {e.reason}")
-        client_logger.error(f"HTTP Error body: {body}")
+                error_json = json.loads(body_text)
+                client_logger.error(f"HTTP {e.code} Error: {json.dumps(error_json, indent=2)}")
+            except:
+                client_logger.error(f"HTTP {e.code} Error: {body_text}")
+        except Exception:
+            client_logger.error(f"HTTP {e.code} Error: {e.reason} (unable to read body)")
+        
         return None
+        
     except urllib.error.URLError as e:
-        print(f"URL Error: {e.reason}")
+        client_logger.error(f"URL Error: {e.reason}")
         return None
+        
     except json.JSONDecodeError as e:
-        print(f"JSON decode error: {e}")
+        client_logger.error(f"JSON decode error: {e}")
         return None
+        
+    except socket.timeout:
+        client_logger.error(f"Request timeout after {timeout} seconds")
+        return None
+        
     except Exception as e:
-        print(f"Unexpected error in API request: {e}")
-        return None
-    
+        client_logger.error(f"Unexpected error in API request: {type(e).__name__}: {e}")
+        if config.debug_mode:
+            import traceback
+            client_logger.debug(traceback.format_exc())
+        return None    

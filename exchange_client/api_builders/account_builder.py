@@ -9,7 +9,7 @@ from models.balance import BalanceReader
 config = Config()
 account_logger = log_manager.get_logger("AccountBuilder")
 
-def get_balances() -> Optional[BalanceReader]:
+def get_balances(source: str = "API") -> Optional[BalanceReader]:
     url = APIEndpoints.backpack_balances()
     headers=data_converters.build_authorisation_header(
         api_key=config.api_key,
@@ -24,7 +24,10 @@ def get_balances() -> Optional[BalanceReader]:
     
     if balances:
         account_logger.debug("API call for balances completed successfully")
-        return BalanceReader(balances)
+        if source == "API":
+            return balances
+        else:
+            return BalanceReader(balances)
         #active_assets = balancelist.get_non_zero_balances()
         #print(balancelist.summary())
     else:

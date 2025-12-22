@@ -27,3 +27,13 @@ class APIEndpoints:
         if startTime is None:
             startTime = get_utc_timestamp_seconds() - 86400  # 24 hours ago
         return f"{cls.BACKPACK_BASE}/api/v1/klines?symbol={ticker}&interval={interval}&startTime={startTime}"
+
+    @classmethod
+    def backpack_ExecuteOrder(cls) -> str:
+        """Backpack Execute Order endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/order"
+
+    @classmethod
+    def backpack_GetOpenOrders(cls) -> str:
+        """Backpack Execute Order endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/orders"
