@@ -5,7 +5,7 @@ from models import BackpackTicker, TickerDepth, BalanceReader
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
-from client import api_request
+from services.client import api_request
 
 config = Config()
 market_logger = log_manager.get_logger("MarketBuilder")

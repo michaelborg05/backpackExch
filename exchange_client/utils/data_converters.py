@@ -5,6 +5,7 @@ import base64
 import urllib.parse
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
+import math
 
 def get_utc_timestamp_seconds() -> int:
     """Get current UTC timestamp in seconds"""
@@ -167,3 +168,10 @@ def build_authorisation_header(api_key: str, secret: str,  query_params: Dict[st
     headers["X-SIGNATURE"] = signature
 
     return headers
+
+def round_down(value, decimals):
+    try:
+        factor = 10**decimals
+        return math.floor(value * factor) / factor
+    except Exception as e:
+        raise ValueError(f"Error rounding down: {e}")

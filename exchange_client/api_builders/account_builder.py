@@ -1,4 +1,4 @@
-from client import api_request
+from services.client import api_request
 from typing import Dict, Optional, Any
 from utils.config import Config
 from utils.logging import log_manager

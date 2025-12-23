@@ -1,11 +1,11 @@
 import time
 import threading
-from typing import List, Optional
+from typing import List,  Dict,Optional
 from utils.logging import log_manager
 from utils.config import Config
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
-
+from services.balance_cache import get_balance_cache
 
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
@@ -23,6 +23,7 @@ class MonitoringService:
         self.is_running = False
         self.thread = None
         self.call_count = 0
+        self.balance_cache = get_balance_cache()  # Get cache instance
         
     def start(self):
         """Start the monitoring loop in a background thread"""
@@ -64,7 +65,8 @@ class MonitoringService:
             "is_running": self.is_running,
             "call_count": self.call_count,
             "tickers": self.tickers,
-            "interval": self.config.monitor_delay_interval
+            "interval": self.config.monitor_delay_interval,
+             "balance_cache": self.balance_cache.get_cache_info()
         }
     
     def _monitoring_loop(self):
@@ -110,5 +112,28 @@ class MonitoringService:
             balances = get_balances(source="GUI")
             if balances:
                 self.logger.info(balances.summary())
+                # Update cache with latest balances
+                # Assuming balances has a method to convert to dict
+                balance_dict = self._convert_balances_to_dict(balances)
+                self.balance_cache.update(balance_dict)
         except Exception as e:
             self.logger.error(f"Error getting balances: {e}")
+
+    def _convert_balances_to_dict(self, balances) -> Dict[str, Dict]:
+        """
+        Convert balance object to dict format for cache
+        Adjust this based on your actual balance object structure
+        """
+        # Example - adjust based on your actual balance object
+        if hasattr(balances, 'to_dict'):
+            return balances.to_dict()
+        
+        # Or if it's already a dict-like object
+        result = {}
+        for asset, balance in balances.items():
+            result[asset] = {
+                "available": str(balance.available) if hasattr(balance, 'available') else "0",
+                "locked": str(balance.locked) if hasattr(balance, 'locked') else "0",
+                "staked": str(balance.staked) if hasattr(balance, 'staked') else "0"
+            }
+        return result

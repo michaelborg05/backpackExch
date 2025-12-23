@@ -14,7 +14,7 @@ from utils.constants import (
     MarketType
 )
 
-class MarketOrderRequest(BaseModel):
+class OrderRequest(BaseModel):
     symbol: str
     quantity: str
     side: str  # "buy" or "sell"
@@ -158,44 +158,55 @@ class Position(BaseModel):
 
 
 # Helper functions for creating common orders
-def create_buy(symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderExecuteRequest:
-    """Create a market buy order"""
-    if price == "0":
-        return OrderExecuteRequest(
-            symbol=symbol,
-            side=Side.BID,
-            order_type=OrderType.MARKET,
-            quantity=quantity,
-            **kwargs
-        )
+def create_buy(symbol: str, quantity: str = None, price: str = None, **kwargs) -> OrderExecuteRequest:
+    """
+    Create a buy order (market or limit based on price)
+    
+    Args:
+        symbol: Trading pair (e.g., "SOL_USDC")
+        quantity: Base asset quantity (omit if using quoteQuantity)
+        price: Limit price (omit or "0" for market order)
+        **kwargs: Additional order parameters
+    """
+    params = {
+        "symbol": symbol,
+        "side": Side.BID,
+        "quantity": quantity,
+    }
+    
+    if price and price != "0":
+        params["order_type"] = OrderType.LIMIT
+        params["price"] = price
     else:
-        return OrderExecuteRequest(
-            symbol=symbol,
-            side=Side.BID,
-            order_type=OrderType.LIMIT,
-            price=price,
-            quantity=quantity,
-            **kwargs
-        )
+        params["order_type"] = OrderType.MARKET
+        
+    params.update(kwargs)
+    return OrderExecuteRequest(**params)
 
-def create_sell(symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderExecuteRequest:
-    """Create a market sell order"""
-    if price == "0":
-        return OrderExecuteRequest(
-            symbol=symbol,
-            side=Side.ASK,
-            order_type=OrderType.MARKET,
-            quantity=quantity,
-            **kwargs
-        )
+def create_sell(symbol: str, quantity: str = None, price: str = None, **kwargs) -> OrderExecuteRequest:
+    """
+    Create a sell order (market or limit based on price)
+    
+    Args:
+        symbol: Trading pair (e.g., "SOL_USDC")
+        quantity: Base asset quantity (omit if using quoteQuantity)
+        price: Limit price (omit or "0" for market order)
+        **kwargs: Additional order parameters
+    """
+    params = {
+        "symbol": symbol,
+        "side": Side.ASK,
+        "quantity": quantity,
+    }
+    
+    if price and price != "0":
+        params["order_type"] = OrderType.LIMIT
+        params["price"] = price
     else:
-        return OrderExecuteRequest(
-            symbol=symbol,
-            side=Side.ASK,
-            order_type=OrderType.LIMIT,
-            price=price,
-            quantity=quantity,
-            **kwargs
-        )
+        params["order_type"] = OrderType.MARKET
+    
+    params.update(kwargs)
+    return OrderExecuteRequest(**params)
+
 
 

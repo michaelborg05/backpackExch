@@ -1,10 +1,14 @@
-from client import api_request
+from services.client import api_request
 from typing import Dict, Optional, Any
 from utils.config import Config
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
 from utils.constants import HttpMethod
+from services.balance_cache import get_balance_cache
+from decimal import Decimal
+from utils.constants import Side
+from utils.data_converters import round_down
 from models.trade import (
     OrderExecuteRequest, 
     OrderResponse, 
@@ -15,29 +19,79 @@ from models.trade import (
 )
 
 class TradingService:
-    config = Config()
-    trader_logger = log_manager.get_logger("TradingBuilder")
+    def __init__(self):
+        self.config = Config()
+        self.trader_logger = log_manager.get_logger("TradingService")
+        self.balance_cache = get_balance_cache()
 
-    def market_buy(self, symbol: str, quantity: str, **kwargs) -> OrderResponse:
+    def _validate_and_adjust_order(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
+        """
+        Validate order against available balance and adjust if needed
+        
+        Args:
+            order: Order to validate
+            
+        Returns:
+            Adjusted order (or original if no adjustment needed)
+        """
+        # Only validate sell orders (Ask side)
+        if order.side != Side.ASK:
+            return order
+        
+        # Extract base asset from symbol (e.g., "SOL_USDC" -> "SOL")
+        base_asset = order.symbol.split("_")[0]
+        
+        # Get available balance
+        available = self.balance_cache.get_available_balance(base_asset)
+        
+        if available is None:
+            self.trader_logger.warning(
+                f"Could not retrieve balance for {base_asset}, proceeding without validation"
+            )
+            return order
+        
+        else:
+            try:
+                order_qty = Decimal(order.quantity)
+                # Check if we have enough balance
+                if order_qty > available:
+                    self.trader_logger.warning(
+                        f"Insufficient balance for {base_asset}. "
+                        f"Requested: {order_qty}, Available: {available}"
+                    )
+                    
+                    # Adjust to max available (with small buffer for fees)
+                    adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
+                
+                    self.trader_logger.info(
+                        f"Adjusting order quantity from {order_qty} to {adjusted_qty}"
+                    )
+            except:
+                self.trader_logger.warning(
+                    f"Invalid order quantity: {order.quantity} for {base_asset}. "
+                    f"Adjusting to available amount: {available}"
+                )
+                adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
+
+                #raise ValueError(f"Invalid order quantity: {order.quantity}")
+           
+            # Create adjusted order
+        if adjusted_qty is not None:
+            order.quantity = str(round_down(adjusted_qty,2))
+
+        return order
+
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderResponse:
             """Execute a market buy order"""
-            order = create_buy(symbol, quantity, **kwargs)
+            order = create_buy(symbol, quantity, price, **kwargs)
             return self.ExecuteOrder(order)
 
-    def market_sell(self, symbol: str, quantity: str, **kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", **kwargs) -> OrderResponse:
         """Execute a market sell order"""
-        order = create_sell(symbol, quantity, **kwargs)
+        order = create_sell(symbol, quantity, price, **kwargs)
+        order = self._validate_and_adjust_order(order)
         return self.ExecuteOrder(order)
 
-    # Limit orders
-    def limit_buy(self, symbol: str, price: str, quantity: str, **kwargs) -> OrderResponse:
-        """Place a limit buy order"""
-        order = create_buy(symbol,  quantity, price=price, **kwargs)
-        return self.ExecuteOrder(order)
-
-    def limit_sell(self, symbol: str, price: str, quantity: str, **kwargs) -> OrderResponse:
-        """Place a limit sell order"""
-        order = create_sell(symbol, quantity, price=price, **kwargs)
-        return self.ExecuteOrder(order)
 
     # Order management
     def cancel_order(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None):

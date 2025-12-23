@@ -2,11 +2,12 @@
 from fastapi import FastAPI,HTTPException
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
-from models.trade import MarketOrderRequest
+from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService
 from services.monitoring_service import MonitoringService
 from pydantic import BaseModel
 from typing import Optional
+from services.balance_cache import get_balance_cache
 
 app = FastAPI(title="Trading API")
 
@@ -122,22 +123,57 @@ def balance_endpoint():
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-@app.post("/order/market")
-def place_market_order(
-    request: MarketOrderRequest
+@app.post("/order")
+def place_order(
+    request: OrderRequest
 ):
     trading: TradingService = TradingService()  
 
     """Place a market order"""
     try:
         if request.side.lower() == "buy":
-            result = trading.market_buy(request.symbol, request.quantity)
+            result = trading.order_buy(request.symbol, request.quantity)
         elif request.side.lower() == "sell":
-            
-            result = trading.market_sell(request.symbol, request.quantity)
+            result = trading.order_sell(request.symbol, request.quantity)
         else:
             raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
         
         return result.model_dump()
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/balances/cached")
+def get_cached_balances():
+    """Get balances from cache (fast, no API call)"""
+    cache = get_balance_cache()
+    balances = cache.get_all_balances()
+    
+    if balances is None:
+        return {
+            "error": "Balance cache is empty or stale",
+            "cache_info": cache.get_cache_info()
+        }
+    
+    return {
+        "balances": balances,
+        "cache_info": cache.get_cache_info()
+    }
+
+
+@app.get("/balances/cached/{asset}")
+def get_cached_asset_balance(asset: str):
+    """Get balance for specific asset from cache"""
+    cache = get_balance_cache()
+    balance = cache.get_available_balance(asset)
+    
+    if balance is None:
+        return {
+            "error": f"Balance for {asset} not found or cache is stale",
+            "cache_info": cache.get_cache_info()
+        }
+    
+    return {
+        "asset": asset,
+        "available": str(balance),
+        "cache_info": cache.get_cache_info()
+    }
