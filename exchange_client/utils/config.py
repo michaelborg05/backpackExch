@@ -11,12 +11,21 @@ class Config:
         self.debug_mode = os.getenv('DEBUG_MODE', 'False').lower() == 'true'
         self.log_level = os.getenv('LOG_LEVEL', 'INFO').upper()    
         self.log_location = os.getenv('LOG_LOCATION', 'app.log')
-        self.monitor_delay_interval = int(os.getenv('MONITORLOOP_DELAY_INTERVAL', '10'))
+        self.monitor_delay_interval = self.get_int_env('MONITORLOOP_DELAY_INTERVAL')
         if self.log_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
             raise ValueError(f"Invalid LOG_LEVEL: {self.log_level}")
-        
+        self.telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        self.chat_group_id = self.get_int_env('CHAT_GROUP_ID')
+
     def _get_required(self, key: str) -> str:
         value = os.getenv(key)
         if not value:
             raise ValueError(f"Required environment variable {key} is not set")
         return value
+    
+    def get_int_env(self, var_name: str) -> int | None:
+        value = os.getenv(var_name)
+        try:
+            return int(value) if value is not None else None
+        except ValueError:
+            return None

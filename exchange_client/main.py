@@ -4,6 +4,8 @@ from services.monitoring_service import MonitoringService
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
+from services.telegram_listener import TelegramListener
+import time
 
 project_root = Path(__file__).parent
 config = Config()
@@ -22,6 +24,15 @@ if __name__ == "__main__":
     # Start monitoring
     monitoring.start()
 
+    #Initialize Telegram listener
+    if config.telegram_bot_token:
+        telegram_thread = TelegramListener(config.telegram_bot_token, config.chat_group_id)
+        
+        # Start Telegram listener
+        telegram_thread.start()
+    else: 
+        main_logger.warning("No TELEGRAM_BOT_TOKEN found in configuration; Telegram listener will not start.")  
+
     try:
         # Start FastAPI server (this blocks)
         main_logger.info("Starting API server on port 8000...")
@@ -33,3 +44,7 @@ if __name__ == "__main__":
         main_logger.info("Shutting down monitoring service...")
         monitoring.stop()
         main_logger.info("Application shutdown complete")
+
+
+
+

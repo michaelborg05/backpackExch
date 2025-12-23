@@ -1,3 +1,5 @@
- # Need to change the validate rounding of Sell and buy amounts to be the decimal places as specified in https://api.backpack.exchange/api/v1/markets
- # Need to track buys and sells to check profit/loss
- # need to split into separate modules so i can migrate to Azure
+ # change the validate rounding of Sell and buy amounts to be the decimal places as specified in https://api.backpack.exchange/api/v1/markets
+ # track buys and sells to check profit/loss
+ # split into separate modules so i can migrate to Azure
+ # change API to allow buy by percentage
+ # Add validation on buy to make sure i have enough funds and reduce 
