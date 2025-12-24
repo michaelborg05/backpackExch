@@ -1,18 +1,53 @@
 # api_server.py
-from fastapi import FastAPI,HTTPException
+from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.responses import JSONResponse
+from typing import Optional
+import hmac
+import hashlib
+from models.webhook import TradingViewAlert, WebhookResponse, TradingViewAction
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService
 from services.monitoring_service import MonitoringService
 from pydantic import BaseModel
-from typing import Optional
 from services.balance_cache import get_balance_cache
+from utils.config import Config
+from utils.logging import log_manager
+
 
 app = FastAPI(title="Trading API")
+config = Config()
+webhook_logger = log_manager.get_logger("Webhook")
+
+WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else None
 
 # Global reference to monitoring service (injected from main.py)
 _monitoring_service: Optional[MonitoringService] = None
+
+def verify_webhook_signature(payload: str, signature: str, secret: str) -> bool:
+    """
+    Verify webhook signature (optional security measure)
+    
+    Args:
+        payload: Raw webhook payload
+        signature: Signature from header
+        secret: Shared secret
+    
+    Returns:
+        True if signature is valid
+    """
+    if not secret:
+        return True  # Skip verification if no secret configured
+    
+    expected_signature = hmac.new(
+        secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)
+
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
@@ -37,6 +72,160 @@ def get_monitoring_status():
     """Get monitoring service status"""
     service = get_monitoring_service()
     return service.get_status()
+
+@app.post("/webhook/tradingview", response_model=WebhookResponse)
+async def tradingview_webhook(
+    alert: TradingViewAlert,
+    request: Request,
+    x_signature: Optional[str] = Header(None)
+):
+    """
+    Receive and process TradingView webhook alerts
+    
+    TradingView Alert Message Format (JSON):
+    {
+        "action": "buy",
+        "symbol": "SOL_USDC",
+        "price": "150.00",
+        "quantity": "10",
+        "secret": "your_webhook_secret"
+    }
+    """
+    try:
+        webhook_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
+        
+        # Verify webhook secret (from payload)
+        if WEBHOOK_SECRET and alert.secret != WEBHOOK_SECRET:
+            webhook_logger.warning("Invalid webhook secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+        
+        # Optional: Verify signature from header (if you implement it in TradingView)
+        # body = await request.body()
+        # if x_signature and not verify_webhook_signature(body.decode(), x_signature, WEBHOOK_SECRET):
+        #     raise HTTPException(status_code=401, detail="Invalid signature")
+        
+        # Initialize trading service
+        trading = TradingService()
+        
+        # Process alert based on action
+        result = await process_tradingview_alert(trading, alert)
+        
+        webhook_logger.info(f"Alert processed successfully: {result}")
+        
+        return WebhookResponse(
+            success=True,
+            message=f"Order executed: {alert.action} {alert.symbol}",
+            order_id=result.id if result else None,
+            details={
+                "action": alert.action,
+                "symbol": alert.symbol,
+                "executed_quantity": result.executed_quantity if result else None,
+                "status": result.status if result else None
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        webhook_logger.error(f"Error processing webhook: {e}", exc_info=True)
+        return WebhookResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            details={"error": str(e)}
+        )
+
+async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert):
+    """
+    Process TradingView alert and execute appropriate trade
+    
+    Args:
+        trading: TradingService instance
+        alert: TradingView alert data
+    
+    Returns:
+        OrderResponse or None
+    """
+    
+    # Validate required fields
+    if not alert.quantity and not alert.quote_quantity:
+        raise ValueError("Either quantity or quoteQuantity must be provided")
+    
+    # Build order kwargs
+    kwargs = {}
+    
+    if alert.quote_quantity:
+        kwargs['quote_quantity'] = alert.quote_quantity
+    
+    if alert.stop_loss:
+        kwargs['stop_loss_trigger_price'] = alert.stop_loss
+    
+    if alert.take_profit:
+        kwargs['take_profit_trigger_price'] = alert.take_profit
+    
+    if alert.post_only:
+        kwargs['post_only'] = alert.post_only
+    
+    if alert.reduce_only:
+        kwargs['reduce_only'] = alert.reduce_only
+    
+    # Execute order based on action
+    if alert.action == TradingViewAction.BUY:
+        if alert.price and alert.price != "0":
+            # Limit buy
+            return trading.limit_buy(
+                symbol=alert.symbol,
+                price=alert.price,
+                quantity=alert.quantity,
+                **kwargs
+            )
+        else:
+            # Market buy
+            return trading.market_buy(
+                symbol=alert.symbol,
+                quantity=alert.quantity,
+                **kwargs
+            )
+    
+    elif alert.action == TradingViewAction.SELL:
+        if alert.price and alert.price != "0":
+            # Limit sell
+            return trading.limit_sell(
+                symbol=alert.symbol,
+                price=alert.price,
+                quantity=alert.quantity,
+                **kwargs
+            )
+        else:
+            # Market sell
+            return trading.market_sell(
+                symbol=alert.symbol,
+                quantity=alert.quantity,
+                **kwargs
+            )
+    
+    elif alert.action in [TradingViewAction.CLOSE, TradingViewAction.CLOSE_LONG, TradingViewAction.CLOSE_SHORT]:
+        # Cancel all open orders and close position
+        webhook_logger.info(f"Closing position for {alert.symbol}")
+        trading.cancel_all_orders(alert.symbol)
+        
+        # Get current position and close it
+        # You'll need to implement position fetching and closing logic
+        return None
+    
+    else:
+        raise ValueError(f"Unknown action: {alert.action}")
+
+
+@app.get("/webhook/test")
+def test_webhook():
+    """Test endpoint to verify webhook is accessible"""
+    return {
+        "status": "ok",
+        "message": "Webhook endpoint is accessible",
+        "webhook_url": "/webhook/tradingview"
+    }
+
+
 
 class TickerRequest(BaseModel):
     ticker: str
@@ -112,14 +301,8 @@ def balance_endpoint():
     """Get account balances"""
     try:
         balances = get_balances()
-        return {
-            asset: {
-                "available": balance.available,
-                "locked": balance.locked,
-                "staked": balance.staked
-            }
-            for asset, balance in balances.items()
-        }
+        return balances if balances else {}
+        
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     

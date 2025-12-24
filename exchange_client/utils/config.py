@@ -16,6 +16,7 @@ class Config:
             raise ValueError(f"Invalid LOG_LEVEL: {self.log_level}")
         self.telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_group_id = self.get_int_env('CHAT_GROUP_ID')
+        self.webhook_secret = os.getenv("WEBHOOK_SECRET", "your_default_secret_here")
 
     def _get_required(self, key: str) -> str:
         value = os.getenv(key)
