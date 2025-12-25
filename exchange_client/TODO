@@ -3,3 +3,5 @@
  # split into separate modules so i can migrate to Azure
  # change API to allow buy by percentage
  # Add validation on buy to make sure i have enough funds and reduce 
+ # In api_server, move the functions to another class. 
+ # double check the UpdateTickersRequest TickerRequest classes are in the right one. I've moved them to market builder but maybe they shoule be somewhere else

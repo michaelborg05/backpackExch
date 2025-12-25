@@ -16,7 +16,15 @@ class Config:
             raise ValueError(f"Invalid LOG_LEVEL: {self.log_level}")
         self.telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_group_id = self.get_int_env('CHAT_GROUP_ID')
-        self.webhook_secret = os.getenv("WEBHOOK_SECRET", "your_default_secret_here")
+        self.webhook_secret = os.getenv("WEBHOOK_SECRET", "")
+        self.port = int(os.getenv("PORT", "8000"))
+        self.api_master_key = os.getenv("API_MASTER_KEY", "")
+        self.api_readonly_key = os.getenv("API_READONLY_KEY", "")
+        self.api_trading_key = os.getenv("API_TRADING_KEY", "")
+        # Security settings
+        self.enable_api_key_auth: bool = os.getenv("ENABLE_API_KEY_AUTH", "true").lower() == "true"
+        self.enable_rate_limiting: bool = os.getenv("ENABLE_RATE_LIMITING", "true").lower() == "true"
+
 
     def _get_required(self, key: str) -> str:
         value = os.getenv(key)

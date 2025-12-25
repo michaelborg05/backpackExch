@@ -1,20 +1,25 @@
 # api_server.py
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
 import hmac
 import hashlib
 from models.webhook import TradingViewAlert, WebhookResponse, TradingViewAction
 from api_builders.account_builder import get_balances
-from api_builders.market_builder import get_price
+from api_builders.market_builder import get_price, TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService
 from services.monitoring_service import MonitoringService
-from pydantic import BaseModel
 from services.balance_cache import get_balance_cache
 from utils.config import Config
 from utils.logging import log_manager
-
+from utils.security import (
+    require_read_permission,
+    require_trade_permission,
+    require_admin_permission,
+    require_webhook_permission,
+    check_rate_limit
+)
 
 app = FastAPI(title="Trading API")
 config = Config()
@@ -63,17 +68,156 @@ def get_monitoring_service() -> MonitoringService:
         )
     return _monitoring_service
 
+# Public endpoints (no auth)
 @app.get("/health")
 def health_check():
+    """Public health check"""
     return {"status": "healthy"}
 
-@app.get("/monitoring/status")
+@app.get("/webhook/test")
+def test_webhook():
+    """Test endpoint to verify webhook is accessible"""
+    """Public test endpoint"""
+    return {
+        "status": "ok",
+        "message": "Webhook endpoint is accessible",        
+    }
+
+#Read only endpoints
+@app.get("/monitoring/status", dependencies=[Depends(require_read_permission)])
 def get_monitoring_status():
     """Get monitoring service status"""
     service = get_monitoring_service()
     return service.get_status()
 
-@app.post("/webhook/tradingview", response_model=WebhookResponse)
+@app.get("/monitoring/tickers", dependencies=[Depends(require_read_permission)])
+def get_tickers():
+    """Get list of monitored tickers"""
+    service = get_monitoring_service()
+    return {"tickers": service.tickers}
+
+@app.get("/price/{symbol}", dependencies=[Depends(require_read_permission)])
+def price_endpoint(symbol: str):
+    try:
+        price = get_price(symbol)
+        return {"symbol": symbol, "price": price}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@app.get("/balances", dependencies=[Depends(require_read_permission)])
+def balance_endpoint():
+    """Get account balances"""
+    try:
+        balances = get_balances()
+        return balances if balances else {}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/balances/cached", dependencies=[Depends(require_read_permission)])
+def get_cached_balances():
+    """Get balances from cache (fast, no API call)"""
+    cache = get_balance_cache()
+    balances = cache.get_all_balances()
+    
+    if balances is None:
+        return {
+            "error": "Balance cache is empty or stale",
+            "cache_info": cache.get_cache_info()
+        }
+    
+    return {
+        "balances": balances,
+        "cache_info": cache.get_cache_info()
+    }
+
+
+@app.get("/balances/cached/{asset}", dependencies=[Depends(require_read_permission)])
+def get_cached_asset_balance(asset: str):
+    """Get balance for specific asset from cache"""
+    cache = get_balance_cache()
+    balance = cache.get_available_balance(asset)
+    
+    if balance is None:
+        return {
+            "error": f"Balance for {asset} not found or cache is stale",
+            "cache_info": cache.get_cache_info()
+        }
+    
+    return {
+        "asset": asset,
+        "available": str(balance),
+        "cache_info": cache.get_cache_info()
+    }
+
+#Requires trade permission
+@app.post("/monitoring/add-ticker", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+def add_ticker(request: TickerRequest):
+    """Add a ticker to monitor"""
+    service = get_monitoring_service()
+    service.add_ticker(request.ticker)
+    return {
+        "message": f"Added ticker {request.ticker}",
+        "tickers": service.tickers
+    }
+
+@app.post("/monitoring/remove-ticker", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+def remove_ticker(request: TickerRequest):
+    """Remove a ticker from monitoring"""
+    service = get_monitoring_service()
+    service.remove_ticker(request.ticker)
+    return {
+        "message": f"Removed ticker {request.ticker}",
+        "tickers": service.tickers
+    }
+
+
+@app.post("/monitoring/stop", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+def stop_monitoring():
+    """Stop the monitoring service"""
+    service = get_monitoring_service()
+    service.stop()
+    return {"message": "Monitoring stopped", "status": service.get_status()}
+
+
+@app.post("/monitoring/start", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+def start_monitoring():
+    """Start the monitoring service"""
+    service = get_monitoring_service()
+    service.start()
+    return {"message": "Monitoring started", "status": service.get_status()}
+
+
+@app.put("/monitoring/tickers", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+def update_tickers(request: UpdateTickersRequest):
+    """Replace the entire list of monitored tickers"""
+    service = get_monitoring_service()
+    service.tickers = request.tickers
+    return {
+        "message": "Tickers updated",
+        "tickers": service.tickers
+    }
+
+@app.post("/order", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+def place_order(
+    request: OrderRequest
+):
+    trading: TradingService = TradingService()  
+
+    """Place a market order"""
+    try:
+        if request.side.lower() == "buy":
+            result = trading.order_buy(request.symbol, request.quantity)
+        elif request.side.lower() == "sell":
+            result = trading.order_sell(request.symbol, request.quantity)
+        else:
+            raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
+        
+        return result.model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)
 async def tradingview_webhook(
     alert: TradingViewAlert,
     request: Request,
@@ -214,149 +358,3 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     
     else:
         raise ValueError(f"Unknown action: {alert.action}")
-
-
-@app.get("/webhook/test")
-def test_webhook():
-    """Test endpoint to verify webhook is accessible"""
-    return {
-        "status": "ok",
-        "message": "Webhook endpoint is accessible",
-        "webhook_url": "/webhook/tradingview"
-    }
-
-
-
-class TickerRequest(BaseModel):
-    ticker: str
-
-@app.post("/monitoring/add-ticker")
-def add_ticker(request: TickerRequest):
-    """Add a ticker to monitor"""
-    service = get_monitoring_service()
-    service.add_ticker(request.ticker)
-    return {
-        "message": f"Added ticker {request.ticker}",
-        "tickers": service.tickers
-    }
-
-
-@app.post("/monitoring/remove-ticker")
-def remove_ticker(request: TickerRequest):
-    """Remove a ticker from monitoring"""
-    service = get_monitoring_service()
-    service.remove_ticker(request.ticker)
-    return {
-        "message": f"Removed ticker {request.ticker}",
-        "tickers": service.tickers
-    }
-
-
-@app.post("/monitoring/stop")
-def stop_monitoring():
-    """Stop the monitoring service"""
-    service = get_monitoring_service()
-    service.stop()
-    return {"message": "Monitoring stopped", "status": service.get_status()}
-
-
-@app.post("/monitoring/start")
-def start_monitoring():
-    """Start the monitoring service"""
-    service = get_monitoring_service()
-    service.start()
-    return {"message": "Monitoring started", "status": service.get_status()}
-
-@app.get("/monitoring/tickers")
-def get_tickers():
-    """Get list of monitored tickers"""
-    service = get_monitoring_service()
-    return {"tickers": service.tickers}
-
-
-class UpdateTickersRequest(BaseModel):
-    tickers: list[str]
-
-
-@app.put("/monitoring/tickers")
-def update_tickers(request: UpdateTickersRequest):
-    """Replace the entire list of monitored tickers"""
-    service = get_monitoring_service()
-    service.tickers = request.tickers
-    return {
-        "message": "Tickers updated",
-        "tickers": service.tickers
-    }
-
-@app.get("/price/{symbol}")
-def price_endpoint(symbol: str):
-    try:
-        price = get_price(symbol)
-        return {"symbol": symbol, "price": price}
-    except Exception as e:
-        return {"error": str(e)}, 500
-
-@app.get("/balances")
-def balance_endpoint():
-    """Get account balances"""
-    try:
-        balances = get_balances()
-        return balances if balances else {}
-        
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
-@app.post("/order")
-def place_order(
-    request: OrderRequest
-):
-    trading: TradingService = TradingService()  
-
-    """Place a market order"""
-    try:
-        if request.side.lower() == "buy":
-            result = trading.order_buy(request.symbol, request.quantity)
-        elif request.side.lower() == "sell":
-            result = trading.order_sell(request.symbol, request.quantity)
-        else:
-            raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
-        
-        return result.model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/balances/cached")
-def get_cached_balances():
-    """Get balances from cache (fast, no API call)"""
-    cache = get_balance_cache()
-    balances = cache.get_all_balances()
-    
-    if balances is None:
-        return {
-            "error": "Balance cache is empty or stale",
-            "cache_info": cache.get_cache_info()
-        }
-    
-    return {
-        "balances": balances,
-        "cache_info": cache.get_cache_info()
-    }
-
-
-@app.get("/balances/cached/{asset}")
-def get_cached_asset_balance(asset: str):
-    """Get balance for specific asset from cache"""
-    cache = get_balance_cache()
-    balance = cache.get_available_balance(asset)
-    
-    if balance is None:
-        return {
-            "error": f"Balance for {asset} not found or cache is stale",
-            "cache_info": cache.get_cache_info()
-        }
-    
-    return {
-        "asset": asset,
-        "available": str(balance),
-        "cache_info": cache.get_cache_info()
-    }

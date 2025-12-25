@@ -35,8 +35,10 @@ if __name__ == "__main__":
 
     try:
         # Start FastAPI server (this blocks)
-        main_logger.info("Starting API server on port 8000...")
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        
+        main_logger.info(f"Starting API server on port {config.port}...")
+
+        uvicorn.run(app, host="0.0.0.0", port=config.port)
     except KeyboardInterrupt:
         main_logger.info("Application interrupted by user")
     finally:
