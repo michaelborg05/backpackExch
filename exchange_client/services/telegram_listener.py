@@ -23,6 +23,7 @@ class TelegramListener(threading.Thread):
         self.allowed_chat_id = allowed_chat_id
         self.telegram_logger = log_manager.get_logger("TelegramListener")
 
+        self.telegram_logger.info("Initializing Telegram Listener") 
         # ADD THESE THREE LINES:
         self.bot: Optional[Bot] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -38,6 +39,7 @@ class TelegramListener(threading.Thread):
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.telegram_logger.debug(f"Received update: {update}")
         if not update.message:
             return
 
