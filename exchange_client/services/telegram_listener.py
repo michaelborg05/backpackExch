@@ -85,9 +85,7 @@ class TelegramListener(threading.Thread):
                     chat_id=chat_id,
                     text=f"Echo: {text}"
                 )
-
     async def _run_bot_async(self):
-        """Run the bot asynchronously"""
         self.app = ApplicationBuilder().token(self.token).build()
 
         self.app.add_handler(
@@ -95,27 +93,30 @@ class TelegramListener(threading.Thread):
         )
 
         self.bot = self.app.bot
-        self.loop = asyncio.get_event_loop()  # Store the event loop
+        self.loop = asyncio.get_event_loop()
 
         self.telegram_logger.info("Telegram bot initialized and starting polling...")
 
-        # Initialize and start
+        # Disable signal handling (critical for threads)
+        self.app.updater._stop_signals = None
+
+        # Manual startup sequence (safe inside a thread)
         await self.app.initialize()
         await self.app.start()
         await self.app.updater.start_polling()
 
         self.telegram_logger.info("Telegram bot is now running")
 
-        # Keep running
+        # Keep thread alive forever
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            self.telegram_logger.info("Bot polling cancelled")
+            pass
         finally:
-            # Cleanup
             await self.app.updater.stop()
             await self.app.stop()
             await self.app.shutdown()
+
 
     def run(self):
         """Thread entry point"""
