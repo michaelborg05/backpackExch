@@ -77,11 +77,12 @@ class TelegramListener(threading.Thread):
 
 
     async def _run_bot(self):
+        self.telegram_logger.info("Starting Telegram bot...")
         app = ApplicationBuilder().token(self.token).build()
-
+        self.telegram_logger.info("Telegram Application built")
         self.bot = app.bot
         self.loop = asyncio.get_event_loop()
-
+        self.telegram_logger.info("Telegram Bot instance created")
         app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
