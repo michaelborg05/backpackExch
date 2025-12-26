@@ -293,6 +293,7 @@ async def tradingview_webhook(
         "secret": "your_webhook_secret"
     }
     """
+    webhook_logger.debug("Received TradingView webhook")
     try:
         if alert.secret is None:
             webhook_logger.warning("No webhook secret provided in alert")
