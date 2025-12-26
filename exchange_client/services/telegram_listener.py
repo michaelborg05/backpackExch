@@ -1,3 +1,4 @@
+# services/telegram_listener.py (fixed version)
 from re import match
 import threading
 import asyncio
@@ -51,36 +52,42 @@ class TelegramListener(threading.Thread):
         text = update.message.text or ""
         user = update.message.from_user.username
         self.telegram_logger.info(f"Received message from {user} in chat {chat_id}: {text}")
+        
         match text.lower():
             case "ping":
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="pong"
+                    text="🏓 Pong!"
                 )
 
             case "balance":
                 cache = get_balance_cache()
                 balances = cache.get_all_balances()
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"Current Balances:\n" + "\n".join(
-                        f"{asset}: {data['available']} available, {data['locked']} locked"
-                        for asset, data in balances.items()
+                
+                if balances:
+                    balance_text = "💰 <b>Current Balances:</b>\n\n"
+                    for asset, data in balances.items():
+                        balance_text += f"<b>{asset}:</b> {data['available']} available, {data['locked']} locked\n"
+                    
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=balance_text,
+                        parse_mode="HTML"
                     )
-                )
+                else:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text="❌ No balance data available"
+                    )
+                    
             case _:
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"Echo: {text}"
                 )
 
-
-    def run(self):
-        self.telegram_logger.info("Starting Telegram bot thread")
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
+    async def _run_bot_async(self):
+        """Run the bot asynchronously"""
         self.app = ApplicationBuilder().token(self.token).build()
 
         self.app.add_handler(
@@ -88,8 +95,43 @@ class TelegramListener(threading.Thread):
         )
 
         self.bot = self.app.bot
+        self.loop = asyncio.get_event_loop()  # Store the event loop
 
-        self.app.run_polling(stop_signals=None)
+        self.telegram_logger.info("Telegram bot initialized and starting polling...")
+
+        # Initialize and start
+        await self.app.initialize()
+        await self.app.start()
+        await self.app.updater.start_polling()
+
+        self.telegram_logger.info("Telegram bot is now running")
+
+        # Keep running
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.telegram_logger.info("Bot polling cancelled")
+        finally:
+            # Cleanup
+            await self.app.updater.stop()
+            await self.app.stop()
+            await self.app.shutdown()
+
+    def run(self):
+        """Thread entry point"""
+        self.telegram_logger.info("Starting Telegram bot thread")
+        
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Run the async bot
+            loop.run_until_complete(self._run_bot_async())
+        except Exception as e:
+            self.telegram_logger.error(f"Error in bot thread: {e}", exc_info=True)
+        finally:
+            loop.close()
 
     def send_message_sync(
         self, 
@@ -106,11 +148,13 @@ class TelegramListener(threading.Thread):
             emoji = self._get_priority_emoji(priority)
             formatted_message = f"{emoji} {message}"
             
+            # Schedule coroutine in the bot's event loop
             future = asyncio.run_coroutine_threadsafe(
                 self._send_message_async(formatted_message, parse_mode),
                 self.loop
             )
             
+            # Wait for result with timeout
             future.result(timeout=5)
             return True
             
@@ -120,11 +164,14 @@ class TelegramListener(threading.Thread):
     
     async def _send_message_async(self, message: str, parse_mode: str):
         """Internal async method to send message"""
-        await self.bot.send_message(
-            chat_id=self.allowed_chat_id,
-            text=message,
-            parse_mode=parse_mode
-        )
+        try:
+            await self.bot.send_message(
+                chat_id=self.allowed_chat_id,
+                text=message,
+                parse_mode=parse_mode
+            )
+        except Exception as e:
+            self.telegram_logger.error(f"Error sending message: {e}")
     
     def send_order_notification(
         self, 
@@ -215,8 +262,11 @@ class TelegramListener(threading.Thread):
             MessagePriority.CRITICAL: "🚨"
         }
         return emoji_map.get(priority, "📌")
-    
+
+
+# Global instance
 _telegram_listener: Optional[TelegramListener] = None
+
 
 def get_telegram_listener() -> Optional[TelegramListener]:
     """Get the global Telegram listener instance"""
