@@ -2,18 +2,20 @@ from re import match
 import threading
 import asyncio
 import logging
-from utils.logging import log_manager
-from telegram import Update
-from utils.constants import MessagePriority
 from typing import Optional, Callable
-from telegram import Bot
-from services.balance_cache import get_balance_cache
+
+from telegram import Bot, Update
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     ContextTypes,
     MessageHandler,
     filters
 )
+
+from utils.logging import log_manager
+from utils.constants import MessagePriority
+from services.balance_cache import get_balance_cache
 
 
 class TelegramListener(threading.Thread):
@@ -23,11 +25,9 @@ class TelegramListener(threading.Thread):
         self.allowed_chat_id = allowed_chat_id
         self.telegram_logger = log_manager.get_logger("TelegramListener")
 
-        self.telegram_logger.info("Initializing Telegram Listener") 
-        # ADD THESE THREE LINES:
         self.bot: Optional[Bot] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.message_callback: Optional[Callable] = None
+        self.app: Optional[Application] = None
 
         logging.basicConfig(
             level=logging.INFO,
@@ -39,7 +39,6 @@ class TelegramListener(threading.Thread):
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        self.telegram_logger.debug(f"Received update: {update}")
         if not update.message:
             return
 
@@ -76,26 +75,21 @@ class TelegramListener(threading.Thread):
                 )
 
 
-    async def _run_bot(self):
-        self.telegram_logger.info("Starting Telegram bot...")
-        app = ApplicationBuilder().token(self.token).build()
-        self.telegram_logger.info("Telegram Application built")
-        self.bot = app.bot
-        self.loop = asyncio.get_event_loop()
-        self.telegram_logger.info("Telegram Bot instance created")
-        app.add_handler(
+    def run(self):
+        self.telegram_logger.info("Starting Telegram bot thread")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        self.app = ApplicationBuilder().token(self.token).build()
+
+        self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
 
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
-        self.telegram_logger.info("Telegram bot started and listening...")
-        await asyncio.Event().wait()
+        self.bot = self.app.bot
 
-
-    def run(self):
-        asyncio.run(self._run_bot())
+        self.app.run_polling(stop_signals=None)
 
     def send_message_sync(
         self, 
