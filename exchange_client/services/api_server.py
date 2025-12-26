@@ -274,7 +274,8 @@ def place_order(
             )
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)
+#@app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)
+@app.post("/webhook/tradingview", response_model=WebhookResponse)
 async def tradingview_webhook(
     alert: TradingViewAlert,
     request: Request,
@@ -293,6 +294,13 @@ async def tradingview_webhook(
     }
     """
     try:
+        if alert.secret is None:
+            webhook_logger.warning("No webhook secret provided in alert")
+            raise HTTPException(status_code=401, detail="Webhook secret required")
+        if alert.secret != WEBHOOK_SECRET:
+            webhook_logger.warning("Invalid webhook secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")   
+        
         webhook_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
         
         # Verify webhook secret (from payload)
@@ -309,8 +317,11 @@ async def tradingview_webhook(
         trading = TradingService()
         
         # Process alert based on action
+        if telegram:
+            telegram.send_message_sync(f"Processing TradingView alert: {alert.action} {alert.symbol}"  )
+
         result = await process_tradingview_alert(trading, alert)
-        
+
         webhook_logger.info(f"Alert processed successfully: {result}")
         
         return WebhookResponse(
@@ -373,7 +384,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     if alert.action == TradingViewAction.BUY:
         if alert.price and alert.price != "0":
             # Limit buy
-            return trading.limit_buy(
+            return trading.order_buy(
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
@@ -381,7 +392,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
             )
         else:
             # Market buy
-            return trading.market_buy(
+            return trading.order_buy(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
                 **kwargs
@@ -390,7 +401,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     elif alert.action == TradingViewAction.SELL:
         if alert.price and alert.price != "0":
             # Limit sell
-            return trading.limit_sell(
+            return trading.order_sell(
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
@@ -398,7 +409,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
             )
         else:
             # Market sell
-            return trading.market_sell(
+            return trading.order_sell(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
                 **kwargs

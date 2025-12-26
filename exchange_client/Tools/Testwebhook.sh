@@ -1,6 +1,6 @@
 
 curl -H 'Content-Type: application/json' \
-     -d '{"action":"buy","symbol":"SOL_USDC","quoteQuantity":"100","secret":"supersecret"}'\
+     -d '{"symbol": "SOL_USDC", "action": "sell", "notprice": "23.00", "quantity": "0.1","secret":"h&ppyfestivu$"}' \
      -X POST http://127.0.0.1:8000/webhook/tradingview
-
+    
 
