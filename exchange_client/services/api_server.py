@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 import hmac
 import hashlib
+from contextlib import asynccontextmanager
 from models.webhook import TradingViewAlert, WebhookResponse, TradingViewAction
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price, TickerRequest, UpdateTickersRequest
@@ -11,6 +12,7 @@ from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService
 from services.monitoring_service import MonitoringService
 from services.balance_cache import get_balance_cache
+from services.telegram_listener import get_telegram_listener
 from utils.config import Config
 from utils.logging import log_manager
 from utils.security import (
@@ -21,7 +23,24 @@ from utils.security import (
     check_rate_limit
 )
 
-app = FastAPI(title="Trading API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan events - runs on startup and shutdown"""
+    global telegram
+    
+    # Startup
+    telegram = get_telegram_listener()
+    if telegram:
+        telegram.send_message_sync("🚀 API Started")
+    
+    yield  # Application runs here
+    
+    # Shutdown
+    if telegram:
+        telegram.send_message_sync("🛑 API Shutting Down")
+
+
+app = FastAPI(title="Trading API", lifespan=lifespan)
 config = Config()
 webhook_logger = log_manager.get_logger("Webhook")
 
@@ -29,6 +48,30 @@ WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else
 
 # Global reference to monitoring service (injected from main.py)
 _monitoring_service: Optional[MonitoringService] = None
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Catches ALL HTTPExceptions across the entire app
+    Sends Telegram notification automatically
+    """
+    # Send Telegram notification for errors
+    if telegram and exc.status_code >= 400:
+        telegram.send_error_notification(
+            error_type=f"HTTP {exc.status_code}",
+            error_message=exc.detail,
+            endpoint=f"{request.method} {request.url.path}",
+            details={
+                "status_code": exc.status_code,
+                "client": request.client.host if request.client else "unknown"
+            }
+        )
+    
+    # Return standard JSON response
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
 
 def verify_webhook_signature(payload: str, signature: str, secret: str) -> bool:
     """
@@ -67,6 +110,7 @@ def get_monitoring_service() -> MonitoringService:
             detail="Monitoring service not initialized"
         )
     return _monitoring_service
+
 
 # Public endpoints (no auth)
 @app.get("/health")
@@ -203,8 +247,7 @@ def place_order(
     request: OrderRequest
 ):
     trading: TradingService = TradingService()  
-
-    """Place a market order"""
+    """Place an order"""
     try:
         if request.side.lower() == "buy":
             result = trading.order_buy(request.symbol, request.quantity)
@@ -213,8 +256,22 @@ def place_order(
         else:
             raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
         
+        if telegram:
+            telegram.send_order_notification(
+                order_type="Market",
+                symbol=request.symbol,
+                side=request.side,
+                quantity=request.quantity,
+                order_id=result.id
+            )
         return result.model_dump()
     except Exception as e:
+        if telegram:
+            telegram.send_error_notification(
+                error_type="Order Failed",
+                error_message=str(e),
+                endpoint="POST /order"
+            )
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)

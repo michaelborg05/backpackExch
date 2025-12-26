@@ -4,7 +4,7 @@ from services.monitoring_service import MonitoringService
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
-from services.telegram_listener import TelegramListener
+from services.telegram_listener import TelegramListener, get_telegram_listener, init_telegram_listener
 import time
 
 project_root = Path(__file__).parent
@@ -24,12 +24,15 @@ if __name__ == "__main__":
     # Start monitoring
     monitoring.start()
 
-    #Initialize Telegram listener
+    #Initialize and start Telegram listener
     if config.telegram_bot_token:
-        telegram_thread = TelegramListener(config.telegram_bot_token, config.chat_group_id)
-        
-        # Start Telegram listener
-        telegram_thread.start()
+        telegram = init_telegram_listener(
+                token=config.telegram_bot_token,
+                chat_id=config.chat_group_id
+            )
+            
+        # Send startup notification
+        telegram.send_message_sync("🚀 Bot started successfully!")        
     else: 
         main_logger.warning("No TELEGRAM_BOT_TOKEN found in configuration; Telegram listener will not start.")  
 

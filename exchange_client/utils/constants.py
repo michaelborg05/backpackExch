@@ -47,3 +47,9 @@ class MarketType(str, Enum):
     PREDICTION = "PREDICTION"
     RFQ = "RFQ"
 
+
+class MessagePriority(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"

@@ -38,6 +38,7 @@ class TradingService:
         if order.side != Side.ASK:
             return order
         
+        adjusted_qty = None
         # Extract base asset from symbol (e.g., "SOL_USDC" -> "SOL")
         base_asset = order.symbol.split("_")[0]
         
