@@ -6,6 +6,7 @@ from utils.config import Config
 from pathlib import Path
 from services.telegram_listener import TelegramListener, get_telegram_listener, init_telegram_listener
 import time
+import telegram 
 
 project_root = Path(__file__).parent
 config = Config()
@@ -14,7 +15,9 @@ main_logger = log_manager.get_logger("main")
 
 if __name__ == "__main__":
     main_logger.info("Starting application...")
-    
+    main_logger.info(f"PTB version: {telegram.__version__}")
+    print("PTB version:", telegram.__version__)
+
     # Initialize and start monitoring service
     monitoring = MonitoringService()
 
