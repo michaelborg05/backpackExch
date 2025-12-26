@@ -39,6 +39,7 @@ if __name__ == "__main__":
     try:
         # Start FastAPI server (this blocks)
         
+        
         main_logger.info(f"Starting API server on port {config.port}...")
 
         uvicorn.run(app, host="0.0.0.0", port=config.port)
