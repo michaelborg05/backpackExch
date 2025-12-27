@@ -55,8 +55,12 @@ def convert_to_price(val: Any) -> Optional[str]:
     
     try:
         float_value = convert_to_float(val)
-        
-        return f"${float_value:.2f}"
+        if float_value is None:
+            return None
+        if float_value < 1:
+            return f"${float_value:.4f}"
+        else:
+            return f"${float_value:.2f}"
     except (ValueError, TypeError):
         raise ValueError(f"Invalid float format: {val}")
 
