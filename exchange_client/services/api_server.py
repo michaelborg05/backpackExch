@@ -12,7 +12,7 @@ from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService
 from services.monitoring_service import MonitoringService
 from services.balance_cache import get_balance_cache
-from services.telegram_listener import get_telegram_listener
+from services.telegram_listener import TelegramListener,get_telegram_listener, set_telegram_listener
 from utils.config import Config
 from utils.logging import log_manager
 from utils.security import (
@@ -23,31 +23,53 @@ from utils.security import (
     check_rate_limit
 )
 
+config = Config()
+apiserver_logger = log_manager.get_logger("APIServer")
+
+WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else None
+
+# Global reference to monitoring service (injected from main.py)
+_monitoring_service: Optional[MonitoringService] = None
+# Global reference to Telegram listener
+telegram: Optional[TelegramListener] = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan events - runs on startup and shutdown"""
     global telegram
     
     # Startup
-    telegram = get_telegram_listener()
-    if telegram:
-        telegram.send_message_sync("🚀 API Started")
+    apiserver_logger.info("Starting API server lifespan...")    
+    # Initialize Telegram if configured
+    if config.telegram_bot_token and config.chat_group_id:
+        apiserver_logger.info("Initializing Telegram bot...")
+        telegram = TelegramListener(
+            token=config.telegram_bot_token,
+            allowed_chat_id=config.chat_group_id
+        )
+        set_telegram_listener(telegram)
+        
+        # Start the bot
+        await telegram.start()
+        
+        # Send startup notification
+        await telegram.send_message("🚀 API Started")
+    else:
+        apiserver_logger.warning("Telegram not configured - skipping")
     
     yield  # Application runs here
     
     # Shutdown
+    apiserver_logger.info("Shutting down...")
+    
     if telegram:
-        telegram.send_message_sync("🛑 API Shutting Down")
+        await telegram.send_message("🛑 API Shutting Down")
+        await telegram.stop()
+
 
 
 app = FastAPI(title="Trading API", lifespan=lifespan)
-config = Config()
-webhook_logger = log_manager.get_logger("Webhook")
 
-WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else None
-
-# Global reference to monitoring service (injected from main.py)
-_monitoring_service: Optional[MonitoringService] = None
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -116,7 +138,10 @@ def get_monitoring_service() -> MonitoringService:
 @app.get("/health")
 def health_check():
     """Public health check"""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "telegram": telegram is not None and telegram._running
+    }
 
 @app.get("/webhook/test")
 def test_webhook():
@@ -243,7 +268,7 @@ def update_tickers(request: UpdateTickersRequest):
     }
 
 @app.post("/order", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
-def place_order(
+async def place_order(
     request: OrderRequest
 ):
     trading: TradingService = TradingService()  
@@ -257,7 +282,7 @@ def place_order(
             raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
         
         if telegram:
-            telegram.send_order_notification(
+            await telegram.send_order_notification(
                 order_type="Market",
                 symbol=request.symbol,
                 side=request.side,
@@ -265,13 +290,8 @@ def place_order(
                 order_id=result.id
             )
         return result.model_dump()
+    
     except Exception as e:
-        if telegram:
-            telegram.send_error_notification(
-                error_type="Order Failed",
-                error_message=str(e),
-                endpoint="POST /order"
-            )
         raise HTTPException(status_code=400, detail=str(e))
 
 #@app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)
@@ -293,37 +313,33 @@ async def tradingview_webhook(
         "secret": "your_webhook_secret"
     }
     """
-    webhook_logger.debug("Received TradingView webhook")
+    apiserver_logger.debug("Received TradingView webhook")
     try:
         if alert.secret is None:
-            webhook_logger.warning("No webhook secret provided in alert")
+            apiserver_logger.warning("No webhook secret provided in alert")
             raise HTTPException(status_code=401, detail="Webhook secret required")
         if alert.secret != WEBHOOK_SECRET:
-            webhook_logger.warning("Invalid webhook secret")
+            apiserver_logger.warning("Invalid webhook secret")
             raise HTTPException(status_code=401, detail="Invalid webhook secret")   
         
-        webhook_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
+        apiserver_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
         
         # Verify webhook secret (from payload)
         if WEBHOOK_SECRET and alert.secret != WEBHOOK_SECRET:
-            webhook_logger.warning("Invalid webhook secret")
+            apiserver_logger.warning("Invalid webhook secret")
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
         
-        # Optional: Verify signature from header (if you implement it in TradingView)
-        # body = await request.body()
-        # if x_signature and not verify_webhook_signature(body.decode(), x_signature, WEBHOOK_SECRET):
-        #     raise HTTPException(status_code=401, detail="Invalid signature")
         
         # Initialize trading service
         trading = TradingService()
         
         # Process alert based on action
         if telegram:
-            telegram.send_message_sync(f"Processing TradingView alert: {alert.action} {alert.symbol}"  )
+            await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol}"  )
 
         result = await process_tradingview_alert(trading, alert)
 
-        webhook_logger.info(f"Alert processed successfully: {result}")
+        apiserver_logger.info(f"Alert processed successfully: {result}")
         
         return WebhookResponse(
             success=True,
@@ -340,7 +356,7 @@ async def tradingview_webhook(
     except HTTPException:
         raise
     except Exception as e:
-        webhook_logger.error(f"Error processing webhook: {e}", exc_info=True)
+        apiserver_logger.error(f"Error processing webhook: {e}", exc_info=True)
         return WebhookResponse(
             success=False,
             message=f"Error: {str(e)}",
@@ -418,7 +434,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     
     elif alert.action in [TradingViewAction.CLOSE, TradingViewAction.CLOSE_LONG, TradingViewAction.CLOSE_SHORT]:
         # Cancel all open orders and close position
-        webhook_logger.info(f"Closing position for {alert.symbol}")
+        apiserver_logger.info(f"Closing position for {alert.symbol}")
         trading.cancel_all_orders(alert.symbol)
         
         # Get current position and close it
