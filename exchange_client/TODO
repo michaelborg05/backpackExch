@@ -1,7 +1,13 @@
+TO DO
  # change the validate rounding of Sell and buy amounts to be the decimal places as specified in https://api.backpack.exchange/api/v1/markets
  # track buys and sells to check profit/loss
- # split into separate modules so i can migrate to Azure
  # change API to allow buy by percentage
  # Add validation on buy to make sure i have enough funds and reduce 
- # In api_server, move the functions to another class. 
+
+
+ No need
+ # split into separate modules so i can migrate to Azure
+ 
+ DONE
  # double check the UpdateTickersRequest TickerRequest classes are in the right one. I've moved them to market builder but maybe they shoule be somewhere else
+ # In api_server, move the functions to another class. 

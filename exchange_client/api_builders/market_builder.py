@@ -6,7 +6,6 @@ from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
 from services.client import api_request
-from pydantic import BaseModel
 
 config = Config()
 market_logger = log_manager.get_logger("MarketBuilder")
@@ -78,8 +77,3 @@ def get_price(symbol:str):
     print(ticker.simple_summary())
     return ticker.last_price
 
-class TickerRequest(BaseModel):
-    ticker: str
-
-class UpdateTickersRequest(BaseModel):
-    tickers: list[str]

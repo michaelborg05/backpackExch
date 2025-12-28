@@ -22,9 +22,9 @@ class Config:
         self.api_readonly_key = os.getenv("API_READONLY_KEY", "")
         self.api_trading_key = os.getenv("API_TRADING_KEY", "")
         # Security settings
-        self.enable_api_key_auth: bool = os.getenv("ENABLE_API_KEY_AUTH", "true").lower() == "true"
-        self.enable_rate_limiting: bool = os.getenv("ENABLE_RATE_LIMITING", "true").lower() == "true"
-
+        self.enable_api_key_auth: bool = os.getenv("ENABLE_API_KEY_AUTH", "true").lower()
+        self.enable_rate_limiting: bool = os.getenv("ENABLE_RATE_LIMITING", "true").lower()
+        self.telegram_enabled: bool = os.getenv("TELEGRAM_ENABLED", "false").lower()
 
     def _get_required(self, key: str) -> str:
         value = os.getenv(key)

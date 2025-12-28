@@ -7,6 +7,7 @@ from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from services.balance_cache import get_balance_cache
 
+
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
     
@@ -137,3 +138,15 @@ class MonitoringService:
                 "staked": str(balance.staked) if hasattr(balance, 'staked') else "0"
             }
         return result
+
+def set_monitoring_service(service: MonitoringService):
+    """Set the monitoring service instance (called from main.py)"""
+    global _monitoring_service
+    _monitoring_service = service
+
+def get_monitoring_service() -> MonitoringService:
+    """Get the monitoring service instance"""
+    if _monitoring_service is None:
+        return None
+    return _monitoring_service
+

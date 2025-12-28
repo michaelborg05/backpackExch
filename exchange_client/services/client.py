@@ -6,6 +6,7 @@ from utils.config import Config
 from utils.logging import log_manager
 import socket
 from utils.constants import HttpMethod
+from utils.exceptions import ExchangeAPIError
 
 config = Config()
 client_logger = log_manager.get_logger("client")
@@ -91,48 +92,43 @@ def api_request(
                     client_logger.error(f"Response text: {resp_bytes.decode('utf-8', errors='replace')}")
                     return None
             else:
-                client_logger.error(f"API request failed with status: {response.status}")
-                # Try to parse error response
-                try:
-                    error_data = json.loads(resp_bytes.decode('utf-8'))
-                    client_logger.error(f"Error details: {error_data}")
-                except:
-                    client_logger.error(f"Response: {resp_bytes.decode('utf-8', errors='replace')}")
-                return None
+                error_msg = f"API request failed with status: {response.status}"
+            try:
+                error_data = json.loads(resp_bytes.decode('utf-8'))
+                error_msg = f"{error_msg} - {error_data}"
+            except:
+                pass
+            
+            client_logger.error(error_msg)
+            raise ExchangeAPIError(error_msg, status_code=response.status)
                 
     except urllib.error.HTTPError as e:
-        # HTTPError contains the response body
-        body_text = None
-        try:
-            body_bytes = e.read()
-            body_text = body_bytes.decode('utf-8')
-            
-            # Try to parse as JSON for better error messages
-            try:
-                error_json = json.loads(body_text)
-                client_logger.error(f"HTTP {e.code} Error: {json.dumps(error_json, indent=2)}")
-            except:
-                client_logger.error(f"HTTP {e.code} Error: {body_text}")
-        except Exception:
-            client_logger.error(f"HTTP {e.code} Error: {e.reason} (unable to read body)")
-        
-        return None
+        body_text = _read_error_body(e)
+        error_msg = f"HTTP {e.code} Error: {body_text or e.reason}"
+        client_logger.error(error_msg)
+        raise ExchangeAPIError(error_msg, status_code=e.code)
         
     except urllib.error.URLError as e:
         client_logger.error(f"URL Error: {e.reason}")
-        return None
-        
-    except json.JSONDecodeError as e:
-        client_logger.error(f"JSON decode error: {e}")
-        return None
+        raise ExchangeAPIError(f"Connection error: {e.reason}")
         
     except socket.timeout:
         client_logger.error(f"Request timeout after {timeout} seconds")
-        return None
+        raise ExchangeAPIError(f"Request timeout after {timeout} seconds")
         
     except Exception as e:
-        client_logger.error(f"Unexpected error in API request: {type(e).__name__}: {e}")
-        if config.debug_mode:
-            import traceback
-            client_logger.debug(traceback.format_exc())
-        return None    
+        client_logger.error(f"Unexpected error: {type(e).__name__}: {e}")
+        raise ExchangeAPIError(f"Unexpected error: {str(e)}")
+
+def _read_error_body(error: urllib.error.HTTPError) -> Optional[str]:
+    """Helper to read error body"""
+    try:
+        body_bytes = error.read()
+        body_text = body_bytes.decode('utf-8')
+        try:
+            error_json = json.loads(body_text)
+            return json.dumps(error_json, indent=2)
+        except:
+            return body_text
+    except:
+        return None

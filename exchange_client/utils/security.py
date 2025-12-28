@@ -235,3 +235,25 @@ async def check_rate_limit(key_info: dict = Depends(verify_api_key)):
     return key_info
 
 
+def verify_webhook_signature(payload: str, signature: str, secret: str) -> bool:
+    """
+    Verify webhook signature (optional security measure)
+    
+    Args:
+        payload: Raw webhook payload
+        signature: Signature from header
+        secret: Shared secret
+    
+    Returns:
+        True if signature is valid
+    """
+    if not secret:
+        return True  # Skip verification if no secret configured
+    
+    expected_signature = hmac.new(
+        secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)

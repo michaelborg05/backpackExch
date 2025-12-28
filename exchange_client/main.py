@@ -1,6 +1,6 @@
 import uvicorn
-from services.api_server import app, set_monitoring_service
-from services.monitoring_service import MonitoringService
+from services.api_server import app
+from services.monitoring_service import MonitoringService, set_monitoring_service
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
