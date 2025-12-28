@@ -13,7 +13,6 @@ main_logger = log_manager.get_logger("main")
 
 if __name__ == "__main__":
     main_logger.info("Starting application...")
-    main_logger.info(f"PTB version: {telegram.__version__}")
 
     # Initialize and start monitoring service
     monitoring = MonitoringService()

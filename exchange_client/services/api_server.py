@@ -12,6 +12,7 @@ from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService, process_tradingview_alert
 from services.balance_cache import get_balance_cache
 from services.telegram_listener import TelegramListener, set_telegram_listener
+from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
 from utils.logging import log_manager
 from utils.security import (
@@ -323,4 +324,23 @@ async def tradingview_webhook(
             message=f"Error: {str(e)}",
             details={"error": str(e)}
         )
+
+
+@app.get("/portfolio", dependencies=[Depends(require_read_permission)])
+def get_portfolio(quote_asset: str = "USDC"):
+    """Get complete portfolio with values"""
+    portfolio = get_portfolio_cache()
+    return portfolio.get_portfolio_summary(quote_asset)
+
+@app.get("/portfolio/total", dependencies=[Depends(require_read_permission)])
+def get_total_portfolio_value(quote_asset: str = "USDC"):
+    """Get total portfolio value"""
+    portfolio = get_portfolio_cache()
+    total = portfolio.get_total_value(quote_asset)
+    
+    return {
+        "total_value": str(total),
+        "quote_asset": quote_asset
+    }
+
 

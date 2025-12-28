@@ -6,7 +6,8 @@ from utils.config import Config
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from services.balance_cache import get_balance_cache
-
+from services.price_cache import get_price_cache
+from services.portfolio_cache import get_portfolio_cache
 
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
@@ -25,7 +26,8 @@ class MonitoringService:
         self.thread = None
         self.call_count = 0
         self.balance_cache = get_balance_cache()  # Get cache instance
-        
+        self.price_cache = get_price_cache()    # Get price cache instance
+
     def start(self):
         """Start the monitoring loop in a background thread"""
         if self.is_running:
@@ -103,20 +105,28 @@ class MonitoringService:
         """Monitor prices for all tickers"""
         for ticker in self.tickers:
             try:
-                get_price(ticker)
+                price = get_price(ticker)
+                if price:
+                    # Update price cache
+                    self.price_cache.update_price(ticker, price)
             except Exception as e:
                 self.logger.error(f"Error getting price for {ticker}: {e}")
     
     def _monitor_balances(self):
         """Monitor account balances"""
         try:
-            balances = get_balances(source="GUI")
+            balances = get_balances(source="MonitoringService")
             if balances:
-                self.logger.info(balances.summary())
+                self.logger.debug(balances.summary())
                 # Update cache with latest balances
                 # Assuming balances has a method to convert to dict
                 balance_dict = self._convert_balances_to_dict(balances)
                 self.balance_cache.update(balance_dict)
+                portfolio = get_portfolio_cache()
+                portfolio_summary =  portfolio.print_portfolio_summary()
+
+                if portfolio_summary:
+                    self.logger.info(portfolio_summary)
         except Exception as e:
             self.logger.error(f"Error getting balances: {e}")
 
