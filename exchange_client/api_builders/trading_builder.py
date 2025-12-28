@@ -81,8 +81,10 @@ class TradingService:
            
             # Create adjusted order
         if adjusted_qty is not None:
-            order.quantity = str(round_down(adjusted_qty,2))
-
+            if adjusted_qty < Decimal("1"):
+                order.quantity = str(round_down(adjusted_qty,2))
+            else:
+                order.quantity = str(round_down(adjusted_qty,0))    
         return order
 
     def order_buy(self, symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderResponse:
