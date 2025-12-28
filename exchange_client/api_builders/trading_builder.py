@@ -66,25 +66,30 @@ class TradingService:
                     
                     # Adjust to max available (with small buffer for fees)
                     adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
-                
+                    if adjusted_qty < Decimal("10"):
+                        adjusted_qty = round_down(adjusted_qty,2)
+                    else:
+                        adjusted_qty = round_down(adjusted_qty,0)
                     self.trader_logger.info(
                         f"Adjusting order quantity from {order_qty} to {adjusted_qty}"
                     )
             except:
+                adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
+                if adjusted_qty < Decimal("10"):
+                    adjusted_qty = round_down(adjusted_qty,2)
+                else:
+                    adjusted_qty = int(adjusted_qty)
                 self.trader_logger.warning(
                     f"Invalid order quantity: {order.quantity} for {base_asset}. "
-                    f"Adjusting to available amount: {available}"
+                    f"Adjusting to available amount: {adjusted_qty}"
                 )
-                adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
 
                 #raise ValueError(f"Invalid order quantity: {order.quantity}")
            
             # Create adjusted order
         if adjusted_qty is not None:
-            if adjusted_qty < Decimal("1"):
-                order.quantity = str(round_down(adjusted_qty,2))
-            else:
-                order.quantity = str(round_down(adjusted_qty,0))    
+            order.quantity = str(adjusted_qty,2)
+
         return order
 
     def order_buy(self, symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderResponse:
