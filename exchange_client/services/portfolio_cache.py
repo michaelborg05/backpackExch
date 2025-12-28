@@ -140,8 +140,8 @@ class PortfolioCache:
         for asset_info in portfolio_summary.get("assets", []):
             result += (
                 f" - {asset_info.get('asset')}: "
-                f"Balance={asset_info.get('total', '0')}, "
-                f"Value=${asset_info.get('total_value', '0')} {quote_asset}\n"
+                f"{asset_info.get('total', '0')} - "
+                f" ${asset_info.get('total_value', '0')} \n"
             )
         return result
 
