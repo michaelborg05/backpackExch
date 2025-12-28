@@ -103,7 +103,7 @@ class TelegramListener:
                     text="🏓 Pong!"
                 )
 
-            case "balance":
+            case "balance" | "b":
                 cache = get_portfolio_cache()
                 balances = cache.print_portfolio_summary()
                 
