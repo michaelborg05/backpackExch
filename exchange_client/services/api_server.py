@@ -2,17 +2,17 @@
 from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
-import hmac
-import hashlib
+from services.monitoring_service import get_monitoring_service
 from contextlib import asynccontextmanager
-from models.webhook import TradingViewAlert, WebhookResponse, TradingViewAction
+from models.webhook import TradingViewAlert, WebhookResponse
 from api_builders.account_builder import get_balances
-from api_builders.market_builder import get_price, TickerRequest, UpdateTickersRequest
+from api_builders.market_builder import get_price
+from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
-from api_builders.trading_builder import TradingService
-from services.monitoring_service import MonitoringService
+from api_builders.trading_builder import TradingService, process_tradingview_alert
 from services.balance_cache import get_balance_cache
-from services.telegram_listener import TelegramListener,get_telegram_listener, set_telegram_listener
+from services.telegram_listener import TelegramListener, set_telegram_listener
+from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
 from utils.logging import log_manager
 from utils.security import (
@@ -29,7 +29,6 @@ apiserver_logger = log_manager.get_logger("APIServer")
 WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else None
 
 # Global reference to monitoring service (injected from main.py)
-_monitoring_service: Optional[MonitoringService] = None
 # Global reference to Telegram listener
 telegram: Optional[TelegramListener] = None
 
@@ -41,7 +40,7 @@ async def lifespan(app: FastAPI):
     # Startup
     apiserver_logger.info("Starting API server lifespan...")    
     # Initialize Telegram if configured
-    if config.telegram_bot_token and config.chat_group_id:
+    if config.telegram_bot_token and config.chat_group_id and config.telegram_enabled == True:
         apiserver_logger.info("Initializing Telegram bot...")
         telegram = TelegramListener(
             token=config.telegram_bot_token,
@@ -66,10 +65,7 @@ async def lifespan(app: FastAPI):
         await telegram.send_message("🛑 API Shutting Down")
         await telegram.stop()
 
-
-
 app = FastAPI(title="Trading API", lifespan=lifespan)
-
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -95,45 +91,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"detail": exc.detail}
     )
 
-def verify_webhook_signature(payload: str, signature: str, secret: str) -> bool:
-    """
-    Verify webhook signature (optional security measure)
-    
-    Args:
-        payload: Raw webhook payload
-        signature: Signature from header
-        secret: Shared secret
-    
-    Returns:
-        True if signature is valid
-    """
-    if not secret:
-        return True  # Skip verification if no secret configured
-    
-    expected_signature = hmac.new(
-        secret.encode(),
-        payload.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return hmac.compare_digest(signature, expected_signature)
-
-
-def set_monitoring_service(service: MonitoringService):
-    """Set the monitoring service instance (called from main.py)"""
-    global _monitoring_service
-    _monitoring_service = service
-
-def get_monitoring_service() -> MonitoringService:
-    """Get the monitoring service instance"""
-    if _monitoring_service is None:
-        raise HTTPException(
-            status_code=503, 
-            detail="Monitoring service not initialized"
-        )
-    return _monitoring_service
-
-
 # Public endpoints (no auth)
 @app.get("/health")
 def health_check():
@@ -157,6 +114,11 @@ def test_webhook():
 def get_monitoring_status():
     """Get monitoring service status"""
     service = get_monitoring_service()
+    if service is None:
+        raise HTTPException(
+                status_code=503, 
+                detail="Monitoring service not initialized"
+            )
     return service.get_status()
 
 @app.get("/monitoring/tickers", dependencies=[Depends(require_read_permission)])
@@ -363,83 +325,22 @@ async def tradingview_webhook(
             details={"error": str(e)}
         )
 
-async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert):
-    """
-    Process TradingView alert and execute appropriate trade
+
+@app.get("/portfolio", dependencies=[Depends(require_read_permission)])
+def get_portfolio(quote_asset: str = "USDC"):
+    """Get complete portfolio with values"""
+    portfolio = get_portfolio_cache()
+    return portfolio.get_portfolio_summary(quote_asset)
+
+@app.get("/portfolio/total", dependencies=[Depends(require_read_permission)])
+def get_total_portfolio_value(quote_asset: str = "USDC"):
+    """Get total portfolio value"""
+    portfolio = get_portfolio_cache()
+    total = portfolio.get_total_value(quote_asset)
     
-    Args:
-        trading: TradingService instance
-        alert: TradingView alert data
-    
-    Returns:
-        OrderResponse or None
-    """
-    
-    # Validate required fields
-    if not alert.quantity and not alert.quote_quantity:
-        raise ValueError("Either quantity or quoteQuantity must be provided")
-    
-    # Build order kwargs
-    kwargs = {}
-    
-    if alert.quote_quantity:
-        kwargs['quote_quantity'] = alert.quote_quantity
-    
-    if alert.stop_loss:
-        kwargs['stop_loss_trigger_price'] = alert.stop_loss
-    
-    if alert.take_profit:
-        kwargs['take_profit_trigger_price'] = alert.take_profit
-    
-    if alert.post_only:
-        kwargs['post_only'] = alert.post_only
-    
-    if alert.reduce_only:
-        kwargs['reduce_only'] = alert.reduce_only
-    
-    # Execute order based on action
-    if alert.action == TradingViewAction.BUY:
-        if alert.price and alert.price != "0":
-            # Limit buy
-            return trading.order_buy(
-                symbol=alert.symbol,
-                price=alert.price,
-                quantity=alert.quantity,
-                **kwargs
-            )
-        else:
-            # Market buy
-            return trading.order_buy(
-                symbol=alert.symbol,
-                quantity=alert.quantity,
-                **kwargs
-            )
-    
-    elif alert.action == TradingViewAction.SELL:
-        if alert.price and alert.price != "0":
-            # Limit sell
-            return trading.order_sell(
-                symbol=alert.symbol,
-                price=alert.price,
-                quantity=alert.quantity,
-                **kwargs
-            )
-        else:
-            # Market sell
-            return trading.order_sell(
-                symbol=alert.symbol,
-                quantity=alert.quantity,
-                **kwargs
-            )
-    
-    elif alert.action in [TradingViewAction.CLOSE, TradingViewAction.CLOSE_LONG, TradingViewAction.CLOSE_SHORT]:
-        # Cancel all open orders and close position
-        apiserver_logger.info(f"Closing position for {alert.symbol}")
-        trading.cancel_all_orders(alert.symbol)
-        
-        # Get current position and close it
-        # You'll need to implement position fetching and closing logic
-        return None
-    
-    else:
-        raise ValueError(f"Unknown action: {alert.action}")
+    return {
+        "total_value": str(total),
+        "quote_asset": quote_asset
+    }
+
+

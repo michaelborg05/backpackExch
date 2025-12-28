@@ -16,7 +16,7 @@ from telegram.ext import (
 
 from utils.logging import log_manager
 from utils.constants import MessagePriority
-from services.balance_cache import get_balance_cache
+from services.portfolio_cache import get_portfolio_cache
 
 
 class TelegramListener:
@@ -104,13 +104,12 @@ class TelegramListener:
                 )
 
             case "balance":
-                cache = get_balance_cache()
-                balances = cache.get_all_balances()
+                cache = get_portfolio_cache()
+                balances = cache.print_portfolio_summary()
                 
                 if balances:
                     balance_text = "💰 <b>Current Balances:</b>\n\n"
-                    for asset, data in balances.items():
-                        balance_text += f"<b>{asset}:</b> {data['available']} available, {data['locked']} locked\n"
+                    balance_text += balances
                 else:
                     balance_text = "❌ No balance data available"
 

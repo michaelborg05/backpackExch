@@ -1,6 +1,6 @@
 import uvicorn
-from services.api_server import app, set_monitoring_service
-from services.monitoring_service import MonitoringService
+from services.api_server import app
+from services.monitoring_service import MonitoringService, set_monitoring_service
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
@@ -13,7 +13,6 @@ main_logger = log_manager.get_logger("main")
 
 if __name__ == "__main__":
     main_logger.info("Starting application...")
-    main_logger.info(f"PTB version: {telegram.__version__}")
 
     # Initialize and start monitoring service
     monitoring = MonitoringService()

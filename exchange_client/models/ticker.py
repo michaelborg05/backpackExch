@@ -2,10 +2,10 @@
 Data models for price information
 """
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Any, Dict
+from typing import Optional
 from utils import data_converters
 import time
-
+from pydantic import BaseModel
 
 @dataclass
 class BackpackTicker:
@@ -103,3 +103,9 @@ class BackpackTicker:
         
         return results
 
+
+class TickerRequest(BaseModel):
+    ticker: str
+
+class UpdateTickersRequest(BaseModel):
+    tickers: list[str]
