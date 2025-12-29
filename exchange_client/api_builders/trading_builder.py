@@ -134,6 +134,7 @@ class TradingService:
         )
 
         try:
+            self.trader_logger.info(f"Debug Trade Request: \r\n{order_data}")
             trade = api_request(url, headers,requestType=HttpMethod.POST, body=order_data)
 
             if trade:
