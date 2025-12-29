@@ -75,7 +75,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """
     # Send Telegram notification for errors
     if telegram and exc.status_code >= 400:
-        telegram.send_error_notification(
+        await telegram.send_error_notification(
             error_type=f"HTTP {exc.status_code}",
             error_message=exc.detail,
             endpoint=f"{request.method} {request.url.path}",

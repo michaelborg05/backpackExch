@@ -144,7 +144,7 @@ class TelegramListener:
             self.telegram_logger.error(f"Failed to send message: {e}")
             return False
     
-    def send_order_notification(
+    async def send_order_notification(
         self, 
         order_type: str,
         symbol: str, 
