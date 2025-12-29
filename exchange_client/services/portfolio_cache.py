@@ -116,7 +116,7 @@ class PortfolioCache:
         for asset in balances.keys():
             asset_info = self.get_asset_value(asset, quote_asset, summary=summary)
             
-            if asset_info:
+            if asset_info and not self._is_zero_balance(asset_info):
                 assets.append(asset_info)
                 
                 # Add to total if value is available
@@ -145,6 +145,16 @@ class PortfolioCache:
             )
         return result
 
+    def _is_zero_balance(self, asset_data: dict) -> bool:
+        """Check if all balance fields are zero"""
+        try:
+            total = sum(
+                Decimal(asset_data.get(field, "0"))
+                for field in ["total_value", "total"]
+            )
+            return total <= 0.1
+        except:
+            return False
 
     def get_total_value(self, quote_asset: str = "USDC") -> Decimal:
         """

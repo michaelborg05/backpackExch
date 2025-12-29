@@ -319,11 +319,18 @@ async def tradingview_webhook(
         raise
     except Exception as e:
         apiserver_logger.error(f"Error processing webhook: {e}", exc_info=True)
+        if telegram:
+            await telegram.send_error_notification(
+                error_type=f"Error processing webhook",
+                error_message=str(e),
+                endpoint=f"{request.method} {request.url.path}"
+            )
         return WebhookResponse(
             success=False,
             message=f"Error: {str(e)}",
             details={"error": str(e)}
         )
+        
 
 
 @app.get("/portfolio", dependencies=[Depends(require_read_permission)])

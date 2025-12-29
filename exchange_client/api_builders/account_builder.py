@@ -9,18 +9,7 @@ from decimal import Decimal
 
 config = Config()
 account_logger = log_manager.get_logger("AccountBuilder")
-
-def _is_zero_balance(balance_data: dict) -> bool:
-    """Check if all balance fields are zero"""
-    try:
-        total = sum(
-            Decimal(balance_data.get(field, "0"))
-            for field in ["available", "locked", "staked"]
-        )
-        return total == 0
-    except:
-        return False
-    
+  
 def get_balances(source: str = "API") -> Optional[BalanceReader]:
     url = APIEndpoints.backpack_balances()
     headers=data_converters.build_authorisation_header(
@@ -37,21 +26,10 @@ def get_balances(source: str = "API") -> Optional[BalanceReader]:
     if balances:
         account_logger.debug("API call for balances completed successfully")
         
-        # Filter out zero balances
-        filtered_balances = {
-            asset: balance_data
-            for asset, balance_data in balances.items()
-            if not _is_zero_balance(balance_data)
-        }
-        
-        if len(filtered_balances) < len(balances):
-            account_logger.debug(
-                f"Filtered out {len(balances) - len(filtered_balances)} zero balance assets"
-            )
         if source == "API":
-            return filtered_balances
+            return balances
         else:
-            return BalanceReader(filtered_balances)
+            return BalanceReader(balances)
         #active_assets = balancelist.get_non_zero_balances()
         #print(balancelist.summary())
     else:

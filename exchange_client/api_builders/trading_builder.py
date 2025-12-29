@@ -49,13 +49,30 @@ class TradingService:
         available = self.balance_cache.get_available_balance(base_asset)
         
         if available is None:
+            
             self.trader_logger.warning(
                 f"Could not retrieve balance for {base_asset}, proceeding without validation"
             )
+            try:
+                order_qty = Decimal(order.quantity)
+                if order_qty <= 0:
+                    raise ValueError(f"Invalid order quantity: {order.quantity}")
+            except:
+                self.trader_logger.warning(
+                    f"Invalid order quantity: {order.quantity} for {base_asset}. "
+                    f"Proceeding without validation"
+                )
+                raise ValueError(f"Order quantity {order.quantity} must be numeric. Unable to validate order.")
             return order
         
         else:
+            if available <= 0:
+                self.trader_logger.warning(
+                    f"No available balance for {base_asset}, cannot proceed with sell order"
+                )
+                raise ValueError(f"Insufficient balance for {base_asset}")
             try:
+
                 order_qty = Decimal(order.quantity)
                 # Check if we have enough balance
                 if order_qty > available:
