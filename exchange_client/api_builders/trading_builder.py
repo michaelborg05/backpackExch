@@ -88,7 +88,7 @@ class TradingService:
            
             # Create adjusted order
         if adjusted_qty is not None:
-            order.quantity = str(adjusted_qty,2)
+            order.quantity = str(adjusted_qty)
 
         return order
 
