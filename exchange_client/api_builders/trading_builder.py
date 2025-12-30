@@ -22,10 +22,17 @@ from models.trade import (
     create_sell
 )
 from fastapi import HTTPException
+from models.trading_profile import TradingProfile
+from utils.config import Config
 
 class TradingService:
-    def __init__(self):
-        self.config = Config()
+    def __init__(self, profile: TradingProfile):
+        self.profile = profile
+
+        self.config = Config(
+            api_key=profile.api_key,
+            secret=profile.secret
+        )
         self.trader_logger = log_manager.get_logger("TradingService")
         self.balance_cache = get_balance_cache()
         self.price_cache = get_price_cache()

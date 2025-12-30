@@ -16,6 +16,7 @@ from services.market_info_cache import get_market_info_cache
 from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
 from utils.logging import log_manager
+from services.profile_manager import get_profile_manager
 from utils.security import (
     require_read_permission,
     require_trade_permission,
@@ -235,6 +236,7 @@ async def place_order(
     request: OrderRequest
 ):
     trading: TradingService = TradingService()  
+
     """Place an order"""
     try:
         if request.side.lower() == "buy":
@@ -293,9 +295,14 @@ async def tradingview_webhook(
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
         
         
-        # Initialize trading service
-        trading = TradingService()
-        
+        # Initialize trading service based on profile supplied
+        profile_name = alert.profile or "scalper_15m"
+
+        profile_manager = get_profile_manager()
+        profile = profile_manager.get(profile_name)
+
+        trading = TradingService(profile)
+
         # Process alert based on action
         if telegram:
             await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol}"  )
