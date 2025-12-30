@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from services.client import api_request
 from typing import Dict, Optional, Any
 from utils.config import Config
@@ -6,7 +7,7 @@ from utils.endpoints import APIEndpoints
 from utils import data_converters
 from utils.constants import HttpMethod
 from services.balance_cache import get_balance_cache
-from decimal import Decimal
+from services.price_cache import get_price_cache
 from utils.constants import Side
 from utils.data_converters import round_down
 from models.webhook import TradingViewAlert,  TradingViewAction
@@ -30,84 +31,300 @@ class TradingService:
     def _validate_and_adjust_order(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
         """
         Validate order against available balance and adjust if needed
+        Handles both BUY (checks quote asset) and SELL (checks base asset)
         
         Args:
             order: Order to validate
             
         Returns:
             Adjusted order (or original if no adjustment needed)
+            
+        Raises:
+            ValueError: If order cannot be validated or executed
         """
-        # Only validate sell orders (Ask side)
-        if order.side != Side.ASK:
-            return order
+        # Parse symbol (e.g., "SOL_USDC" -> base="SOL", quote="USDC")
+        parts = order.symbol.split("_")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid symbol format: {order.symbol}")
         
-        adjusted_qty = None
-        # Extract base asset from symbol (e.g., "SOL_USDC" -> "SOL")
-        base_asset = order.symbol.split("_")[0]
+        base_asset, quote_asset = parts
         
-        # Get available balance
+        # Determine which asset to check based on order side
+        if order.side == Side.ASK:  # SELL - check base asset
+            return self._validate_sell_order(order, base_asset)
+        else:  # BID - check quote asset (USDC)
+            return self._validate_buy_order(order, base_asset, quote_asset)
+
+
+    def _validate_sell_order(self, order: OrderExecuteRequest, base_asset: str) -> OrderExecuteRequest:
+        """
+        Validate SELL order against available base asset balance
+        
+        Args:
+            order: Order to validate
+            base_asset: Base asset symbol (e.g., "SOL")
+            
+        Returns:
+            Adjusted order if needed
+        """
         available = self.balance_cache.get_available_balance(base_asset)
         
+        # Parse order quantity
+        order_qty = self._parse_order_quantity(order.quantity, available, base_asset)
+        
+        # Validate we have balance data
         if available is None:
-            
             self.trader_logger.warning(
                 f"Could not retrieve balance for {base_asset}, proceeding without validation"
             )
-            try:
-                order_qty = Decimal(order.quantity)
-                if order_qty <= 0:
-                    raise ValueError(f"Invalid order quantity: {order.quantity}")
-            except:
-                self.trader_logger.warning(
-                    f"Invalid order quantity: {order.quantity} for {base_asset}. "
-                    f"Proceeding without validation"
-                )
-                raise ValueError(f"Order quantity {order.quantity} must be numeric. Unable to validate order.")
+            if order_qty is None:
+                raise ValueError(f"Order quantity '{order.quantity}' requires balance data")
+            order.quantity = str(order_qty)
             return order
         
-        else:
-            if available <= 0:
-                self.trader_logger.warning(
-                    f"No available balance for {base_asset}, cannot proceed with sell order"
-                )
-                raise ValueError(f"Insufficient balance for {base_asset}")
-            try:
-
-                order_qty = Decimal(order.quantity)
-                # Check if we have enough balance
-                if order_qty > available:
-                    self.trader_logger.warning(
-                        f"Insufficient balance for {base_asset}. "
-                        f"Requested: {order_qty}, Available: {available}"
-                    )
-                    
-                    # Adjust to max available (with small buffer for fees)
-                    adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
-                    if adjusted_qty < Decimal("10"):
-                        adjusted_qty = round_down(adjusted_qty,2)
-                    else:
-                        adjusted_qty = round_down(adjusted_qty,0)
-                    self.trader_logger.info(
-                        f"Adjusting order quantity from {order_qty} to {adjusted_qty}"
-                    )
-            except:
-                adjusted_qty = available * Decimal("0.9999")  # 0.1% buffer
-                if adjusted_qty < Decimal("10"):
-                    adjusted_qty = round_down(adjusted_qty,2)
-                else:
-                    adjusted_qty = int(adjusted_qty)
-                self.trader_logger.warning(
-                    f"Invalid order quantity: {order.quantity} for {base_asset}. "
-                    f"Adjusting to available amount: {adjusted_qty}"
-                )
-
-                #raise ValueError(f"Invalid order quantity: {order.quantity}")
-           
-            # Create adjusted order
-        if adjusted_qty is not None:
-            order.quantity = str(adjusted_qty)
-
+        # Check sufficient balance
+        if available <= 0:
+            raise ValueError(f"No available balance for {base_asset}")
+        
+        # If "MAX", use all available
+        if order_qty is None:
+            order_qty = available
+        
+        # Adjust if needed
+        adjusted_qty = self._adjust_quantity_to_balance(order_qty, available, base_asset)
+        order.quantity = str(adjusted_qty)
+        
         return order
+
+
+    def _validate_buy_order(
+        self, 
+        order: OrderExecuteRequest, 
+        base_asset: str, 
+        quote_asset: str
+    ) -> OrderExecuteRequest:
+        """
+        Validate BUY order against available quote asset balance (USDC)
+        
+        Args:
+            order: Order to validate
+            base_asset: Base asset symbol (e.g., "SOL")
+            quote_asset: Quote asset symbol (e.g., "USDC")
+            
+        Returns:
+            Adjusted order if needed
+        """
+        # Get available quote balance (USDC)
+        available_quote = self.balance_cache.get_available_balance(quote_asset)
+        
+        if available_quote is None:
+            self.trader_logger.warning(
+                f"Could not retrieve balance for {quote_asset}, proceeding without validation"
+            )
+            return order
+        
+        if available_quote <= 0:
+            raise ValueError(f"No available balance for {quote_asset}")
+        
+        # Get current price
+        price = self._get_order_price(order, base_asset, quote_asset)
+        
+        if price is None:
+            self.trader_logger.warning(
+                f"Could not retrieve price for {order.symbol}, proceeding without validation"
+            )
+            return order
+        
+        # Parse order quantity
+        order_qty = self._parse_order_quantity(order.quantity, None, base_asset)
+        
+        # Calculate required quote amount
+        if order_qty is None:  # "MAX" - buy as much as possible
+            # Calculate max base quantity we can buy with available quote
+            max_base_qty = available_quote / price
+            adjusted_qty = self._apply_buffer_and_round(max_base_qty, price)
+            
+            self.trader_logger.info(
+                f"MAX buy order: {available_quote} {quote_asset} @ {price} = {adjusted_qty} {base_asset}"
+            )
+            order.quantity = str(adjusted_qty)
+        else:
+            # Check if we have enough quote asset to buy requested quantity
+            required_quote = order_qty * price
+            
+            if required_quote > available_quote:
+                self.trader_logger.warning(
+                    f"Insufficient {quote_asset} for buy order. "
+                    f"Required: {required_quote}, Available: {available_quote}"
+                )
+                
+                # Calculate max we can buy
+                max_base_qty = available_quote / price
+                adjusted_qty = self._apply_buffer_and_round(max_base_qty, price)
+                
+                self.trader_logger.info(
+                    f"Adjusted buy quantity from {order_qty} to {adjusted_qty} {base_asset}"
+                )
+                order.quantity = str(adjusted_qty)
+        
+        return order
+
+
+    def _get_order_price(
+        self, 
+        order: OrderExecuteRequest, 
+        base_asset: str, 
+        quote_asset: str
+    ) -> Optional[Decimal]:
+        """
+        Get price for the order (from order.price or cache)
+        
+        Args:
+            order: Order with optional price
+            base_asset: Base asset symbol
+            quote_asset: Quote asset symbol
+            
+        Returns:
+            Price as Decimal, or None if not available
+        """
+        # If limit order, use specified price
+        if order.order_type == OrderType.LIMIT and order.price:
+            try:
+                return Decimal(order.price)
+            except:
+                self.trader_logger.warning(f"Invalid limit price: {order.price}")
+        
+        # For market orders, get from cache
+        symbol = f"{base_asset}_{quote_asset}"
+        cached_price = self.price_cache.get_price(symbol)
+        
+        if cached_price is None:
+            self.trader_logger.warning(f"Price not found in cache for {symbol}")
+        
+        return cached_price
+
+
+    def _apply_buffer_and_round(self, quantity: Decimal, price: Decimal) -> Decimal:
+        """
+        Apply fee buffer and round quantity appropriately
+        
+        Args:
+            quantity: Base quantity
+            price: Price per unit
+            
+        Returns:
+            Adjusted and rounded quantity
+        """
+        # Apply fee buffer (0.01% for safety)
+        buffered = quantity * Decimal("0.9999")
+        
+        # Round based on value size
+        total_value = buffered * price
+        
+        if total_value < Decimal("10"):
+            # Small orders: 2-4 decimal places
+            return self._round_down(buffered, 4)
+        elif total_value < Decimal("100"):
+            # Medium orders: 2 decimal places
+            return self._round_down(buffered, 2)
+        else:
+            # Large orders: 1 decimal or whole numbers
+            if price > Decimal("100"):
+                return self._round_down(buffered, 2)
+            else:
+                return self._round_down(buffered, 1)
+
+
+    def _parse_order_quantity(
+        self, 
+        quantity_str: str, 
+        available: Optional[Decimal],
+        asset: str
+    ) -> Optional[Decimal]:
+        """
+        Parse order quantity string (handles "MAX" and numeric values)
+        
+        Args:
+            quantity_str: Order quantity as string (e.g., "10", "MAX")
+            available: Available balance (can be None)
+            asset: Asset symbol for logging
+            
+        Returns:
+            Decimal quantity, or None if "MAX"
+            
+        Raises:
+            ValueError: If quantity is invalid
+        """
+        # Handle "MAX" case
+        if quantity_str.upper() == "MAX":
+            return None  # Signal to use maximum possible
+        
+        # Try to parse as numeric
+        try:
+            qty = Decimal(quantity_str)
+            if qty <= 0:
+                raise ValueError(f"Order quantity must be positive: {quantity_str}")
+            return qty
+        except (ValueError, InvalidOperation):
+            raise ValueError(f"Invalid order quantity: {quantity_str}")
+
+
+    def _adjust_quantity_to_balance(
+        self,
+        order_qty: Decimal,
+        available: Decimal,
+        asset: str
+    ) -> Decimal:
+        """
+        Adjust order quantity to available balance if needed (for SELL orders)
+        
+        Args:
+            order_qty: Requested order quantity
+            available: Available balance
+            asset: Asset symbol for logging
+            
+        Returns:
+            Adjusted quantity (with fee buffer applied)
+        """
+        # Check if adjustment needed
+        if order_qty <= available:
+            return order_qty
+        
+        self.trader_logger.warning(
+            f"Insufficient balance for {asset}. "
+            f"Requested: {order_qty}, Available: {available}"
+        )
+        
+        # Apply fee buffer (0.01%)
+        adjusted = available * Decimal("0.9999")
+        
+        # Round based on size
+        if adjusted < Decimal("10"):
+            adjusted = self._round_down(adjusted, 2)
+        else:
+            adjusted = self._round_down(adjusted, 0)
+        
+        self.trader_logger.info(f"Adjusted order quantity to {adjusted}")
+        
+        return adjusted
+
+
+    def _round_down(self, value: Decimal, decimals: int) -> Decimal:
+        """
+        Round down to specified decimal places
+        
+        Args:
+            value: Value to round
+            decimals: Number of decimal places
+            
+        Returns:
+            Rounded value
+        """
+        if decimals == 0:
+            return Decimal(int(value))
+        
+        quantize_str = "0." + "0" * decimals
+        return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
     def order_buy(self, symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderResponse:
         """Execute a market buy order"""
