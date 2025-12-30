@@ -12,6 +12,7 @@ from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService, process_tradingview_alert
 from services.balance_cache import get_balance_cache
 from services.telegram_listener import TelegramListener, set_telegram_listener
+from services.market_info_cache import get_market_info_cache
 from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
 from utils.logging import log_manager
@@ -350,4 +351,36 @@ def get_total_portfolio_value(quote_asset: str = "USDC"):
         "quote_asset": quote_asset
     }
 
+@app.get("/market/{symbol}", dependencies=[Depends(require_read_permission)])
+def get_market_info_endpoint(symbol: str):
+    """Get market info for a symbol"""
+    cache = get_market_info_cache()
+    market_info = cache.get_market_info(symbol)
+    
+    if market_info is None:
+        # Try to fetch from API
+        from api_builders.market_builder import get_market_info
+        result = get_market_info(symbol)
+        
+        if result:
+            market_info = cache.get_market_info(symbol)
+        
+        if market_info is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Market info for {symbol} not found"
+            )
+    
+    return market_info.to_dict()
 
+
+@app.get("/markets", dependencies=[Depends(require_read_permission)])
+def get_all_markets_endpoint():
+    """Get all market info"""
+    cache = get_market_info_cache()
+    markets = cache.get_all_markets()
+    
+    return {
+        "markets": {symbol: info.to_dict() for symbol, info in markets.items()},
+        "cache_info": cache.get_cache_info()
+    }

@@ -8,6 +8,8 @@ from api_builders.market_builder import get_price
 from services.balance_cache import get_balance_cache
 from services.price_cache import get_price_cache
 from services.portfolio_cache import get_portfolio_cache
+from services.market_info_cache import get_market_info_cache
+from api_builders.market_builder import get_market_info
 
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
@@ -27,12 +29,18 @@ class MonitoringService:
         self.call_count = 0
         self.balance_cache = get_balance_cache()  # Get cache instance
         self.price_cache = get_price_cache()    # Get price cache instance
+        self.market_info_cache = get_market_info_cache()
+        self._markets_initialized = False
 
     def start(self):
         """Start the monitoring loop in a background thread"""
         if self.is_running:
             self.logger.warning("Monitoring service is already running")
             return
+        
+        # Initialize market info on first start
+        if not self._markets_initialized:
+            self._initialize_market_info()
         
         self.is_running = True
         self.thread = threading.Thread(target=self._monitoring_loop, daemon=True)
@@ -148,6 +156,20 @@ class MonitoringService:
                 "staked": str(balance.staked) if hasattr(balance, 'staked') else "0"
             }
         return result
+
+    def _initialize_market_info(self):
+        """Initialize market info cache for all monitored tickers"""
+        self.logger.info("Initializing market info...")
+        try:
+            # Fetch market info for each ticker
+            for ticker in self.tickers:
+                get_market_info(ticker)
+            
+            self._markets_initialized = True
+            self.logger.info(f"Market info initialized for {len(self.tickers)} tickers")
+        except Exception as e:
+            self.logger.error(f"Error initializing market info: {e}")
+
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""

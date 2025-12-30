@@ -1,10 +1,8 @@
 TO DO
  # track buys and sells to check profit/loss
  # change API to allow buy by percentage
-# Change rounding logic to be based off the minimal unit for each symbol. And functionalise it so code is not fuplicated in in _validate_and_adjust_order. Also handle BUY rounding also
- # change the validate rounding of Sell and buy amounts to be the decimal places as specified in https://api.backpack.exchange/api/v1/markets
  # If cache isnt up to date, go make live calls
- 
+ # Different API keys  
 
  No need
  # split into separate modules so i can migrate to Azure
@@ -13,3 +11,5 @@ TO DO
  # double check the UpdateTickersRequest TickerRequest classes are in the right one. I've moved them to market builder but maybe they shoule be somewhere else
  # In api_server, move the functions to another class. 
  # Add validation on buy to make sure i have enough funds and reduce 
+# Change rounding logic to be based off the minimal unit for each symbol. And functionalise it so code is not fuplicated in in _validate_and_adjust_order. Also handle BUY rounding also
+ # change the validate rounding of Sell and buy amounts to be the decimal places as specified in https://api.backpack.exchange/api/v1/markets

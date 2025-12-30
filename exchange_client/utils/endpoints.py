@@ -37,3 +37,13 @@ class APIEndpoints:
     def backpack_GetOpenOrders(cls) -> str:
         """Backpack Execute Order endpoint"""
         return f"{cls.BACKPACK_BASE}/api/v1/orders"
+
+    @classmethod
+    def backpack_MarketInfo(cls, symbol: str = "SOL_USDC") -> str:
+        """Backpack Market Info endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/market?symbol={symbol}"
+
+    @classmethod
+    def backpack_Markets(cls) -> str:
+        """Backpack Markets endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/markets"

@@ -8,6 +8,7 @@ from utils import data_converters
 from utils.constants import HttpMethod
 from services.balance_cache import get_balance_cache
 from services.price_cache import get_price_cache
+from services.market_info_cache import get_market_info_cache
 from utils.constants import Side
 from utils.data_converters import round_down
 from models.webhook import TradingViewAlert,  TradingViewAction
@@ -27,6 +28,9 @@ class TradingService:
         self.config = Config()
         self.trader_logger = log_manager.get_logger("TradingService")
         self.balance_cache = get_balance_cache()
+        self.price_cache = get_price_cache()
+        self.market_info_cache = get_market_info_cache()  
+
 
     def _validate_and_adjust_order(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
         """
@@ -329,13 +333,15 @@ class TradingService:
     def order_buy(self, symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
-        #order = self._validate_and_adjust_order(order)
+        order = self._validate_and_adjust_order(order)
+        order = self._validate_market_rules(order)
         return self.ExecuteOrder(order)
 
     def order_sell(self, symbol: str, quantity: str, price:str = "0", **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
+        order = self._validate_market_rules(order)
         return self.ExecuteOrder(order)
 
 
@@ -351,6 +357,67 @@ class TradingService:
     def cancel_all_orders(self, symbol: str):
         """Cancel all orders for a symbol"""
         return self.cancel_all_orders(symbol)
+
+    def _validate_market_rules(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
+        """
+        Validate and adjust order to comply with market rules
+        
+        Args:
+            order: Order to validate
+            
+        Returns:
+            Adjusted order
+        """
+        market_info = self.market_info_cache.get_market_info(order.symbol)
+        
+        if market_info is None:
+            self.trader_logger.warning(
+                f"Market info not available for {order.symbol}, skipping market rules validation"
+            )
+            return order
+        
+        # Validate and adjust quantity
+        quantity = Decimal(order.quantity)
+        
+        if quantity <= 0:
+            raise ValueError("Quantity must be greater than zero")
+        # Round to step size
+        rounded_qty = market_info.round_quantity(quantity)
+        
+        if rounded_qty != quantity:
+            self.trader_logger.info(
+                f"Adjusted quantity from {quantity} to {rounded_qty} to comply with step size {market_info.step_size}"
+            )
+            quantity = rounded_qty
+        
+        # Validate quantity
+        is_valid, error_msg = market_info.validate_quantity(quantity)
+        if not is_valid:
+            raise ValueError(error_msg)
+
+        order.quantity = str(quantity)
+        
+        # Validate price (if limit order)
+        if order.price and order.price != "0":
+            price = Decimal(order.price)
+            
+            # Round to tick size
+            rounded_price = market_info.round_price(price)
+            
+            if rounded_price != price:
+                self.trader_logger.info(
+                    f"Adjusted price from {price} to {rounded_price} to comply with tick size {market_info.tick_size}"
+                )
+                price = rounded_price
+            
+            # Validate price
+            is_valid, error_msg = market_info.validate_price(price)
+            if not is_valid:
+                raise ValueError(f"Invalid price: {error_msg}")
+            
+            order.price = str(price)
+        
+        return order
 
     def ExecuteOrder(self, order: OrderExecuteRequest) -> OrderResponse:
         url = APIEndpoints.backpack_ExecuteOrder()

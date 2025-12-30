@@ -6,6 +6,7 @@ from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
 from services.client import api_request
+from services.market_info_cache import get_market_info_cache
 
 config = Config()
 market_logger = log_manager.get_logger("MarketBuilder")
@@ -77,3 +78,43 @@ def get_price(symbol:str):
     print(ticker.simple_summary())
     return ticker.last_price
 
+
+
+def get_market_info(symbol: str) -> Optional[dict]:
+    """
+    Get market information from API
+    
+    Args:
+        symbol: Trading pair (e.g., "SOL_USDC")
+        
+    Returns:
+        Market info dict or None
+    """
+    url = APIEndpoints.backpack_MarketInfo(symbol)
+    result = api_request(url)
+
+    if result:
+        # Update cache
+        cache = get_market_info_cache()
+        cache.update_market(result)
+    
+    return result
+
+
+def get_all_markets() -> Optional[list]:
+    """
+    Get all market information from API
+    
+    Returns:
+        List of market info dicts or None
+    """
+    url = APIEndpoints.backpack_Markets()
+
+    result = api_request(url)
+    
+    if result:
+        # Update cache with all markets
+        cache = get_market_info_cache()
+        cache.update_markets(result)
+    
+    return result
