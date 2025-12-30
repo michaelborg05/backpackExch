@@ -9,7 +9,7 @@ from utils.constants import HttpMethod
 from services.balance_cache import get_balance_cache
 from services.price_cache import get_price_cache
 from services.market_info_cache import get_market_info_cache
-from utils.constants import Side
+from utils.constants import Side, OrderType
 from utils.data_converters import round_down
 from models.webhook import TradingViewAlert,  TradingViewAction
 from utils.exceptions import ExchangeAPIError   
