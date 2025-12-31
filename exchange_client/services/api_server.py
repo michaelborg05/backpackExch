@@ -16,6 +16,7 @@ from services.market_info_cache import get_market_info_cache
 from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
 from utils.logging import log_manager
+from services.profile_manager import get_profile_manager
 from utils.security import (
     require_read_permission,
     require_trade_permission,
@@ -235,6 +236,7 @@ async def place_order(
     request: OrderRequest
 ):
     trading: TradingService = TradingService()  
+
     """Place an order"""
     try:
         if request.side.lower() == "buy":
@@ -287,15 +289,30 @@ async def tradingview_webhook(
         
         apiserver_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
         
-        # Verify webhook secret (from payload)
-        if WEBHOOK_SECRET and alert.secret != WEBHOOK_SECRET:
-            apiserver_logger.warning("Invalid webhook secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+        # Get profile manager
+        profile_manager = get_profile_manager()
+        if profile_manager is None:
+            apiserver_logger.error("Profile manager not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="Profile manager not initialized. Server startup incomplete."
+            )
         
+        # Get trading profile
+        profile_name = alert.profile or "default"
         
-        # Initialize trading service
-        trading = TradingService()
+        try:
+            profile = profile_manager.get(profile_name)
+        except ValueError as e:
+            apiserver_logger.error(f"Invalid profile: {profile_name}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid trading profile: {profile_name}"
+            )
         
+        apiserver_logger.info(f"Using trading profile: {profile_name}")
+        trading = TradingService(profile)
+
         # Process alert based on action
         if telegram:
             await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol}"  )

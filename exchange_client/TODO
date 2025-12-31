@@ -2,8 +2,13 @@ TO DO
  # track buys and sells to check profit/loss
  # change API to allow buy by percentage
  # If cache isnt up to date, go make live calls
- # Different API keys  
-
+ # Different API keys per profile
+ # Add profiles support - To trade from multiple accounts
+ # Add take profit/stop loss options
+ # Add trailing stop loss once certain percent is hit. I.e. Once 5% profit, set a trailing stop loss at 2%
+ # Track profit/loss per trade
+ #For profiles, we also need to save balances and portfolio per profile
+ 
  No need
  # split into separate modules so i can migrate to Azure
  

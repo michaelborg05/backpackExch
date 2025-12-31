@@ -19,7 +19,8 @@ class TradingViewAlert(BaseModel):
     price: Optional[str] = Field(None, description="Limit price (optional, market order if not provided)")
     quantity: Optional[str] = Field(None, description="Order quantity")
     quote_quantity: Optional[str] = Field(None, alias="quoteQuantity", description="Quote quantity for market orders")
-    
+    profile: str | None = Field(None, description="Trading profile")
+
     # Optional advanced parameters
     stop_loss: Optional[str] = Field(None, alias="stopLoss", description="Stop loss price")
     take_profit: Optional[str] = Field(None, alias="takeProfit", description="Take profit price")

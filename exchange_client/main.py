@@ -4,7 +4,7 @@ from services.monitoring_service import MonitoringService, set_monitoring_servic
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
-import telegram 
+from services.profile_manager import load_profiles, set_profile_manager  
 
 project_root = Path(__file__).parent
 config = Config()
@@ -14,11 +14,19 @@ main_logger = log_manager.get_logger("main")
 if __name__ == "__main__":
     main_logger.info("Starting application...")
 
+    # Load and set profile manager 
+    main_logger.info("Loading trading profiles...")
+    profile_manager = load_profiles()
+    set_profile_manager(profile_manager)  
+    main_logger.info(f"Loaded {len(profile_manager._profiles)} trading profiles")
+
     # Initialize and start monitoring service
     monitoring = MonitoringService()
     # Inject monitoring service into FastAPI app
     set_monitoring_service(monitoring)
     # Start monitoring
+    profile_manager = load_profiles()
+
     monitoring.start()
 
     try:
