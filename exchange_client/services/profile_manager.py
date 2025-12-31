@@ -45,11 +45,15 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
 
     return ProfileManager(profiles)
 
+# Global instance
 _profile_manager = None
 
-def set_profile_manager(pm):
+def set_profile_manager(pm: ProfileManager):
     global _profile_manager
     _profile_manager = pm
 
-def get_profile_manager():
+def get_profile_manager() -> ProfileManager:
     return _profile_manager
+
+
+

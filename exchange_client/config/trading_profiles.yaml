@@ -1,11 +1,11 @@
 profiles:
-  scalper_15m:
+  default:
     api_key_env: BACKPACK_API_KEY
     secret_env: SECRET
     max_risk_pct: 0.25
     default_order_size_pct: 5
 
-  swing_1h:
+  1hr_MB:
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H
     max_risk_pct: 1.0

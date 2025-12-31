@@ -7,6 +7,7 @@ TO DO
  # Add take profit/stop loss options
  # Add trailing stop loss once certain percent is hit. I.e. Once 5% profit, set a trailing stop loss at 2%
  # Track profit/loss per trade
+ #For profiles, we also need to save balances and portfolio per profile
  
  No need
  # split into separate modules so i can migrate to Azure

@@ -27,17 +27,24 @@ from utils.config import Config
 
 class TradingService:
     def __init__(self, profile: TradingProfile):
-        self.profile = profile
+        self.config = Config()
 
-        self.config = Config(
-            api_key=profile.api_key,
-            secret=profile.secret
-        )
         self.trader_logger = log_manager.get_logger("TradingService")
         self.balance_cache = get_balance_cache()
         self.price_cache = get_price_cache()
         self.market_info_cache = get_market_info_cache()  
 
+        if profile:
+            self.api_key = profile.api_key
+            self.secret = profile.secret
+            self.profile_name = profile.name
+            self.trader_logger.info(f"Initialized with profile: {profile.name}")
+        else:
+            self.api_key = self.config.api_key
+            self.secret = self.config.secret
+            self.profile_name = "default"
+            self.trader_logger.info("Initialized with default config")
+            
 
     def _validate_and_adjust_order(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
         """

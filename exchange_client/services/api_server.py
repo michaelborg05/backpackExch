@@ -289,18 +289,28 @@ async def tradingview_webhook(
         
         apiserver_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
         
-        # Verify webhook secret (from payload)
-        if WEBHOOK_SECRET and alert.secret != WEBHOOK_SECRET:
-            apiserver_logger.warning("Invalid webhook secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
-        
-        
-        # Initialize trading service based on profile supplied
-        profile_name = alert.profile or "scalper_15m"
-
+        # Get profile manager
         profile_manager = get_profile_manager()
-        profile = profile_manager.get(profile_name)
-
+        if profile_manager is None:
+            apiserver_logger.error("Profile manager not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail="Profile manager not initialized. Server startup incomplete."
+            )
+        
+        # Get trading profile
+        profile_name = alert.profile or "default"
+        
+        try:
+            profile = profile_manager.get(profile_name)
+        except ValueError as e:
+            apiserver_logger.error(f"Invalid profile: {profile_name}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid trading profile: {profile_name}"
+            )
+        
+        apiserver_logger.info(f"Using trading profile: {profile_name}")
         trading = TradingService(profile)
 
         # Process alert based on action
