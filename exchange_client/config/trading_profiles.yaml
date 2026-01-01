@@ -2,11 +2,25 @@ profiles:
   default:
     api_key_env: BACKPACK_API_KEY
     secret_env: SECRET
+    take_profit_pct: 1.5
+    stop_loss_pct: 1
     max_risk_pct: 0.25
-    default_order_size_pct: 5
+    trailing_stop_pct: 1
+    use_trailing_stop: true
+    max_position_size: 25
+    default_order_size_pct: 25
 
   1hr_MB:
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H
+    take_profit_pct: 5.0
+    max_risk_pct: 0.25
+    stop_loss_pct: 1
+    trailing_stop_pct: 1.5
+    use_trailing_stop: true
+    max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
+
+
+    

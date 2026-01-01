@@ -25,7 +25,8 @@ class Config:
         self.enable_api_key_auth: bool = os.getenv("ENABLE_API_KEY_AUTH", "true").lower() == 'true'
         self.enable_rate_limiting: bool = os.getenv("ENABLE_RATE_LIMITING", "true").lower() == 'true'
         self.telegram_enabled: bool = os.getenv("TELEGRAM_ENABLED", "false").lower() == 'true'
-
+        self.database_url: str = self._get_required("DATABASE_URL")
+        
     def _get_required(self, key: str) -> str:
         value = os.getenv(key)
         if not value:

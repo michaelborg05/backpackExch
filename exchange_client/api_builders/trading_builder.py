@@ -24,6 +24,9 @@ from models.trade import (
 from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
+from db.session import SessionLocal
+from db.crud import save_trade, open_position, close_position, get_open_position_for_symbol
+from utils.position_calculator import PositionCalculator
 
 class TradingService:
     def __init__(self, profile: TradingProfile):
@@ -35,14 +38,15 @@ class TradingService:
         self.market_info_cache = get_market_info_cache()  
 
         if profile:
-            self.api_key = profile.api_key
-            self.secret = profile.secret
-            self.profile_name = profile.name
+            self.profile = profile  # Store the full profile
             self.trader_logger.info(f"Initialized with profile: {profile.name}")
         else:
-            self.api_key = self.config.api_key
-            self.secret = self.config.secret
-            self.profile_name = "default"
+            # Create default profile from config
+            self.profile = TradingProfile(
+                name="default",
+                api_key=self.config.api_key,
+                secret=self.config.secret
+            )
             self.trader_logger.info("Initialized with default config")
             
 
@@ -440,8 +444,8 @@ class TradingService:
         order_data = order.model_dump(by_alias=True, exclude_none=True)
             
         headers=data_converters.build_authorisation_header(
-            api_key=self.config.api_key,
-            secret=self.config.secret,
+            api_key=self.profile.api_key,
+            secret=self.profile.secret,
             query_params={},
             body=order_data,
             instruction="orderExecute",
@@ -454,7 +458,59 @@ class TradingService:
 
             if trade:
                 self.trader_logger.debug(f"API call for trade completed successfully\r\n{trade}")
-                return OrderResponse(**trade)
+                order_response = OrderResponse(**trade)
+                self.trader_logger.info(f"Trade executed: {order_response}")
+                # Save to database
+                db = SessionLocal()
+                try:
+                    saved_trade = save_trade(db, order_response, self.profile.name)
+                    self.trader_logger.info(f"Trade saved to database: ID {saved_trade.id}")
+                    # Open position if this is a BUY order
+                    if order_response.side.upper() == "BID":
+                        # Calculate position prices based on profile settings
+                        tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
+                            entry_price=saved_trade.price,
+                            side=saved_trade.side,
+                            profile=self.profile  # You'll need to store the profile object
+                        )
+                        
+                        # Open the position
+                        position = open_position(
+                            db=db,
+                            trade=saved_trade,
+                            tp_price=tp_price,
+                            sl_price=sl_price,
+                            trailing_sl_price=trailing_sl_price,
+                            highest_price=saved_trade.price
+                        )
+                        
+                        self.trader_logger.info(
+                            f"Position opened: ID {position.id}, "
+                            f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
+                        )
+                    else:
+                        position_id = get_open_position_for_symbol(db=db, profile_name=self.profile.name,symbol=saved_trade.symbol)
+                        if position_id is None:
+                            self.trader_logger.warning(
+                                f"No open position found for symbol {saved_trade.symbol} to close"
+                            )
+                        else:
+                            position = close_position(
+                                db=db,
+                                position_id=position_id.id,
+                                sell_trade=saved_trade
+                            )
+                            
+                            self.trader_logger.info(
+                                f"Position closed: ID {position.id}, "
+                                f"Profit/Loss: {position.profit}"
+                            )
+                except Exception as db_error:
+                    self.trader_logger.error(f"Failed to save trade to database: {db_error}")
+                finally:
+                    db.close()
+                
+                return order_response
             else:
                 self.trader_logger.error(f"API call for trade failed\r\n{trade}")
                 raise ExchangeAPIError("Empty response from exchange")
@@ -472,7 +528,7 @@ class TradingService:
                 status_code=500,
                 detail=f"Trading service error: {str(e)}"
             )
-    
+   
 async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert):
     """
     Process TradingView alert and execute appropriate trade
