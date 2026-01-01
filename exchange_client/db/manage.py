@@ -6,6 +6,7 @@ import sys
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from db.models import Trade, Position
 from db.session import engine,SessionLocal
 from db.models import Base
 from utils.logging import log_manager
@@ -48,6 +49,48 @@ def reset_tables():
     if confirm.lower() == "yes":
         drop_tables()
         create_tables()
+
+def load_dummy_data():
+    """Load dummy data into the database for testing"""
+    db = SessionLocal()
+    confirm = input("Are you sure you want to load dummy data? (yes/no): ")
+    if confirm.lower() == "yes":
+        try:
+            # Add dummy data loading logic here
+
+            trade = Trade(
+                profile_name="1hr_MB",
+                order_id=str(1234567),
+                symbol="HYPE_USDC",
+                side="BID",
+                quantity=Decimal("1"),
+                price=Decimal("24.52"),
+                exchange="backpack"
+            )
+            db.add(trade)
+            db.commit()
+            db.refresh(trade)
+            position = Position(
+                    profile_name="1hr_MB", 
+                    symbol="HYPE_USDC",
+                    buy_trade_id=trade.id,  # Use database Trade ID
+                    tp_price=26.02,
+                    sl_price=23.02,
+                    trailing_sl_price=23.60,
+                    highest_price=24.52 or trade.price,  # Initialize with entry price
+                    status="OPEN"
+            )
+            db.add(position)
+            db.commit()
+            db.refresh(position)
+
+            logger.info("✓ Dummy data loaded successfully")
+            print("✓ Dummy data loaded successfully")
+        except Exception as e:
+            logger.error(f"✗ Failed to load dummy data: {e}")
+            print(f"✗ Failed to load dummy data: {e}")
+        finally:
+            db.close()
 
 def migrate_yaml_profiles():
     """One-time migration: Load profiles from YAML into database"""
@@ -94,6 +137,7 @@ if __name__ == "__main__":
         "drop": drop_tables,
         "reset": reset_tables,
         "migrate-profiles": migrate_yaml_profiles,
+        "load-dummy": load_dummy_data
     }
     
     if len(sys.argv) < 2 or sys.argv[1] not in commands:
@@ -102,6 +146,7 @@ if __name__ == "__main__":
         print("  drop   - Drop all tables (destructive)")
         print("  reset  - Drop and recreate tables (destructive)")
         print("  migrate-profiles - Load profiles from YAML into database")
+        print("  load-dummy - Load dummy data into database")
         sys.exit(1)
     
     command = sys.argv[1]

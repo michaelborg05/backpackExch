@@ -4,7 +4,6 @@ import threading
 import asyncio
 import logging
 from typing import Optional, Callable
-
 from telegram import Bot, Update
 from telegram.ext import (
     Application,
@@ -23,7 +22,7 @@ class TelegramListener:
     def __init__(self, token: str, allowed_chat_id: int):
         self.token = token
         self.allowed_chat_id = allowed_chat_id
-        self.telegram_logger = log_manager.get_logger("TelegramListener")
+        self.logger = log_manager.get_logger("TelegramListener")
 
         self.app: Optional[Application] = None
         self.bot: Optional[Bot] = None
@@ -42,10 +41,10 @@ class TelegramListener:
     async def start(self):
         """Initialize and start the bot"""
         if self._running:
-            self.telegram_logger.warning("Bot already running")
+            self.logger.warning("Bot already running")
             return
         
-        self.telegram_logger.info("Initializing Telegram bot...")
+        self.logger.info("Initializing Telegram bot...")
         self.app = ApplicationBuilder().token(self.token).build()
         self.bot = self.app.bot
         
@@ -59,7 +58,7 @@ class TelegramListener:
         await self.app.start()
         
         self._running = True
-        self.telegram_logger.info("Telegram bot started successfully")
+        self.logger.info("Telegram bot started successfully")
         
         # Start polling (non-blocking)
         await self.app.updater.start_polling()
@@ -69,7 +68,7 @@ class TelegramListener:
         if not self._running:
             return
         
-        self.telegram_logger.info("Stopping Telegram bot...")
+        self.logger.info("Stopping Telegram bot...")
         
         if self.app and self.app.updater:
             await self.app.updater.stop()
@@ -78,7 +77,7 @@ class TelegramListener:
             await self.app.shutdown()
         
         self._running = False
-        self.telegram_logger.info("Telegram bot stopped")
+        self.logger.info("Telegram bot stopped")
 
 
 
@@ -94,7 +93,7 @@ class TelegramListener:
         
         text = update.message.text or ""
         user = update.message.from_user.username or "Unknown"
-        self.telegram_logger.info(f"Received message from {user} in chat {chat_id}: {text}")
+        self.logger.info(f"Received message from {user} in chat {chat_id}: {text}")
         
         match text.lower():
             case "ping":
@@ -128,7 +127,7 @@ class TelegramListener:
     async def send_message(self, message: str, priority: MessagePriority = MessagePriority.NORMAL, parse_mode: str = "HTML") -> bool:
         """Send a message (async)"""
         if not self.bot:
-            self.telegram_logger.warning("Bot not initialized yet")
+            self.logger.warning("Bot not initialized yet")
             return False
         
         try:
@@ -141,7 +140,7 @@ class TelegramListener:
             )
             return True
         except Exception as e:
-            self.telegram_logger.error(f"Failed to send message: {e}")
+            self.logger.error(f"Failed to send message: {e}")
             return False
     
     async def send_order_notification(
@@ -249,3 +248,4 @@ def set_telegram_listener(listener: TelegramListener):
     """Set the global Telegram listener instance"""
     global _telegram_listener
     _telegram_listener = listener
+
