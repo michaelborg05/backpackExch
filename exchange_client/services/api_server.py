@@ -26,6 +26,7 @@ from utils.security import (
 )
 from db.session import SessionLocal 
 from db.crud import save_trade, open_position, close_position
+from decimal import Decimal
 
 db = SessionLocal()
 config = Config()
@@ -321,13 +322,25 @@ async def tradingview_webhook(
                 status_code=400,
                 detail=f"Invalid trading profile: {profile_name}"
             )
-        
         apiserver_logger.info(f"Using trading profile: {profile_name}")
+
+        if alert.take_profit:
+            apiserver_logger.info(f"Overriding default take profit {profile.take_profit_pct}% with {alert.take_profit}%")
+            profile.take_profit_pct = Decimal(alert.take_profit)
+
+        if alert.trailing_stop_loss:
+            apiserver_logger.info(f"Overriding default trailing stop {profile.trailing_stop_pct}% with {alert.trailing_stop_loss}%")
+            profile.trailing_stop_pct = Decimal(alert.trailing_stop_loss)
+
+        if alert.stop_loss:
+            apiserver_logger.info(f"Overriding default stop loss {profile.stop_loss_pct}% with {alert.stop_loss}%")
+            profile.stop_loss_pct = Decimal(alert.stop_loss)
+
         trading = TradingService(profile)
 
         # Process alert based on action
         if telegram:
-            await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol}"  )
+            await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol} {alert.current_price}"  )
 
         result = await process_tradingview_alert(trading, alert)
 

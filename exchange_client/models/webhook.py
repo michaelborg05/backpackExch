@@ -3,6 +3,9 @@ from pydantic import BaseModel, Field,validator
 from typing import Optional, Literal
 from enum import Enum
 
+##Webhook sample
+#{"symbol": "ETH_USDC", "action": "sell", "notprice": "{{close}}", "quantity": "MAX","secret":"h&ppyfestivu$"}
+#
 
 class TradingViewAction(str, Enum):
     BUY = "buy"
@@ -17,12 +20,14 @@ class TradingViewAlert(BaseModel):
     action: TradingViewAction = Field(..., description="Trading action (buy/sell/close)")
     symbol: str = Field(..., description="Trading pair (e.g., SOL_USDC)")
     price: Optional[str] = Field(None, description="Limit price (optional, market order if not provided)")
+    current_price: Optional[str] = Field(None, alias="price", description="Current market price from TradingView")
     quantity: Optional[str] = Field(None, description="Order quantity")
     quote_quantity: Optional[str] = Field(None, alias="quoteQuantity", description="Quote quantity for market orders")
     profile: str | None = Field(None, description="Trading profile")
 
     # Optional advanced parameters
     stop_loss: Optional[str] = Field(None, alias="stopLoss", description="Stop loss price")
+    trailing_stop_loss: Optional[str] = Field(None, alias="trailingStopLoss", description="Trailing stop loss price")
     take_profit: Optional[str] = Field(None, alias="takeProfit", description="Take profit price")
     post_only: Optional[bool] = Field(False, alias="postOnly")
     reduce_only: Optional[bool] = Field(False, alias="reduceOnly")
