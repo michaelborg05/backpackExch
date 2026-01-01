@@ -24,7 +24,10 @@ from utils.security import (
     require_webhook_permission,
     check_rate_limit
 )
+from db.session import SessionLocal 
+from db.crud import save_trade, open_position, close_position
 
+db = SessionLocal()
 config = Config()
 apiserver_logger = log_manager.get_logger("APIServer")
 
@@ -254,6 +257,15 @@ async def place_order(
                 quantity=request.quantity,
                 order_id=result.id
             )
+
+        trade = save_trade(db, result) 
+        if request.side.lower() == "buy":
+            open_position(db, trade) 
+            print("BUY saved:", trade.id)
+        else:
+            pos = close_position(db, trade) 
+            print("SELL saved:", trade.id, "Closed position:", pos.id if pos else None)
+
         return result.model_dump()
     
     except Exception as e:
