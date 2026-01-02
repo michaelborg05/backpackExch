@@ -96,7 +96,7 @@ class MonitoringService:
         self.logger.debug("Monitoring loop starting...")
         self.logger.debug(f"Log level set to {self.config.log_level}")
         validation_counter = 0
-        validation_interval = 2  # Run validation every 10 cycles (e.g., every 5 min if cycle is 30s)
+        validation_interval = 10  # Run validation every 10 cycles (e.g., every 5 min if cycle is 30s)
     
         try:
             while self.is_running:
