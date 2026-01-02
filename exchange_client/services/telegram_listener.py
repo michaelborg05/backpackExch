@@ -104,7 +104,7 @@ class TelegramListener:
 
             case "balance" | "b":
                 cache = get_portfolio_cache()
-                balances = cache.print_portfolio_summary()
+                balances = cache.print_portfolio_summary(profile_name="default")
                 
                 if balances:
                     balance_text = "💰 <b>Current Balances:</b>\n\n"

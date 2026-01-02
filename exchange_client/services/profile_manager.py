@@ -1,7 +1,7 @@
 from pathlib import Path
 import os
 import yaml
-from typing import Dict
+from typing import Dict, List, Optional
 from models.trading_profile import TradingProfile
 
 
@@ -17,6 +17,25 @@ class ProfileManager:
             raise ValueError(f"Unknown trading profile: {name}")
         return self._profiles[name]
 
+    def get_all_profiles(self) -> List[TradingProfile]:
+        """Get all enabled profiles (only enabled profiles are loaded from YAML)"""
+        return list(self._profiles.values())
+    
+    def get_profile(self, name: str) -> Optional[TradingProfile]:
+        """Get a specific profile by name (returns None if not found)"""
+        return self._profiles.get(name)
+    
+    def has_profile(self, name: str) -> bool:
+        """Check if a profile exists"""
+        return name in self._profiles
+    
+    def get_profile_names(self) -> List[str]:
+        """Get list of all profile names"""
+        return list(self._profiles.keys())
+    
+    def get_profiles_dict(self) -> Dict[str, TradingProfile]:
+        """Get the profiles dictionary"""
+        return self._profiles.copy()    
 
 def load_profiles(path: Path | None = None) -> ProfileManager:
     path = path or DEFAULT_PROFILE_PATH
@@ -27,8 +46,13 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         raw = yaml.safe_load(f) or {}
 
     profiles = {}
+    skipped_profiles = []
 
     for name, cfg in raw.get("profiles", {}).items():
+        # Skip disabled profiles
+        if not cfg.get("enabled", False):
+            skipped_profiles.append(name)
+            continue
         api_key = os.getenv(cfg["api_key_env"])
         secret = os.getenv(cfg["secret_env"])
 
@@ -47,17 +71,21 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             use_trailing_stop=cfg.get("use_trailing_stop", False),
             max_position_size=float(cfg.get("max_position_size", 0)),
         )
+    print(f"Loaded {len(profiles)} enabled profiles from YAML")
+    if skipped_profiles:
+        print(f"Skipped {len(skipped_profiles)} disabled profiles: {', '.join(skipped_profiles)}")
+    
     return ProfileManager(profiles)
-
 # Global instance
 _profile_manager = None
 
 def set_profile_manager(pm: ProfileManager):
+    """Set the global profile manager instance"""
     global _profile_manager
     _profile_manager = pm
 
 def get_profile_manager() -> ProfileManager:
+    """Get the global profile manager instance"""
     return _profile_manager
-
 
 

@@ -16,6 +16,7 @@ from services.market_info_cache import get_market_info_cache
 from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
 from utils.logging import log_manager
+from utils.constants import TradeReason
 from services.profile_manager import get_profile_manager
 from utils.security import (
     require_read_permission,
@@ -244,9 +245,9 @@ async def place_order(
     """Place an order"""
     try:
         if request.side.lower() == "buy":
-            result = trading.order_buy(request.symbol, request.quantity)
+            result = trading.order_buy(request.symbol, request.quantity,source=TradeReason.API)
         elif request.side.lower() == "sell":
-            result = trading.order_sell(request.symbol, request.quantity)
+            result = trading.order_sell(request.symbol, request.quantity,source=TradeReason.API)
         else:
             raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
         
@@ -259,14 +260,6 @@ async def place_order(
                 order_id=result.id
             )
 
-        trade = save_trade(db, result) 
-        if request.side.lower() == "buy":
-            open_position(db, trade) 
-            print("BUY saved:", trade.id)
-        else:
-            pos = close_position(db, trade) 
-            print("SELL saved:", trade.id, "Closed position:", pos.id if pos else None)
-
         return result.model_dump()
     
     except Exception as e:
@@ -276,8 +269,7 @@ async def place_order(
 @app.post("/webhook/tradingview", response_model=WebhookResponse)
 async def tradingview_webhook(
     alert: TradingViewAlert,
-    request: Request,
-    x_signature: Optional[str] = Header(None)
+    request: Request
 ):
     """
     Receive and process TradingView webhook alerts
@@ -342,7 +334,7 @@ async def tradingview_webhook(
         if telegram:
             await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol} {alert.current_price}"  )
 
-        result = await process_tradingview_alert(trading, alert)
+        result = await process_tradingview_alert(trading, alert, source=TradeReason.WEBHOOK)
 
         apiserver_logger.info(f"Alert processed successfully: {result}")
         
@@ -376,18 +368,18 @@ async def tradingview_webhook(
         
 
 
-@app.get("/portfolio", dependencies=[Depends(require_read_permission)])
-def get_portfolio(quote_asset: str = "USDC"):
+@app.get("/portfolio/{profile_name}", dependencies=[Depends(require_read_permission)])
+def get_portfolio(profile_name: str, quote_asset: str = "USDC"):
     """Get complete portfolio with values"""
     portfolio = get_portfolio_cache()
-    return portfolio.get_portfolio_summary(quote_asset)
+    return portfolio.get_portfolio_summary(quote_asset, profile_name=profile_name)
 
-@app.get("/portfolio/total", dependencies=[Depends(require_read_permission)])
-def get_total_portfolio_value(quote_asset: str = "USDC"):
+@app.get("/portfolio/{profile_name}/total", dependencies=[Depends(require_read_permission)])
+def get_total_portfolio_value(profile_name: str, quote_asset: str = "USDC"):
     """Get total portfolio value"""
     portfolio = get_portfolio_cache()
-    total = portfolio.get_total_value(quote_asset)
-    
+    total = portfolio.get_total_value(quote_asset, profile_name=profile_name)
+
     return {
         "total_value": str(total),
         "quote_asset": quote_asset

@@ -1,4 +1,5 @@
 from enum import Enum
+import enum
 
 class HttpMethod(str, Enum):
     GET = "GET"
@@ -53,3 +54,22 @@ class MessagePriority(str, Enum):
     NORMAL = "normal"
     HIGH = "high"
     CRITICAL = "critical"
+
+class TradeReason(str, enum.Enum):
+    """Reasons for trade execution"""
+    MANUAL = "MANUAL"
+    WEBHOOK = "WEBHOOK"
+    TAKE_PROFIT = "TAKE_PROFIT"
+    STOP_LOSS = "STOP_LOSS"
+    TRAILING_STOP = "TRAILING_STOP"
+    STRATEGY = "STRATEGY"
+    API = "API"
+
+class PositionCloseReason(str, enum.Enum):
+    """Reasons for position closure"""
+    TAKE_PROFIT = "TAKE_PROFIT"
+    STOP_LOSS = "STOP_LOSS"
+    TRAILING_STOP = "TRAILING_STOP"
+    MANUAL = "MANUAL"
+    INVALID_POSITION = "INVALID_POSITION"  # Position exists but token was sold
+    FORCE_CLOSE = "FORCE_CLOSE"

@@ -6,6 +6,7 @@ from utils.config import Config
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService
+from models.balance import BalanceReader
 from services.balance_cache import get_balance_cache
 from services.price_cache import get_price_cache
 from services.portfolio_cache import get_portfolio_cache
@@ -94,10 +95,13 @@ class MonitoringService:
         """Internal monitoring loop - runs in background thread"""
         self.logger.debug("Monitoring loop starting...")
         self.logger.debug(f"Log level set to {self.config.log_level}")
-        
+        validation_counter = 0
+        validation_interval = 2  # Run validation every 10 cycles (e.g., every 5 min if cycle is 30s)
+    
         try:
             while self.is_running:
                 self.call_count += 1
+                validation_counter += 1
                 self.logger.debug(f"Beginning loop #{self.call_count}")
                 
                 # Monitor prices for all tickers
@@ -106,7 +110,15 @@ class MonitoringService:
                 # Get account balances
                 self._monitor_balances()
 
-                self._monitor_open_positions()
+                # Monitor open balances and check for SL/TP/Trailing SL
+                #self._monitor_open_positions()
+                all_balances = get_balances(source="MonitoringService", update_cache=True)
+
+                # Validate positions periodically (less frequently)
+                if validation_counter >= validation_interval:
+                    self.logger.info("Running position validation...")
+                    self._validate_open_positions()
+                    validation_counter = 0
 
                 # Wait before next iteration
                 if self.is_running:  # Check again before sleeping
@@ -133,22 +145,27 @@ class MonitoringService:
                 self.logger.error(f"Error getting price for {ticker}: {e}")
     
     def _monitor_balances(self):
-        """Monitor account balances"""
+        """Monitor account balances for all profiles and update cache"""
         try:
-            balances = get_balances(source="MonitoringService")
-            if balances:
-                self.logger.debug(balances.summary())
-                # Update cache with latest balances
-                # Assuming balances has a method to convert to dict
-                balance_dict = self._convert_balances_to_dict(balances)
-                self.balance_cache.update(balance_dict)
-                portfolio = get_portfolio_cache()
-                portfolio_summary =  portfolio.print_portfolio_summary()
-
-                if portfolio_summary:
-                    self.logger.info(portfolio_summary)
+            # Get balances for ALL profiles and update cache in one call
+            all_balances = get_balances(source="MonitoringService", update_cache=True)
+            
+            if all_balances:
+                # Log summary for each profile
+                for profile_name, balances in all_balances.items():
+                    if isinstance(balances, BalanceReader):
+                        self.logger.debug(f"[{profile_name}] {balances.summary()}")
+                
+                    # Print portfolio summary
+                    portfolio = get_portfolio_cache()
+                    portfolio_summary = portfolio.print_portfolio_summary(profile_name=profile_name)
+                    if portfolio_summary:
+                        self.logger.info(portfolio_summary)
+                    
         except Exception as e:
             self.logger.error(f"Error getting balances: {e}")
+
+
 
     def _convert_balances_to_dict(self, balances) -> Dict[str, Dict]:
         """
@@ -212,8 +229,6 @@ class MonitoringService:
                         #self._execute_close(db, position, profile, reason="TAKE_PROFIT")
                         continue
 
-
-
                     # STOP LOSS
                     if position.sl_price and price <= float(position.sl_price):
                         self.logger.info(f"MOCK SL hit for {symbol} @ {price}")
@@ -246,6 +261,77 @@ class MonitoringService:
                             self.logger.info(f"MOCK Trailing SL hit for {symbol} @ {price}")
                             #send_telegram_message_sync(f"Trailing SL hit for {symbol} @ {price}")
                             #self._execute_close(db, position, profile, reason="TRAILING_STOP")
+
+    def _validate_open_positions(self):
+        """
+        Validate open positions against cached balances.
+        Close positions where the token has been sold but position wasn't updated.
+        """
+        from db.utils import get_db_session
+        from db.crud import close_invalid_position
+
+        profile_manager = get_profile_manager()
+        if profile_manager is None:
+            self.logger.error("Profile manager not initialized. Skipping validation.")
+            return
+
+        balance_cache = get_balance_cache()
+
+        with get_db_session() as db:
+            profiles = profile_manager._profiles.values()
+            
+            for profile in profiles:
+                open_positions = get_open_positions(db, profile.name)
+                
+                # Get cached balances for this profile
+                cached_balances = balance_cache.get_profile_balances(profile.name)
+                
+                if not cached_balances:
+                    self.logger.warning(f"No cached balances for profile {profile.name}, skipping validation")
+                    continue
+                
+                for position in open_positions:
+                    symbol = position.symbol
+                    # Extract base asset (e.g., "SOL" from "SOL_USDC")
+                    base_asset = symbol.split('_')[0]
+                    
+                    # Check if we still hold this token (from cache)
+                    balance_info = cached_balances.get(base_asset)
+                    
+                    # Get the buy trade to check quantity
+                    buy_trade = position.buy_trade
+                    if not buy_trade:
+                        self.logger.warning(f"Position {position.id} has no buy_trade, skipping")
+                        continue
+                    
+                    expected_quantity = float(buy_trade.quantity)
+                    
+                    # Check if balance is insufficient
+                    if balance_info is None:
+                        current_balance = 0
+                    else:
+                        current_balance = float(balance_info.get('available', 0))
+                    
+                    # If balance is zero or less than 1% of expected, position is invalid
+                    if current_balance < (expected_quantity * 0.01):  # 1% threshold
+                        self.logger.warning(
+                            f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
+                            f"Expected {expected_quantity}, but balance is {current_balance}"
+                        )
+                        
+                        # Close the invalid position
+                        close_invalid_position(db, position.id, reason="INVALID_POSITION")
+                        
+                        self.logger.info(
+                            f"Closed invalid position {position.id} for {symbol} - "
+                            f"token was sold externally"
+                        )
+                        
+                        # Optional: Send notification
+                        # send_telegram_message_sync(
+                        #     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
+                        # )
+
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""

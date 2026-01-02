@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from decimal import Decimal
 from typing import Optional
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from db.models import Trade, Position
 from models.trade import OrderResponse
 from models.trading_profile import TradingProfile
 from db.models import TradingProfileDB
 
-def save_trade(db: Session, order: OrderResponse, profile_name: str) -> Trade:
+def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL") -> Trade:
     """Save a trade to the database"""
     
     if order.price is None or order.price == "0":
@@ -17,7 +18,6 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str) -> Trade:
     else:
         unit_price = Decimal(str(order.price))
 
-
     trade = Trade(
         profile_name=profile_name,
         order_id=str(order.id),
@@ -25,7 +25,8 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str) -> Trade:
         side=order.side.upper(),
         quantity=Decimal(str(order.executed_quantity)),
         price=Decimal(str(unit_price)),
-        exchange="backpack"
+        exchange="backpack",
+        reason=reason
     )
     db.add(trade)
     db.commit()
@@ -77,7 +78,8 @@ def update_position_trailing_stop(
 def close_position(
     db: Session,
     position_id: int,
-    sell_trade: Trade
+    sell_trade: Trade,
+    reason: str = "MANUAL"
 ) -> Position:
     """Close an existing position"""
     position = db.query(Position).filter(Position.id == position_id).first()
@@ -86,8 +88,9 @@ def close_position(
     
     position.sell_trade_id = sell_trade.id
     position.status = "CLOSED"
-    position.closed_at = datetime.utcnow()
-    
+    position.close_reason = reason
+    position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+
     # Calculate profit
     buy_trade = position.buy_trade
     
@@ -121,6 +124,25 @@ def get_open_position_for_symbol(
         Position.symbol == symbol,
         Position.status == "OPEN"
     ).first()
+
+def close_invalid_position(
+    db: Session,
+    position_id: int,
+    reason: str = "INVALID_POSITION"
+) -> Position:
+    """Close a position that's invalid (no sell trade)"""
+    position = db.query(Position).filter(Position.id == position_id).first()
+    if not position:
+        raise ValueError(f"Position {position_id} not found")
+    
+    position.status = "CLOSED"
+    position.close_reason = reason
+    position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+    position.profit = None  # No profit calculation since we don't have sell details
+    
+    db.commit()
+    db.refresh(position)
+    return position
 
 def get_profile_by_name(db: Session, name: str) -> Optional[TradingProfileDB]:
     """Get a trading profile by name"""

@@ -348,19 +348,19 @@ class TradingService:
         quantize_str = "0." + "0" * decimals
         return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
-    def order_buy(self, symbol: str, quantity: str, price:str = "0",**kwargs) -> OrderResponse:
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL",**kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
-        return self.ExecuteOrder(order)
+        return self.ExecuteOrder(order, source=source)
 
-    def order_sell(self, symbol: str, quantity: str, price:str = "0", **kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
-        return self.ExecuteOrder(order)
+        return self.ExecuteOrder(order, source=source)
 
 
     # Order management
@@ -437,7 +437,7 @@ class TradingService:
         
         return order
 
-    def ExecuteOrder(self, order: OrderExecuteRequest) -> OrderResponse:
+    def ExecuteOrder(self, order: OrderExecuteRequest, source: str = "MANUAL") -> OrderResponse:
         url = APIEndpoints.backpack_ExecuteOrder()
         
         # Convert model to dict, excluding None values
@@ -463,7 +463,7 @@ class TradingService:
                 # Save to database
                 db = SessionLocal()
                 try:
-                    saved_trade = save_trade(db, order_response, self.profile.name)
+                    saved_trade = save_trade(db, order_response, self.profile.name, source)
                     self.trader_logger.info(f"Trade saved to database: ID {saved_trade.id}")
                     # Open position if this is a BUY order
                     if order_response.side.upper() == "BID":
@@ -498,7 +498,8 @@ class TradingService:
                             position = close_position(
                                 db=db,
                                 position_id=position_id.id,
-                                sell_trade=saved_trade
+                                sell_trade=saved_trade,
+                                source=source
                             )
                             
                             self.trader_logger.info(
@@ -529,7 +530,7 @@ class TradingService:
                 detail=f"Trading service error: {str(e)}"
             )
    
-async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert):
+async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, source:str = "WEBHOOK") -> Optional[OrderResponse]:
     """
     Process TradingView alert and execute appropriate trade
 
@@ -571,6 +572,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
+                source=source,
                 **kwargs
             )
         else:
@@ -578,6 +580,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
             return trading.order_buy(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
+                source=source,
                 **kwargs
             )
 

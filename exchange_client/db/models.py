@@ -2,6 +2,7 @@
 from sqlalchemy import Column, Integer, String, Numeric, TIMESTAMP, ForeignKey, CheckConstraint, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
+from utils.constants import TradeReason, PositionCloseReason
 
 Base = declarative_base()
 
@@ -41,6 +42,7 @@ class Trade(Base):
     quantity = Column(Numeric, nullable=False)
     price = Column(Numeric, nullable=False)
     exchange = Column(String, default="backpack")
+    reason = Column(String, default=TradeReason.MANUAL) 
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     __table_args__ = (
@@ -59,9 +61,11 @@ class Position(Base):
     tp_price = Column(Numeric, nullable=True)
     sl_price = Column(Numeric, nullable=True)
     trailing_sl_price = Column(Numeric, nullable=True)
-    highest_price = Column(Numeric, nullable=True)
+    highest_price = Column(Numeric(precision=20, scale=8), nullable=True)
+    profit = Column(Numeric(precision=20, scale=8), nullable=True)
     status = Column(String, nullable=False)
-    profit = Column(Numeric)
+    status = Column(String, default="OPEN")  # OPEN or CLOSED
+    close_reason = Column(String, nullable=True) 
     created_at = Column(TIMESTAMP, server_default=func.now())
     closed_at = Column(TIMESTAMP)
 
