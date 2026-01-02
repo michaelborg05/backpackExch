@@ -12,7 +12,7 @@ from services.portfolio_cache import get_portfolio_cache
 from services.market_info_cache import get_market_info_cache
 from api_builders.market_builder import get_market_info
 from services.profile_manager import get_profile_manager
-from db.session import SessionLocal
+from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
     update_position_trailing_stop,
@@ -184,72 +184,68 @@ class MonitoringService:
 
     def _monitor_open_positions(self):
         """Check open positions for TP / SL / trailing SL conditions"""
-        db = SessionLocal()
         
         profile_manager = get_profile_manager()
         if profile_manager is None:
             self.logger.error("Profile manager not initialized. Skipping open position monitoring.")
             return 
-        profiles = profile_manager._profiles.values()
-        for profile in profiles:
-            open_positions = get_open_positions(db, profile.name)
+        
+        # Use the context manager - session is automatically closed
+        with get_db_session() as db:
+            profiles = profile_manager._profiles.values()
+            for profile in profiles:
+                open_positions = get_open_positions(db, profile.name)
 
-            for position in open_positions:
-                symbol = position.symbol
-                price = self.price_cache.get_price(symbol)
+                for position in open_positions:
+                    symbol = position.symbol
+                    price = self.price_cache.get_price(symbol)
 
-                if not price:
-                    continue
+                    if not price:
+                        continue
 
-                price = float(price)
+                    price = float(price)
 
-                # -------------------------------
-                # TAKE PROFIT
-                # -------------------------------
-                if position.tp_price and price >= float(position.tp_price):
-                    self.logger.info(f"MOCK TP hit for {symbol} @ {price}")
-                    #send_telegram_message_sync(f"TP hit for {symbol} @ {price}")
-                    #self._execute_close(db, position, profile, reason="TAKE_PROFIT")
-                    continue
-
-                # -------------------------------
-                # STOP LOSS
-                # -------------------------------
-                if position.sl_price and price <= float(position.sl_price):
-                    self.logger.info(f"MOCK SL hit for {symbol} @ {price}")
-                    #send_telegram_message_sync(f"SL hit for {symbol} @ {price}")
-                    #self._execute_close(db, position, profile, reason="STOP_LOSS")
-                    continue
-
-                # -------------------------------
-                # TRAILING STOP LOGIC
-                # -------------------------------
-                if profile.use_trailing_stop and position.trailing_sl_price:
-                    highest = float(position.highest_price or 0)
-
-                    if price > highest:
-                        new_high = price
-                        trailing_pct = float(profile.trailing_stop_pct)
-                        new_trailing_sl = new_high * (1 - trailing_pct / 100)
-
-                        update_position_trailing_stop(
-                            db,
-                            position.id,
-                            highest_price=new_high,
-                            trailing_sl_price=new_trailing_sl,
-                        )
-
-                        self.logger.debug(
-                            f"MOCK Updated trailing SL for {symbol}: {new_trailing_sl}"
-                        )
-                        #send_telegram_message_sync(f"Updated trailing SL for {symbol}: {new_trailing_sl}")
-
-                    elif price <= float(position.trailing_sl_price):
-                        self.logger.info(f"MOCK Trailing SL hit for {symbol} @ {price}")
-                        #send_telegram_message_sync(f"Trailing SL hit for {symbol} @ {price}")
-                        #self._execute_close(db, position, profile, reason="TRAILING_STOP")
+                    # TAKE PROFIT
+                    if position.tp_price and price >= float(position.tp_price):
+                        self.logger.info(f"MOCK TP hit for {symbol} @ {price}")
+                        #send_telegram_message_sync(f"TP hit for {symbol} @ {price}")
+                        #self._execute_close(db, position, profile, reason="TAKE_PROFIT")
+                        continue
 
 
+
+                    # STOP LOSS
+                    if position.sl_price and price <= float(position.sl_price):
+                        self.logger.info(f"MOCK SL hit for {symbol} @ {price}")
+                        #send_telegram_message_sync(f"SL hit for {symbol} @ {price}")
+                        #self._execute_close(db, position, profile, reason="STOP_LOSS")
+                        continue
+
+                    # TRAILING STOP LOGIC
+                    if profile.use_trailing_stop and position.trailing_sl_price:
+                        highest = float(position.highest_price or 0)
+
+                        if price > highest:
+                            new_high = price
+                            trailing_pct = float(profile.trailing_stop_pct)
+                            new_trailing_sl = new_high * (1 - trailing_pct / 100)
+
+                            update_position_trailing_stop(
+                                db,
+                                position.id,
+                                highest_price=new_high,
+                                trailing_sl_price=new_trailing_sl,
+                            )
+
+                            self.logger.debug(
+                                f"MOCK Updated trailing SL for {symbol}: {new_trailing_sl}"
+                            #send_telegram_message_sync(f"Updated trailing SL for {symbol}: {new_trailing_sl}")
+                            )
+
+                        elif price <= float(position.trailing_sl_price):
+                            self.logger.info(f"MOCK Trailing SL hit for {symbol} @ {price}")
+                            #send_telegram_message_sync(f"Trailing SL hit for {symbol} @ {price}")
+                            #self._execute_close(db, position, profile, reason="TRAILING_STOP")
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
