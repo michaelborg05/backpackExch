@@ -96,7 +96,7 @@ class TradingService:
         # Validate we have balance data
         if available is None:
             self.trader_logger.warning(
-                f"Could not retrieve balance for {base_asset}, proceeding without validation"
+                f"Could not retrieve balance for {profile_name} {base_asset}, proceeding without validation"
             )
             if order_qty is None:
                 raise ValueError(f"Order quantity '{order.quantity}' requires balance data")

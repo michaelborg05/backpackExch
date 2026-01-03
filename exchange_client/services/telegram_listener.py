@@ -12,18 +12,18 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
-
+from services import profile_manager
 from utils.logging import log_manager
 from utils.constants import MessagePriority
 from services.portfolio_cache import get_portfolio_cache
-
+from services.profile_manager import get_profile_manager
 
 class TelegramListener:
     def __init__(self, token: str, allowed_chat_id: int):
         self.token = token
         self.allowed_chat_id = allowed_chat_id
         self.logger = log_manager.get_logger("TelegramListener")
-
+        self.profile_manager = get_profile_manager()
         self.app: Optional[Application] = None
         self.bot: Optional[Bot] = None
         self._running = False
@@ -104,19 +104,36 @@ class TelegramListener:
 
             case "balance" | "b":
                 cache = get_portfolio_cache()
-                balances = cache.print_portfolio_summary(profile_name="default")
-                
-                if balances:
-                    balance_text = "💰 <b>Current Balances:</b>\n\n"
-                    balance_text += balances
-                else:
-                    balance_text = "❌ No balance data available"
+                if not self.profile_manager:
+                    self.logger.warning("Profile manager not initialized")
+                    balances = cache.print_portfolio_summary(profile_name="default")
+                    if balances:
+                        balance_text = "💰 <b>Current Balances:</b>\n\n"
+                        balance_text += balances
+                    else:
+                        balance_text = "❌ No balance data available"
 
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=balance_text,
-                    parse_mode="HTML"
-                )
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=balance_text,
+                        parse_mode="HTML"
+                    )
+
+                else:
+                    profiles = self.profile_manager.get_all_profiles()
+                    for profile in profiles:
+                        balances = cache.print_portfolio_summary(profile_name=profile.name)
+                        if balances:
+                            balance_text = f"💰 <b>Current Balances for {profile.name}:</b>\n\n"
+                            balance_text += balances
+                        else:
+                            balance_text = f"❌ No balance data available for {profile.name}"
+
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=balance_text,
+                            parse_mode="HTML"
+                        )
                     
             case _:
                 await context.bot.send_message(

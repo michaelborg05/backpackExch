@@ -281,7 +281,8 @@ class MonitoringService:
             
             for profile in profiles:
                 open_positions = get_open_positions(db, profile.name)
-                
+                if open_positions is None or len(open_positions) == 0:
+                    continue
                 # Get cached balances for this profile
                 cached_balances = balance_cache.get_profile_balances(profile.name)
                 
@@ -301,10 +302,10 @@ class MonitoringService:
                     buy_trade = position.buy_trade
                     if not buy_trade:
                         self.logger.warning(f"Position {position.id} has no buy_trade, skipping")
-                        continue
-                    
-                    expected_quantity = float(buy_trade.quantity)
-                    
+                        expected_quantity = 0.01
+                    else:
+                        expected_quantity = float(buy_trade.quantity)
+
                     # Check if balance is insufficient
                     if balance_info is None:
                         current_balance = 0

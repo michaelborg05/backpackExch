@@ -46,10 +46,12 @@ class BalanceCache:
 
     def get_available_balance(self, profile_name: str, asset: str) -> Optional[Decimal]:
         """Get available balance for an asset in a specific profile"""
+        self.logger.debug(f"Retrieving available balance for asset '{asset}' in profile '{profile_name}'")
         with self._lock:
             profile_balances = self._cache.get(profile_name)
             if profile_balances:
                 available = profile_balances.get(asset, {}).get("available","0")
+                self.logger.debug(f"Available balance for asset '{asset}' in profile '{profile_name}': {available}")
                 return Decimal(available)
             return None
 
