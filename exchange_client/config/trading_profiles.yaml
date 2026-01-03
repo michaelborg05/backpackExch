@@ -3,19 +3,19 @@ profiles:
     enabled: true
     api_key_env: BACKPACK_API_KEY
     secret_env: SECRET
-    take_profit_pct: 2
-    stop_loss_pct: 1
+    take_profit_pct: 4
+    stop_loss_pct: 5
     max_risk_pct: 0.25
-    trailing_stop_pct: 1
+    trailing_stop_pct: 5
     use_trailing_stop: true
     max_position_size: 25
     default_order_size_pct: 25
 
   15m_MB:
-    enabled: false
+    enabled: true
     api_key_env: BP_API_KEY_15M
     secret_env: BP_SECRET_15M
-    take_profit_pcrt: 4.0
+    take_profit_pcrt: 3
     max_risk_pct: 0.25
     stop_loss_pct: 1
     trailing_stop_pct: 1
