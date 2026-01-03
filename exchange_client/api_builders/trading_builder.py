@@ -107,16 +107,22 @@ class TradingService:
         if available <= 0:
             raise ValueError(f"No available balance for {base_asset}")
         
-        # If "MAX", use all available
+        # If "MAX", use all available with buffer
         if order_qty is None:
-            order_qty = available
+            # Apply buffer for fees (0.01% safety margin)
+            buffered_qty = available * Decimal("0.9999")
+            
+            self.trader_logger.info(
+                f"MAX sell order: {available} {base_asset} → {buffered_qty} (buffered, will be rounded by market rules)"
+            )
+            order.quantity = str(buffered_qty)
+            return order
         
-        # Adjust if needed
+        # For explicit quantities, check if adjustment needed
         adjusted_qty = self._adjust_quantity_to_balance(order_qty, available, base_asset)
         order.quantity = str(adjusted_qty)
         
         return order
-
 
     def _validate_buy_order(
         self, 
@@ -299,6 +305,9 @@ class TradingService:
     ) -> Decimal:
         """
         Adjust order quantity to available balance if needed (for SELL orders)
+        Applies fee buffer when quantity exceeds or equals available balance
+        
+        NOTE: Does NOT round - rounding is handled by _validate_market_rules
         
         Args:
             order_qty: Requested order quantity
@@ -306,30 +315,27 @@ class TradingService:
             asset: Asset symbol for logging
             
         Returns:
-            Adjusted quantity (with fee buffer applied)
+            Adjusted quantity (with fee buffer applied if needed)
         """
-        # Check if adjustment needed
-        if order_qty <= available:
+        # If requested quantity is safely below balance, no adjustment needed
+        # Use a small threshold (0.1%) to avoid adjusting unnecessarily
+        if order_qty <= available * Decimal("0.999"):
             return order_qty
         
+        # Order quantity equals or exceeds balance - need to adjust
         self.trader_logger.warning(
-            f"Insufficient balance for {asset}. "
+            f"Order quantity close to or exceeds balance for {asset}. "
             f"Requested: {order_qty}, Available: {available}"
         )
         
         # Apply fee buffer (0.01%)
         adjusted = available * Decimal("0.9999")
         
-        # Round based on size
-        if adjusted < Decimal("10"):
-            adjusted = self._round_down(adjusted, 2)
-        else:
-            adjusted = self._round_down(adjusted, 0)
-        
-        self.trader_logger.info(f"Adjusted order quantity to {adjusted}")
+        self.trader_logger.info(
+            f"Adjusted order quantity from {order_qty} to {adjusted} (with fee buffer, will be rounded by market rules)"
+        )
         
         return adjusted
-
 
     def _round_down(self, value: Decimal, decimals: int) -> Decimal:
         """
@@ -529,8 +535,8 @@ class TradingService:
                 status_code=500,
                 detail=f"Trading service error: {str(e)}"
             )
-   
-async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, source:str = "WEBHOOK") -> Optional[OrderResponse]:
+
+async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK") -> Optional[OrderResponse]:
     """
     Process TradingView alert and execute appropriate trade
 
@@ -573,7 +579,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 price=alert.price,
                 quantity=alert.quantity,
                 source=source,
-                profile_name=alert.profile,
+                profile_name=profile_name,
                 **kwargs
             )
         else:
@@ -582,7 +588,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 symbol=alert.symbol,
                 quantity=alert.quantity,
                 source=source,
-                profile_name=alert.profile,
+                profile_name=profile_name,
                 **kwargs
             )
 
@@ -593,7 +599,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
-                profile_name=alert.profile,
+                profile_name=profile_name,
                 **kwargs
             )
         else:
@@ -601,7 +607,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
             return trading.order_sell(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
-                profile_name=alert.profile,
+                profile_name=profile_name,
                 **kwargs
             )
 

@@ -274,23 +274,24 @@ async def tradingview_webhook(
     """
     Receive and process TradingView webhook alerts
     
-    TradingView Alert Message Format (JSON):
+    Supports multiple profiles in single alert:
     {
         "action": "buy",
         "symbol": "SOL_USDC",
-        "price": "150.00",
-        "quantity": "10",
+        "profile": "default,MB15m,aggressive",
         "secret": "your_webhook_secret"
     }
     """
     apiserver_logger.debug("Received TradingView webhook")
+    
     try:
+        # Authentication
         if alert.secret is None:
             apiserver_logger.warning("No webhook secret provided in alert")
             raise HTTPException(status_code=401, detail="Webhook secret required")
         if alert.secret != WEBHOOK_SECRET:
             apiserver_logger.warning("Invalid webhook secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")   
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
         
         apiserver_logger.info(f"Received TradingView alert: {alert.action} {alert.symbol}")
         
@@ -303,50 +304,142 @@ async def tradingview_webhook(
                 detail="Profile manager not initialized. Server startup incomplete."
             )
         
-        # Get trading profile
-        profile_name = alert.profile or "default"
+        # Validate all profiles exist before processing any
+        invalid_profiles = []
+        for profile_name in alert.profiles:
+            if not profile_manager.has_profile(profile_name):
+                invalid_profiles.append(profile_name)
         
-        try:
-            profile = profile_manager.get(profile_name)
-        except ValueError as e:
-            apiserver_logger.error(f"Invalid profile: {profile_name}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid trading profile: {profile_name}"
-            )
-        apiserver_logger.info(f"Using trading profile: {profile_name}")
-
-        if alert.take_profit:
-            apiserver_logger.info(f"Overriding default take profit {profile.take_profit_pct}% with {alert.take_profit}%")
-            profile.take_profit_pct = Decimal(alert.take_profit)
-
-        if alert.trailing_stop_loss:
-            apiserver_logger.info(f"Overriding default trailing stop {profile.trailing_stop_pct}% with {alert.trailing_stop_loss}%")
-            profile.trailing_stop_pct = Decimal(alert.trailing_stop_loss)
-
-        if alert.stop_loss:
-            apiserver_logger.info(f"Overriding default stop loss {profile.stop_loss_pct}% with {alert.stop_loss}%")
-            profile.stop_loss_pct = Decimal(alert.stop_loss)
-
-        trading = TradingService(profile)
-
-        # Process alert based on action
+        if invalid_profiles:
+            error_msg = f"Invalid profile(s): {', '.join(invalid_profiles)}"
+            apiserver_logger.error(error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        apiserver_logger.info(
+            f"Processing TradingView alert: {alert.action} {alert.symbol} "
+            f"for profiles: {', '.join(alert.profiles)}"
+        )
+        
+        # Notify via Telegram
         if telegram:
-            await telegram.send_message(f"Processing TradingView alert: {alert.action} {alert.symbol} {alert.current_price}"  )
-
-        result = await process_tradingview_alert(trading, alert, source=TradeReason.WEBHOOK)
-
-        apiserver_logger.info(f"Alert processed successfully: {result}")
+            profiles_str = ', '.join(alert.profiles)
+            await telegram.send_message(
+                f"📊 TradingView Alert\n"
+                f"Action: {alert.action.upper()}\n"
+                f"Symbol: {alert.symbol}\n"
+                f"Price: {alert.current_price}\n"
+                f"Profiles: {profiles_str}"
+            )
+        
+        # Process alert for each profile
+        results = []
+        errors = []
+        
+        for profile_name in alert.profiles:
+            try:
+                profile = profile_manager.get(profile_name)
+                
+                # Override profile settings if provided in alert
+                if alert.take_profit:
+                    apiserver_logger.info(
+                        f"[{profile_name}] Overriding take profit: "
+                        f"{profile.take_profit_pct}% → {alert.take_profit}%"
+                    )
+                    profile.take_profit_pct = Decimal(alert.take_profit)
+                
+                if alert.trailing_stop_loss:
+                    apiserver_logger.info(
+                        f"[{profile_name}] Overriding trailing stop: "
+                        f"{profile.trailing_stop_pct}% → {alert.trailing_stop_loss}%"
+                    )
+                    profile.trailing_stop_pct = Decimal(alert.trailing_stop_loss)
+                
+                if alert.stop_loss:
+                    apiserver_logger.info(
+                        f"[{profile_name}] Overriding stop loss: "
+                        f"{profile.stop_loss_pct}% → {alert.stop_loss}%"
+                    )
+                    profile.stop_loss_pct = Decimal(alert.stop_loss)
+                
+                # Create trading service for this profile
+                trading = TradingService(profile)
+                
+                # Process the alert
+                result = await process_tradingview_alert(
+                    trading, 
+                    alert, 
+                    source=TradeReason.WEBHOOK,
+                    profile_name=profile_name
+                )
+                
+                results.append({
+                    "profile": profile_name,
+                    "success": True,
+                    "order_id": result.id if result else None,
+                    "executed_quantity": result.executed_quantity if result else None,
+                    "status": result.status if result else None
+                })
+                
+                apiserver_logger.info(
+                    f"[{profile_name}] Alert processed successfully: {result}"
+                )
+                
+            except Exception as e:
+                error_msg = f"[{profile_name}] Error: {str(e)}"
+                apiserver_logger.error(error_msg, exc_info=True)
+                
+                results.append({
+                    "profile": profile_name,
+                    "success": False,
+                    "error": str(e)
+                })
+                errors.append(error_msg)
+        
+        # Determine overall success
+        successful_profiles = [r for r in results if r.get("success")]
+        overall_success = len(successful_profiles) > 0
+        
+        # Send summary notification
+        if telegram:
+            success_count = len(successful_profiles)
+            total_count = len(alert.profiles)
+            
+            if success_count == total_count:
+                summary = f"✅ Alert Complete: {success_count}/{total_count} profiles succeeded\n"
+            elif success_count > 0:
+                summary = f"⚠️ Alert Partial Success: {success_count}/{total_count} profiles succeeded\n"
+            else:
+                summary = f"❌ Alert Failed: {success_count}/{total_count} profiles succeeded\n"
+            summary += f"Symbol: {alert.symbol} | Action: {alert.action.upper()}\n\n"
+            
+            for result in results:
+                profile_name = result['profile']
+                if result['success']:
+                    summary += f"✓ {profile_name}: Order {result.get('order_id', 'N/A')}\n"
+                else:
+                    summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
+            
+            await telegram.send_message(summary)
+        
+        # Build response message
+        if overall_success:
+            if errors:
+                message = f"Partial success: {len(successful_profiles)}/{len(alert.profiles)} profiles executed"
+            else:
+                message = f"All {len(alert.profiles)} profile(s) executed successfully"
+        else:
+            message = "All profiles failed to execute"
         
         return WebhookResponse(
-            success=True,
-            message=f"Order executed: {alert.action} {alert.symbol}",
-            order_id=result.id if result else None,
+            success=overall_success,
+            message=message,
+            results=results,
             details={
                 "action": alert.action,
                 "symbol": alert.symbol,
-                "executed_quantity": result.executed_quantity if result else None,
-                "status": result.status if result else None
+                "profiles_attempted": alert.profiles,
+                "successful_count": len(successful_profiles),
+                "failed_count": len(errors)
             }
         )
         
@@ -356,17 +449,16 @@ async def tradingview_webhook(
         apiserver_logger.error(f"Error processing webhook: {e}", exc_info=True)
         if telegram:
             await telegram.send_error_notification(
-                error_type=f"Error processing webhook",
+                error_type="Webhook Processing Error",
                 error_message=str(e),
                 endpoint=f"{request.method} {request.url.path}"
             )
         return WebhookResponse(
             success=False,
             message=f"Error: {str(e)}",
+            results=[],
             details={"error": str(e)}
         )
-        
-
 
 @app.get("/portfolio/{profile_name}", dependencies=[Depends(require_read_permission)])
 def get_portfolio(profile_name: str, quote_asset: str = "USDC"):

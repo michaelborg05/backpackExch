@@ -1,11 +1,6 @@
-# models/webhook.py
-from pydantic import BaseModel, Field,validator
-from typing import Optional, Literal
+from pydantic import BaseModel, Field, validator
+from typing import Optional, Literal, List
 from enum import Enum
-
-##Webhook sample
-#{"symbol": "ETH_USDC", "action": "sell", "notprice": "{{close}}", "quantity": "MAX","secret":"h&ppyfestivu$"}
-#
 
 class TradingViewAction(str, Enum):
     BUY = "buy"
@@ -23,7 +18,10 @@ class TradingViewAlert(BaseModel):
     current_price: Optional[str] = Field(None, alias="price", description="Current market price from TradingView")
     quantity: Optional[str] = Field(None, description="Order quantity")
     quote_quantity: Optional[str] = Field(None, alias="quoteQuantity", description="Quote quantity for market orders")
-    profile: str | None = Field(None, description="Trading profile")
+    profile: str | None = Field(None, description="Trading profile(s) - comma-separated for multiple profiles")
+    
+    # Parsed profiles (computed from profile field)
+    profiles: List[str] = Field(default_factory=lambda: ["default"], description="List of profile names to execute")
 
     # Optional advanced parameters
     stop_loss: Optional[str] = Field(None, alias="stopLoss", description="Stop loss price")
@@ -44,6 +42,25 @@ class TradingViewAlert(BaseModel):
     class Config:
         populate_by_name = True
         use_enum_values = True
+    
+    @validator('profiles', pre=True, always=True)
+    def parse_profiles(cls, v, values):
+        """Parse profile field into list of profile names"""
+        # If profiles is already set (from direct instantiation), use it
+        if v and v != ["default"]:
+            return v
+            
+        # Otherwise parse from profile field
+        profile_str = values.get('profile')
+        
+        if not profile_str or profile_str.strip() == "":
+            return ["default"]
+        
+        # Split by comma, strip whitespace, filter empty strings
+        profiles = [p.strip() for p in profile_str.split(',') if p.strip()]
+        
+        # If parsing resulted in empty list, default to ["default"]
+        return profiles if profiles else ["default"]
     
     @validator('symbol', pre=True)
     def normalize_symbol(cls, v, values):
@@ -73,5 +90,5 @@ class WebhookResponse(BaseModel):
     """Response model for webhook"""
     success: bool
     message: str
-    order_id: Optional[str] = None
+    results: List[dict] = Field(default_factory=list, description="Results per profile")
     details: Optional[dict] = None
