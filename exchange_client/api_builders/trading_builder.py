@@ -50,7 +50,7 @@ class TradingService:
             self.trader_logger.info("Initialized with default config")
             
 
-    def _validate_and_adjust_order(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
+    def _validate_and_adjust_order(self, order: OrderExecuteRequest, profile_name: str = "default") -> OrderExecuteRequest:
         """
         Validate order against available balance and adjust if needed
         Handles both BUY (checks quote asset) and SELL (checks base asset)
@@ -73,12 +73,12 @@ class TradingService:
         
         # Determine which asset to check based on order side
         if order.side == Side.ASK:  # SELL - check base asset
-            return self._validate_sell_order(order, base_asset)
+            return self._validate_sell_order(order, base_asset, profile_name=profile_name)
         else:  # BID - check quote asset (USDC)
-            return self._validate_buy_order(order, base_asset, quote_asset)
+            return self._validate_buy_order(order, base_asset, quote_asset, profile_name=profile_name)
 
 
-    def _validate_sell_order(self, order: OrderExecuteRequest, base_asset: str) -> OrderExecuteRequest:
+    def _validate_sell_order(self, order: OrderExecuteRequest, base_asset: str, profile_name: str = "default") -> OrderExecuteRequest:
         """
         Validate SELL order against available base asset balance
         
@@ -89,8 +89,7 @@ class TradingService:
         Returns:
             Adjusted order if needed
         """
-        available = self.balance_cache.get_available_balance(base_asset)
-        
+        available = self.balance_cache.get_available_balance(profile_name=profile_name, asset=base_asset)
         # Parse order quantity
         order_qty = self._parse_order_quantity(order.quantity, available, base_asset)
         
@@ -123,7 +122,8 @@ class TradingService:
         self, 
         order: OrderExecuteRequest, 
         base_asset: str, 
-        quote_asset: str
+        quote_asset: str,
+        profile_name: str = "default"
     ) -> OrderExecuteRequest:
         """
         Validate BUY order against available quote asset balance (USDC)
@@ -137,7 +137,7 @@ class TradingService:
             Adjusted order if needed
         """
         # Get available quote balance (USDC)
-        available_quote = self.balance_cache.get_available_balance(quote_asset)
+        available_quote = self.balance_cache.get_available_balance(profile_name=profile_name, asset=quote_asset)
         
         if available_quote is None:
             self.trader_logger.warning(
@@ -348,17 +348,17 @@ class TradingService:
         quantize_str = "0." + "0" * decimals
         return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
-    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL",**kwargs) -> OrderResponse:
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL",profile_name: str = "default", **kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
-        order = self._validate_and_adjust_order(order)
+        order = self._validate_and_adjust_order(order, profile_name=profile_name)
         order = self._validate_market_rules(order)
         return self.ExecuteOrder(order, source=source)
 
-    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", **kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", profile_name: str = "default",**kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
-        order = self._validate_and_adjust_order(order)
+        order = self._validate_and_adjust_order(order, profile_name=profile_name)
         order = self._validate_market_rules(order)
         return self.ExecuteOrder(order, source=source)
 
@@ -499,7 +499,7 @@ class TradingService:
                                 db=db,
                                 position_id=position_id.id,
                                 sell_trade=saved_trade,
-                                source=source
+                                reason=source
                             )
                             
                             self.trader_logger.info(
@@ -549,20 +549,20 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     # Build order kwargs
     kwargs = {}
 
-    if alert.quote_quantity:
-        kwargs['quote_quantity'] = alert.quote_quantity
+    # if alert.quote_quantity:
+    #     kwargs['quote_quantity'] = alert.quote_quantity
 
-    if alert.stop_loss:
-        kwargs['stop_loss_trigger_price'] = alert.stop_loss
+    # if alert.stop_loss:
+    #     kwargs['stop_loss_trigger_price'] = alert.stop_loss
 
-    if alert.take_profit:
-        kwargs['take_profit_trigger_price'] = alert.take_profit
+    # if alert.take_profit:
+    #     kwargs['take_profit_trigger_price'] = alert.take_profit
 
-    if alert.post_only:
-        kwargs['post_only'] = alert.post_only
+    # if alert.post_only:
+    #     kwargs['post_only'] = alert.post_only
 
-    if alert.reduce_only:
-        kwargs['reduce_only'] = alert.reduce_only
+    # if alert.reduce_only:
+    #     kwargs['reduce_only'] = alert.reduce_only
 
     # Execute order based on action
     if alert.action == TradingViewAction.BUY:
@@ -573,6 +573,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 price=alert.price,
                 quantity=alert.quantity,
                 source=source,
+                profile_name=alert.profile,
                 **kwargs
             )
         else:
@@ -581,6 +582,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 symbol=alert.symbol,
                 quantity=alert.quantity,
                 source=source,
+                profile_name=alert.profile,
                 **kwargs
             )
 
@@ -591,6 +593,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
+                profile_name=alert.profile,
                 **kwargs
             )
         else:
@@ -598,6 +601,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
             return trading.order_sell(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
+                profile_name=alert.profile,
                 **kwargs
             )
 

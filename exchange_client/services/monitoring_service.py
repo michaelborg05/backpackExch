@@ -111,8 +111,7 @@ class MonitoringService:
                 self._monitor_balances()
 
                 # Monitor open balances and check for SL/TP/Trailing SL
-                #self._monitor_open_positions()
-                all_balances = get_balances(source="MonitoringService", update_cache=True)
+                self._monitor_open_positions()
 
                 # Validate positions periodically (less frequently)
                 if validation_counter >= validation_interval:

@@ -36,14 +36,23 @@ class BalanceCache:
         with self._lock:
             return self._cache.get(profile_name)
 
-    def get_profile_asset_balance(self, profile_name: str, asset: str) -> Optional[Dict]:
+    def get_profile_asset_balance(self, profile_name: str, asset: str = "USDC") -> Optional[Dict]:
         """Get balance for a specific asset in a profile"""
         with self._lock:
             profile_balances = self._cache.get(profile_name)
             if profile_balances:
                 return profile_balances.get(asset)
             return None
-                    
+
+    def get_available_balance(self, profile_name: str, asset: str) -> Optional[Decimal]:
+        """Get available balance for an asset in a specific profile"""
+        with self._lock:
+            profile_balances = self._cache.get(profile_name)
+            if profile_balances:
+                available = profile_balances.get(asset, {}).get("available","0")
+                return Decimal(available)
+            return None
+
     def update(self, balances: Dict[str, Dict]):
         """Update balances for default profile (backwards compatibility)"""
         self.update_profile_balances("default", balances)

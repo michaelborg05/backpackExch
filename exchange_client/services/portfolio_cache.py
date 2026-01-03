@@ -15,7 +15,7 @@ class PortfolioCache:
         self.logger = log_manager.get_logger("PortfolioCache")
         self.balance_cache = get_balance_cache()
         self.price_cache = get_price_cache()
-    
+        self.DUST_THRESHOLD = Decimal("0.0001")  # Minimum balance to consider
     def get_asset_value(
         self,
         profile_name: str,
@@ -43,8 +43,10 @@ class PortfolioCache:
         locked_qty = Decimal(asset_balance.get("locked", "0"))
         staked_qty = Decimal(asset_balance.get("staked", "0"))
         total_qty = available_qty + locked_qty + staked_qty
-        
-        
+
+        if total_qty < self.DUST_THRESHOLD:
+            return None
+
         # If asset IS the quote asset (e.g., USDC), price is 1
         if asset == quote_asset:
             price = Decimal("1.0")

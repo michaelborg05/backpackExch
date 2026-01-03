@@ -26,7 +26,8 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
         quantity=Decimal(str(order.executed_quantity)),
         price=Decimal(str(unit_price)),
         exchange="backpack",
-        reason=reason
+        reason=reason,
+        created_at=datetime.now(ZoneInfo("Australia/Sydney"))
     )
     db.add(trade)
     db.commit()
@@ -50,7 +51,8 @@ def open_position(
         sl_price=sl_price,
         trailing_sl_price=trailing_sl_price,
         highest_price=highest_price or trade.price,  # Initialize with entry price
-        status="OPEN"
+        status="OPEN",
+        created_at=datetime.now(ZoneInfo("Australia/Sydney"))
     )
     db.add(position)
     db.commit()

@@ -7,6 +7,7 @@ TO DO
  # Add trailing stop loss once certain percent is hit. I.e. Once 5% profit, set a trailing stop loss at 2%
  #For profiles, we also need to save balances and portfolio per profile
  #For telegram listener, when sending B , get balance for all profiles or specific profile passed
+# filter out balances for symbols no longer supported
 
  No need
  # split into separate modules so i can migrate to Azure

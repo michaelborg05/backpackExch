@@ -170,12 +170,12 @@ def get_cached_balances():
     }
 
 
-@app.get("/balances/cached/{asset}", dependencies=[Depends(require_read_permission)])
-def get_cached_asset_balance(asset: str):
+@app.get("/balances/cached/{profile_name}/{asset}", dependencies=[Depends(require_read_permission)])
+def get_cached_asset_balance(profile_name: str, asset: str):
     """Get balance for specific asset from cache"""
     cache = get_balance_cache()
-    balance = cache.get_available_balance(asset)
-    
+    balance = cache.get_available_balance(profile_name=profile_name, asset=asset)
+
     if balance is None:
         return {
             "error": f"Balance for {asset} not found or cache is stale",

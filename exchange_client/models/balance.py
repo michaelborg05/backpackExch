@@ -10,7 +10,7 @@ class AssetBalance:
         self.available = round(Decimal(available),3) if symbol not in ['BTC', 'ETH'] else Decimal(available)
         self.locked = round(Decimal(locked),3) if symbol not in ['BTC', 'ETH'] else Decimal(locked)
         self.staked = round(Decimal(staked),3) if symbol not in ['BTC', 'ETH'] else Decimal(staked)
-
+        self.DUST_THRESHOLD = Decimal("0.0001")
     @property
     def total(self) -> Decimal:
         """Total balance across all states"""
@@ -19,7 +19,7 @@ class AssetBalance:
     @property
     def is_empty(self) -> bool:
         """Check if all balances are zero"""
-        return self.total == 0
+        return abs(self.total) < self.DUST_THRESHOLD
     
     def __str__(self) -> str:
         return f"{self.symbol:>12}: Available={self.available}, Locked={self.locked}, Staked={self.staked}, Total={self.total}"
