@@ -26,7 +26,7 @@ class Config:
         self.enable_rate_limiting: bool = os.getenv("ENABLE_RATE_LIMITING", "true").lower() == 'true'
         self.telegram_enabled: bool = os.getenv("TELEGRAM_ENABLED", "false").lower() == 'true'
         self.database_url: str = self._get_required("DATABASE_URL")
-        
+        self.telegram_webhook_url: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")  
     def _get_required(self, key: str) -> str:
         value = os.getenv(key)
         if not value:
