@@ -106,7 +106,7 @@ def health_check():
     """Public health check"""
     return {
         "status": "healthy",
-        "telegram": telegram is not None and telegram._running
+        "telegram": telegram is not None and telegram._initialized
     }
 
 @app.get("/webhook/test")
