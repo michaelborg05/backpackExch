@@ -11,7 +11,7 @@ from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService, process_tradingview_alert
 from services.balance_cache import get_balance_cache
-from services.telegram_listener import TelegramListener, set_telegram_listener
+from services.telegram_service import TelegramService, set_telegram, get_telegram
 from services.market_info_cache import get_market_info_cache
 from services.portfolio_cache import get_portfolio_cache
 from utils.config import Config
@@ -36,8 +36,7 @@ apiserver_logger = log_manager.get_logger("APIServer")
 WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else None
 
 # Global reference to monitoring service (injected from main.py)
-# Global reference to Telegram listener
-telegram: Optional[TelegramListener] = None
+telegram: Optional[TelegramService] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,19 +46,22 @@ async def lifespan(app: FastAPI):
     # Startup
     apiserver_logger.info("Starting API server lifespan...")    
     # Initialize Telegram if configured
-    if config.telegram_bot_token and config.chat_group_id and config.telegram_enabled == True:
+    if config.telegram_bot_token and config.chat_group_id and config.telegram_enabled:
+        webhook_url = getattr(config, 'telegram_webhook_url', None)
         apiserver_logger.info("Initializing Telegram bot...")
-        telegram = TelegramListener(
+        telegram = TelegramService(
             token=config.telegram_bot_token,
-            allowed_chat_id=config.chat_group_id
+            allowed_chat_id=config.chat_group_id,
+            webhook_url=webhook_url  # None = polling, URL = webhook
         )
-        set_telegram_listener(telegram)
+        set_telegram(telegram)
         
-        # Start the bot
-        await telegram.start()
+        # Initialize the webhook
+        await telegram.initialize()
         
         # Send startup notification
-        await telegram.send_message("🚀 API Started")
+        mode = "Webhook" if telegram.use_webhook else "Polling (Local)"
+        await telegram.send_message(f"🚀 API Started ({mode} mode)")
     else:
         apiserver_logger.warning("Telegram not configured - skipping")
     
@@ -70,7 +72,7 @@ async def lifespan(app: FastAPI):
     
     if telegram:
         await telegram.send_message("🛑 API Shutting Down")
-        await telegram.stop()
+        await telegram.shutdown()
 
 app = FastAPI(title="Trading API", lifespan=lifespan)
 
@@ -115,6 +117,28 @@ def test_webhook():
         "status": "ok",
         "message": "Webhook endpoint is accessible",        
     }
+
+@app.post("/telegram/webhook")
+async def telegram_webhook_endpoint(request: Request):
+    """
+    Receives updates from Telegram via webhook.
+    This is the endpoint you configure in Telegram.
+    """
+    if not telegram:
+        raise HTTPException(status_code=503, detail="Telegram not configured")
+    
+    try:
+        # Get the JSON data from Telegram
+        update_data = await request.json()
+        
+        # Process the update
+        await telegram.process_update(update_data)
+        
+        return {"ok": True}
+    
+    except Exception as e:
+        apiserver_logger.error(f"Error processing Telegram webhook: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
 
 #Read only endpoints
 @app.get("/monitoring/status", dependencies=[Depends(require_read_permission)])

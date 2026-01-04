@@ -3,6 +3,7 @@ import threading
 from typing import List,  Dict,Optional
 from utils.logging import log_manager
 from utils.config import Config
+from utils.constants import MessagePriority
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService
@@ -11,6 +12,7 @@ from services.balance_cache import get_balance_cache
 from services.price_cache import get_price_cache
 from services.portfolio_cache import get_portfolio_cache
 from services.market_info_cache import get_market_info_cache
+from services.telegram_service import get_telegram
 from api_builders.market_builder import get_market_info
 from services.profile_manager import get_profile_manager
 from db.utils import get_db_session
@@ -331,7 +333,14 @@ class MonitoringService:
                         # send_telegram_message_sync(
                         #     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
                         # )
-
+    def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
+        """Helper to send Telegram messages from sync context"""
+        try:
+            telegram = get_telegram()
+            if telegram and telegram._initialized:
+                telegram.send_message_sync(message, priority)
+        except Exception as e:
+            self.logger.debug(f"Could not send Telegram message: {e}")
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
