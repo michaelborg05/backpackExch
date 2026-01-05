@@ -395,12 +395,21 @@ async def tradingview_webhook(
                     source=TradeReason.WEBHOOK,
                     profile_name=profile_name
                 )
+                executed_price = None
+                try:
+                    executed_price = round(
+                        float(result.executed_quote_quantity) / float(result.executed_quantity),
+                        2
+                    )
+                except (ValueError, ZeroDivisionError):
+                    executed_price = None
                 
                 results.append({
                     "profile": profile_name,
                     "success": True,
                     "order_id": result.id if result else None,
                     "executed_quantity": result.executed_quantity if result else None,
+                    "executed_price": executed_price,
                     "status": result.status if result else None
                 })
                 
@@ -439,7 +448,7 @@ async def tradingview_webhook(
             for result in results:
                 profile_name = result['profile']
                 if result['success']:
-                    summary += f"✓ {profile_name}: Order {result.get('order_id', 'N/A')}\n"
+                    summary += f"✓ {profile_name}: Price: ${result.get('executed_price', 'N/A')}\n"
                 else:
                     summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
             

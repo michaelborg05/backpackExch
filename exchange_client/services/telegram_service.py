@@ -332,19 +332,47 @@ class TelegramService:
         priority: MessagePriority = MessagePriority.NORMAL, 
         parse_mode: str = "HTML"
     ) -> bool:
-        """Synchronous wrapper for send_message"""
+        """
+        Synchronous wrapper for send_message.
+        Works from any thread, including background monitoring threads.
+        """
         try:
             import asyncio
+            import threading
+            
+            # Try to get current event loop
             try:
                 loop = asyncio.get_running_loop()
+                # We're in an async context - create task
                 asyncio.create_task(self.send_message(message, priority, parse_mode))
                 return True
             except RuntimeError:
-                return asyncio.run(self.send_message(message, priority, parse_mode))
+                # No running loop - we're in a sync context
+                # Create new event loop in a separate thread
+                result = [False]  # Use list to allow modification in thread
+                
+                def run_in_thread():
+                    try:
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            result[0] = new_loop.run_until_complete(
+                                self.send_message(message, priority, parse_mode)
+                            )
+                        finally:
+                            new_loop.close()
+                    except Exception as e:
+                        self.logger.error(f"Error in telegram thread: {e}")
+                
+                thread = threading.Thread(target=run_in_thread, daemon=True)
+                thread.start()
+                thread.join(timeout=5)  # Wait max 5 seconds
+                return result[0]
+                
         except Exception as e:
             self.logger.error(f"Error in send_message_sync: {e}")
             return False
-    
+            
     def send_error_notification_sync(
         self, 
         error_type: str,

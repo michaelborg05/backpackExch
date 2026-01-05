@@ -225,16 +225,16 @@ class MonitoringService:
 
                     # TAKE PROFIT
                     if position.tp_price and price >= float(position.tp_price):
-                        self.logger.info(f"MOCK TP hit for {symbol} @ {price}")
-                        #send_telegram_message_sync(f"TP hit for {symbol} @ {price}")
-                        #self._execute_close(db, position, profile, reason="TAKE_PROFIT")
+                        self.logger.info(f"TP hit for {symbol} @ {price} [{profile.name}]")
+                        self._send_telegram(f"🎯 TP hit for {symbol} @ {price} [{profile.name}]")
+                        self._execute_close(db, position, profile, reason="TAKE_PROFIT")
                         continue
 
                     # STOP LOSS
                     if position.sl_price and price <= float(position.sl_price):
-                        self.logger.info(f"MOCK SL hit for {symbol} @ {price}")
-                        #send_telegram_message_sync(f"SL hit for {symbol} @ {price}")
-                        #self._execute_close(db, position, profile, reason="STOP_LOSS")
+                        self.logger.info(f"SL hit for {symbol} @ {price} [{profile.name}]")
+                        self._send_telegram(f"🛑 SL hit for {symbol} @ {price} [{profile.name}]")
+                        self._execute_close(db, position, profile, reason="STOP_LOSS")
                         continue
 
                     # TRAILING STOP LOGIC
@@ -254,14 +254,12 @@ class MonitoringService:
                             )
 
                             self.logger.debug(
-                                f"MOCK Updated trailing SL for {symbol}: {new_trailing_sl}"
-                            #send_telegram_message_sync(f"Updated trailing SL for {symbol}: {new_trailing_sl}")
+                                f"Updated trailing SL for {symbol}: {new_trailing_sl:.4f} [{profile.name}]"
                             )
-
                         elif price <= float(position.trailing_sl_price):
-                            self.logger.info(f"MOCK Trailing SL hit for {symbol} @ {price}")
-                            #send_telegram_message_sync(f"Trailing SL hit for {symbol} @ {price}")
-                            #self._execute_close(db, position, profile, reason="TRAILING_STOP")
+                            self.logger.info(f"Trailing SL hit for {symbol} @ {price} [{profile.name}]")
+                            self._send_telegram(f"📉 Trailing SL hit for {symbol} @ {price} [{profile.name}]")
+                            self._execute_close(db, position, profile, reason="TRAILING_STOP")
 
     def _validate_open_positions(self):
         """
@@ -328,11 +326,95 @@ class MonitoringService:
                             f"Closed invalid position {position.id} for {symbol} - "
                             f"token was sold externally"
                         )
-                        
+                        self._send_telegram(
+                            f"⚠️ Closed invalid position for {symbol} - token was sold externally"
+                        )
                         # Optional: Send notification
                         # send_telegram_message_sync(
                         #     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
                         # )
+
+    def _execute_close(self, db, position, profile, reason: str):
+        """
+        Execute a close order for a position
+        
+        Args:
+            db: Database session
+            position: Position object to close
+            profile: TradingProfile for this position
+            reason: Reason for closing (TAKE_PROFIT, STOP_LOSS, TRAILING_STOP)
+        """
+        try:
+            # Create TradingService instance for this profile
+            trading = TradingService(profile)
+            
+            # Get the quantity from the buy trade
+            if not position.buy_trade:
+                self.logger.warning(f"Position {position.id} has no buy_trade, Closing with MAX")
+                quantity = "MAX"
+            else:
+                quantity = str(position.buy_trade.quantity)
+
+            symbol = position.symbol
+            
+            self.logger.info(
+                f"Executing close order: {symbol} x {quantity} "
+                f"[{profile.name}] Reason: {reason}"
+            )
+            
+            # Execute sell order with "MAX" to ensure we sell everything
+            result = trading.order_sell(
+                symbol=symbol,
+                quantity="MAX",  # Use MAX to sell all available
+                source=reason,
+                profile_name=profile.name
+            )
+            
+            if result:
+                self.logger.info(
+                    f"Close order executed successfully: {result.id} "
+                    f"[{profile.name}] Quantity: {result.executed_quantity}"
+                )
+                
+                # Calculate profit/loss
+                entry_price = float(position.buy_trade.price)
+                exit_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
+                quantity_sold = float(result.executed_quantity)
+                profit = (exit_price - entry_price) * quantity_sold
+                profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                
+                # Send detailed notification
+                self._send_telegram(
+                    f"✅ Position Closed [{profile.name}]\n"
+                    f"Symbol: {symbol}\n"
+                    f"Reason: {reason}\n"
+                    f"Entry: ${entry_price:.4f}\n"
+                    f"Exit: ${exit_price:.4f}\n"
+                    f"Quantity: {quantity_sold:.4f}\n"
+                    f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)",
+                    MessagePriority.HIGH
+                )
+                
+                # Note: Position will be closed automatically by TradingService.ExecuteOrder
+                # which calls close_position() for SELL orders
+                
+            else:
+                self.logger.error(f"Close order failed for {symbol} [{profile.name}]")
+                self._send_telegram(
+                    f"❌ Failed to close position for {symbol} [{profile.name}]",
+                    MessagePriority.HIGH
+                )
+                
+        except Exception as e:
+            self.logger.error(
+                f"Error executing close order for {position.symbol} [{profile.name}]: {e}",
+                exc_info=True
+            )
+            self._send_telegram(
+                f"❌ Error closing position for {position.symbol} [{profile.name}]: {str(e)}",
+                MessagePriority.HIGH
+            )    
+    
     def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
         """Helper to send Telegram messages from sync context"""
         try:
