@@ -397,10 +397,12 @@ async def tradingview_webhook(
                 )
                 executed_price = None
                 try:
-                    executed_price = round(
-                        float(result.executed_quote_quantity) / float(result.executed_quantity),
-                        2
-                    )
+                    
+                    executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
+                    if executed_price < 1:
+                        executed_price = round(executed_price, 6)
+                    else:
+                        executed_price = round(executed_price, 2)   
                 except (ValueError, ZeroDivisionError):
                     executed_price = None
                 
