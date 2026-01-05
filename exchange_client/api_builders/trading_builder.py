@@ -512,6 +512,9 @@ class TradingService:
                                 f"Position closed: ID {position.id}, "
                                 f"Profit/Loss: {position.profit}"
                             )
+                    
+                    self._refresh_balance_cache_after_trade(order_response)
+
                 except Exception as db_error:
                     self.trader_logger.error(f"Failed to save trade to database: {db_error}")
                 finally:
@@ -535,6 +538,39 @@ class TradingService:
                 status_code=500,
                 detail=f"Trading service error: {str(e)}"
             )
+        
+    def _refresh_balance_cache_after_trade(self, order_response: OrderResponse):
+        """
+        Refresh balance cache after a successful trade to ensure 
+        subsequent orders have up-to-date balance information
+        
+        Args:
+            order_response: The executed order response
+        """
+        try:
+            from api_builders.account_builder import get_balances
+            
+            self.trader_logger.info(
+                f"Refreshing balance cache after {order_response.side} order for {self.profile.name}"
+            )
+            
+            # Fetch fresh balances for this profile and update cache
+            get_balances(
+                source="TradingService",
+                profile=self.profile,
+                update_cache=True
+            )
+            
+            self.trader_logger.debug(
+                f"Balance cache refreshed successfully for {self.profile.name}"
+            )
+            
+        except Exception as e:
+            # Don't fail the trade if cache refresh fails
+            self.trader_logger.warning(
+                f"Failed to refresh balance cache after trade: {e}. "
+                "Cache will be updated on next monitoring cycle."
+            )        
 
 async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK") -> Optional[OrderResponse]:
     """
@@ -648,3 +684,4 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
         return None
 
         """
+    
