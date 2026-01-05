@@ -1,11 +1,7 @@
 TO DO
  # change API to allow buy by percentage
- # If cache isnt up to date, go make live calls
- # Add take profit/stop loss options
- # Add trailing stop loss once certain percent is hit. I.e. Once 5% profit, set a trailing stop loss at 2%
-  #For telegram listener, when sending B , get balance for all profiles or specific profile passed
- # filter out balances for symbols no longer supported
-
+ # For telegram listener, when sending B , get balance for all profiles or specific profile passed
+ 
  No need
  # split into separate modules so i can migrate to Azure
  
@@ -20,3 +16,7 @@ TO DO
   #For profiles, we also need to save balances and portfolio per profile
  # Add profiles support - To trade from multiple accounts
  # Different API keys per profile
+# filter out balances for symbols no longer supported
+# Add trailing stop loss once certain percent is hit. I.e. Once 5% profit, set a trailing stop loss at 2%
+  # Add take profit/stop loss options
+ # If cache isnt up to date, go make live calls

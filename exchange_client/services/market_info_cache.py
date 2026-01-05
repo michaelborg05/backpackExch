@@ -60,16 +60,16 @@ class MarketInfo:
             (is_valid, error_message)
         """
         if quantity < self.min_quantity:
-            return False, f"Quantity {quantity} below minimum {self.min_quantity}"
+            return False, f"Qty {quantity} below min {self.min_quantity}"
         
         if self.max_quantity > 0 and quantity > self.max_quantity:
-            return False, f"Quantity {quantity} exceeds maximum {self.max_quantity}"
+            return False, f"Qty {quantity} exceeds max {self.max_quantity}"
         
         # Check step size compliance
         if self.step_size > 0:
             remainder = quantity % self.step_size
             if remainder != 0:
-                return False, f"Quantity {quantity} does not comply with step size {self.step_size}"
+                return False, f"Qty {quantity} does not comply with step size {self.step_size}"
         
         return True, None
     
@@ -81,10 +81,10 @@ class MarketInfo:
             (is_valid, error_message)
         """
         if price < self.min_price:
-            return False, f"Price {price} below minimum {self.min_price}"
+            return False, f"Price {price} below min {self.min_price}"
         
         if self.max_price > 0 and price > self.max_price:
-            return False, f"Price {price} exceeds maximum {self.max_price}"
+            return False, f"Price {price} exceeds max {self.max_price}"
         
         # Check tick size compliance
         if self.tick_size > 0:

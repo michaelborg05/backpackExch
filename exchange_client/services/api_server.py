@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI):
     
     apiserver_logger.info("API server shutdown complete")
 
-    
+
 app = FastAPI(title="Trading API", lifespan=lifespan)
 
 @app.exception_handler(HTTPException)
@@ -494,11 +494,11 @@ async def tradingview_webhook(
             total_count = len(alert.profiles)
             
             if success_count == total_count:
-                summary = f"✅ Alert Complete: {success_count}/{total_count} profiles succeeded\n"
+                summary = f"✅  {success_count}/{total_count} profiles succeeded\n"
             elif success_count > 0:
-                summary = f"⚠️ Alert Partial Success: {success_count}/{total_count} profiles succeeded\n"
+                summary = f"⚠️ {success_count}/{total_count} profiles succeeded\n"
             else:
-                summary = f"❌ Alert Failed: {success_count}/{total_count} profiles succeeded\n"
+                summary = f"❌ {success_count}/{total_count} profiles succeeded\n"
             summary += f"Symbol: {alert.symbol} | Action: {alert.action.upper()}\n\n"
             
             for result in results:
