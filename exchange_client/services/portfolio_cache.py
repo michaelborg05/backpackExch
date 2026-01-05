@@ -143,7 +143,7 @@ class PortfolioCache:
     def print_portfolio_summary(self, profile_name: str, quote_asset: str = "USDC") -> str:
         portfolio = self.get_portfolio_summary(profile_name, quote_asset)
 
-        result = f"\nPortfolio ({profile_name}) Total: {portfolio.get('total_value')} {quote_asset}\n"
+        result = f"\n<b>({profile_name}) Total: ${portfolio.get('total_value')}</b> {quote_asset}\n"
 
         for asset in portfolio.get("assets", []):
             result += (

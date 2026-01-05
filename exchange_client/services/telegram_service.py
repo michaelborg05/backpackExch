@@ -211,9 +211,9 @@ class TelegramService:
                     for profile in profiles:
                         balances = cache.print_portfolio_summary(profile_name=profile.name)
                         balance_text = (
-                            f"💰 <b>Current Balances for {profile.name}:</b>\n\n{balances}"
+                            f"💰 {balances} "
                             if balances 
-                            else f"❌ No balance data available for {profile.name}"
+                            else f"❌ No balance for {profile.name}"
                         )
                         await bot.send_message(
                             chat_id=chat_id,

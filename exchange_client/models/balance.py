@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import json
 
 class AssetBalance:
@@ -11,6 +11,7 @@ class AssetBalance:
         self.locked = round(Decimal(locked),3) if symbol not in ['BTC', 'ETH'] else Decimal(locked)
         self.staked = round(Decimal(staked),3) if symbol not in ['BTC', 'ETH'] else Decimal(staked)
         self.DUST_THRESHOLD = Decimal("0.0001")
+    
     @property
     def total(self) -> Decimal:
         """Total balance across all states"""
@@ -30,32 +31,59 @@ class AssetBalance:
 class BalanceReader:
     """Class for reading and managing Backpack Exchange balance data"""
     
-    def __init__(self, balance_data: Dict = None):
+    # Define tokens to exclude from balance display (class-level constant)
+    EXCLUDED_TOKENS: Set[str] = {
+        "ZEX", "HONEY","MOBILE", "MOTHER", "POINTS"
+        # Add delisted or unwanted tokens here
+        # Example: "OLDTOKEN", "SCAM", "DEPRECATED"
+    }
+    
+    def __init__(self, balance_data: Dict = None, exclude_tokens: Optional[Set[str]] = None):
         """
         Initialize with balance data dictionary
         
         Args:
             balance_data: Dictionary in Backpack format or None to create empty
+            exclude_tokens: Additional tokens to exclude (beyond EXCLUDED_TOKENS)
         """
         self._balances: Dict[str, AssetBalance] = {}
+        self._raw_balances: Dict = {}
+        
+        # Combine default exclusions with any custom ones
+        self._excluded = self.EXCLUDED_TOKENS.copy()
+        if exclude_tokens:
+            self._excluded.update(exclude_tokens)
+        
         if balance_data:
             self.load_balances(balance_data)
     
     def load_balances(self, balance_data: Dict) -> None:
         """
-        Load balance data from dictionary
+        Load balance data from dictionary with filtering
         
         Args:
             balance_data: Dictionary in Backpack balance format
         """
         self._balances.clear()
+        self._raw_balances = balance_data.copy()
+        
         for symbol, data in balance_data.items():
-            self._balances[symbol] = AssetBalance(
+            # Skip excluded tokens
+            if symbol in self._excluded:
+                continue
+            
+            asset_balance = AssetBalance(
                 symbol=symbol,
                 available=data['available'],
                 locked=data['locked'],
                 staked=data['staked']
             )
+            
+            # Optionally skip zero balances (uncomment if desired)
+            if asset_balance.is_empty:
+                continue
+            
+            self._balances[symbol] = asset_balance
     
     def load_from_json(self, json_string: str) -> None:
         """Load balance data from JSON string"""
@@ -118,8 +146,12 @@ class BalanceReader:
         return balance.available > Decimal(minimum)
     
     def get_all_symbols(self) -> List[str]:
-        """Get list of all asset symbols"""
+        """Get list of all asset symbols (filtered)"""
         return list(self._balances.keys())
+    
+    def get_all_symbols_including_excluded(self) -> List[str]:
+        """Get list of ALL asset symbols including excluded ones"""
+        return list(self._raw_balances.keys())
     
     def get_non_zero_balances(self) -> Dict[str, AssetBalance]:
         """Get all assets with non-zero balances"""
@@ -144,7 +176,7 @@ class BalanceReader:
         return "\n".join(lines)
     
     def to_dict(self) -> Dict:
-        """Convert back to original dictionary format"""
+        """Convert back to dictionary format (filtered balances only)"""
         result = {}
         for symbol, balance in self._balances.items():
             result[symbol] = {
@@ -154,16 +186,39 @@ class BalanceReader:
             }
         return result
     
+    def to_dict_raw(self) -> Dict:
+        """Convert back to dictionary format (including excluded tokens)"""
+        return self._raw_balances.copy()
+    
     def to_json(self, indent: int = 2) -> str:
-        """Convert to JSON string"""
+        """Convert to JSON string (filtered balances only)"""
         return json.dumps(self.to_dict(), indent=indent)
     
+    @classmethod
+    def add_excluded_token(cls, token: str):
+        """Add a token to the global exclusion list"""
+        cls.EXCLUDED_TOKENS.add(token.upper())
+    
+    @classmethod
+    def remove_excluded_token(cls, token: str):
+        """Remove a token from the global exclusion list"""
+        cls.EXCLUDED_TOKENS.discard(token.upper())
+    
+    @classmethod
+    def get_excluded_tokens(cls) -> Set[str]:
+        """Get current list of excluded tokens"""
+        return cls.EXCLUDED_TOKENS.copy()
+    
+    def get_excluded_count(self) -> int:
+        """Get count of excluded tokens in current data"""
+        return sum(1 for symbol in self._raw_balances.keys() if symbol in self._excluded)
+    
     def __len__(self) -> int:
-        """Number of assets"""
+        """Number of assets (filtered)"""
         return len(self._balances)
     
     def __contains__(self, symbol: str) -> bool:
-        """Check if symbol exists in balances"""
+        """Check if symbol exists in balances (filtered)"""
         return symbol.upper() in self._balances
     
     def __getitem__(self, symbol: str) -> AssetBalance:
@@ -171,7 +226,7 @@ class BalanceReader:
         return self._balances[symbol.upper()]
     
     def __iter__(self):
-        """Iterate over asset symbols"""
+        """Iterate over asset symbols (filtered)"""
         return iter(self._balances)
     
     def __str__(self) -> str:
@@ -180,7 +235,7 @@ class BalanceReader:
 
 # Example usage and testing
 def example_usage():
-    """Example of how to use the BalanceReader class"""
+    """Example of how to use the BalanceReader class with filtering"""
     
     # Sample balance data
     sample_data = {
@@ -203,15 +258,23 @@ def example_usage():
             "available": "1250.50",
             "locked": "100.00",
             "staked": "0"
+        },
+        "SCAMTOKEN": {
+            "available": "1000",
+            "locked": "0",
+            "staked": "0"
         }
     }
     
-    # Create balance reader
+    # Add token to global exclusion list
+    BalanceReader.add_excluded_token("SCAMTOKEN")
+    
+    # Create balance reader (SCAMTOKEN will be filtered out)
     balances = BalanceReader(sample_data)
     
     print("=== Balance Reader Example ===\n")
     
-    # Print summary
+    # Print summary (won't include SCAMTOKEN)
     print(balances.summary())
     print()
     
@@ -239,8 +302,8 @@ def example_usage():
         print(f"  {symbol}: Available = {balance.available}")
     print()
     
-    # Convert back to dict/JSON
-    print("=== Convert back to JSON ===")
+    # Convert back to dict/JSON (filtered)
+    print("=== Convert back to JSON (filtered) ===")
     print(balances.to_json())
 
 if __name__ == "__main__":
