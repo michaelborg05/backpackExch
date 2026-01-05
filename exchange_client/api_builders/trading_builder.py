@@ -243,8 +243,8 @@ class TradingService:
         Returns:
             Adjusted and rounded quantity
         """
-        # Apply fee buffer (0.01% for safety)
-        buffered = quantity * Decimal("0.9999")
+        # Apply fee buffer (0.05% for safety)
+        buffered = quantity * Decimal("0.9995")
         
         # Round based on value size
         total_value = buffered * price
