@@ -17,8 +17,8 @@ profiles:
     secret_env: BP_SECRET_15M
     take_profit_pct: 3
     max_risk_pct: 0.25
-    stop_loss_pct: 1
-    trailing_stop_pct: 1
+    stop_loss_pct: 1.7
+    trailing_stop_pct: 2
     use_trailing_stop: true
     max_position_size: 10
     max_risk_pct: 1.0
