@@ -1,4 +1,5 @@
 # api_server.py
+import asyncio
 from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
@@ -123,6 +124,8 @@ async def telegram_webhook_endpoint(request: Request):
     """
     Receives updates from Telegram via webhook.
     This is the endpoint you configure in Telegram.
+    
+    CRITICAL: Returns immediately to avoid Telegram timeout (60s limit)
     """
     if not telegram:
         raise HTTPException(status_code=503, detail="Telegram not configured")
@@ -131,15 +134,19 @@ async def telegram_webhook_endpoint(request: Request):
         # Get the JSON data from Telegram
         update_data = await request.json()
         
-        # Process the update
-        await telegram.process_update(update_data)
+        # ⭐ Process update asynchronously - don't await!
+        # This allows us to return {"ok": True} immediately
+        asyncio.create_task(telegram.process_update(update_data))
         
+        # Return immediately - Telegram requires response within 60 seconds
         return {"ok": True}
     
     except Exception as e:
-        apiserver_logger.error(f"Error processing Telegram webhook: {e}", exc_info=True)
-        return {"ok": False, "error": str(e)}
-
+        apiserver_logger.error(f"Error in Telegram webhook endpoint: {e}", exc_info=True)
+        # Still return ok to Telegram even if we had an error
+        # (otherwise Telegram will retry repeatedly)
+        return {"ok": True}
+    
 #Read only endpoints
 @app.get("/monitoring/status", dependencies=[Depends(require_read_permission)])
 def get_monitoring_status():

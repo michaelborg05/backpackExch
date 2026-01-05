@@ -5,6 +5,7 @@ Hybrid Telegram bot that automatically switches between:
 - Webhook mode (production - with webhook URL)
 """
 import logging
+import asyncio
 from typing import Optional
 from telegram import Bot, Update
 from telegram.ext import (
@@ -151,6 +152,8 @@ class TelegramService:
         """
         Process webhook update (webhook mode only).
         Called by FastAPI endpoint.
+        
+        IMPORTANT: Must respond quickly to avoid Telegram timeout (60s limit)
         """
         if not self._initialized:
             self.logger.warning("Bot not initialized")
@@ -176,65 +179,107 @@ class TelegramService:
             user = update.message.from_user.username or "Unknown"
             self.logger.info(f"[WEBHOOK] Message from {user}: {text}")
             
-            # Process command
-            await self._handle_command(chat_id, text, self.bot)
+            # ⭐ CRITICAL: Process command asynchronously to avoid webhook timeout
+            # Don't await - let it run in background
+            asyncio.create_task(self._handle_command(chat_id, text, self.bot))
+            
+            # Return immediately - Telegram gets quick response
             
         except Exception as e:
             self.logger.error(f"Error processing webhook update: {e}", exc_info=True)
 
+
     async def _handle_command(self, chat_id: int, text: str, bot: Bot):
         """Handle incoming text commands (works for both modes)"""
-        match text.lower():
-            case "ping":
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="🏓 Pong!"
-                )
-
-            case "balance" | "b":
-                cache = get_portfolio_cache()
-                
-                if not self.profile_manager:
-                    self.logger.warning("Profile manager not initialized")
-                    balances = cache.print_portfolio_summary(profile_name="default")
-                    balance_text = (
-                        f"💰 <b>Current Balances:</b>\n\n{balances}"
-                        if balances else "❌ No balance data available"
-                    )
+        try:
+            match text.lower():
+                case "ping":
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=balance_text,
-                        parse_mode="HTML"
+                        text="🏓 Pong!"
                     )
-                else:
-                    profiles = self.profile_manager.get_all_profiles()
-                    for profile in profiles:
-                        balances = cache.print_portfolio_summary(profile_name=profile.name)
-                        balance_text = (
-                            f"💰 {balances} "
-                            if balances 
-                            else f"❌ No balance for {profile.name}"
-                        )
+
+                case "balance" | "b":
+                    # Send "processing" message first
+                    processing_msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text="💰 Fetching balances..."
+                    )
+                    
+                    try:
+                        cache = get_portfolio_cache()
+                        
+                        if not self.profile_manager:
+                            self.logger.warning("Profile manager not initialized")
+                            balances = cache.print_portfolio_summary(profile_name="default")
+                            balance_text = (
+                                f"💰 <b>Current Balances:</b>\n\n{balances}"
+                                if balances else "❌ No balance data available"
+                            )
+                            
+                            # Delete "processing" message and send result
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=balance_text,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            profiles = self.profile_manager.get_all_profiles()
+                            
+                            # Delete "processing" message
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                            
+                            # Send each profile's balance
+                            for profile in profiles:
+                                balances = cache.print_portfolio_summary(profile_name=profile.name)
+                                balance_text = (
+                                    f"💰 {balances}"
+                                    if balances 
+                                    else f"❌ No balance for {profile.name}"
+                                )
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=balance_text,
+                                    parse_mode="HTML"
+                                )
+                    
+                    except Exception as e:
+                        # Delete processing message and show error
+                        try:
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                        except:
+                            pass
+                        
                         await bot.send_message(
                             chat_id=chat_id,
-                            text=balance_text,
-                            parse_mode="HTML"
+                            text=f"❌ Error fetching balances: {str(e)}"
                         )
+                
+                case "mode":
+                    mode = "Webhook" if self.use_webhook else "Polling (Local)"
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"🤖 Bot Mode: <b>{mode}</b>",
+                        parse_mode="HTML"
+                    )
+                            
+                case _:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"Echo: {text}"
+                    )
+        
+        except Exception as e:
+            self.logger.error(f"Error in _handle_command: {e}", exc_info=True)
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"❌ Error processing command: {str(e)}"
+                )
+            except:
+                pass  # Failed to send error message
             
-            case "mode":
-                mode = "Webhook" if self.use_webhook else "Polling (Local)"
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"🤖 Bot Mode: <b>{mode}</b>",
-                    parse_mode="HTML"
-                )
-                    
-            case _:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"Echo: {text}"
-                )
-
     async def send_message(
         self, 
         message: str, 
