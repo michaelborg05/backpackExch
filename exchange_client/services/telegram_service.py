@@ -56,7 +56,7 @@ class TelegramService:
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
     async def initialize(self):
-        """Initialize bot - auto-detects polling vs webhook mode"""
+        """Initialize bot - auto-detects polling vs webhook mode with timeout protection"""
         if self._initialized:
             self.logger.warning("Bot already initialized")
             return
@@ -64,49 +64,71 @@ class TelegramService:
         mode = "WEBHOOK" if self.use_webhook else "POLLING"
         self.logger.info(f"Initializing Telegram bot in {mode} mode...")
         
-        # Build application
-        self.app = ApplicationBuilder().token(self.token).build()
-        self.bot = self.app.bot
-        
-        # Initialize app
-        await self.app.initialize()
-        
-        if self.use_webhook:
-            # === WEBHOOK MODE (Production) ===
-            self.logger.info(f"Setting webhook: {self.webhook_url}")
-            
-            webhook_info = await self.bot.get_webhook_info()
-            
-            if webhook_info.url != self.webhook_url:
-                await self.bot.set_webhook(
-                    url=self.webhook_url,
-                    allowed_updates=["message"],
-                    drop_pending_updates=True
-                )
-                self.logger.info("✅ Webhook configured successfully")
-            else:
-                self.logger.info("✅ Webhook already configured")
-                
-        else:
-            # === POLLING MODE (Local Development) ===
-            self.logger.info("Starting polling mode for local development...")
-            
-            # Add message handler
-            self.app.add_handler(
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND, 
-                    self._handle_message_polling
-                )
+        try:
+            # Build application with connection timeout
+            self.logger.debug("Building Telegram application...")
+            self.app = (
+                ApplicationBuilder()
+                .token(self.token)
+                .connect_timeout(15.0)  # 15 second connection timeout
+                .read_timeout(15.0)     # 15 second read timeout
+                .build()
             )
+            self.bot = self.app.bot
             
-            # Start polling
-            await self.app.start()
-            await self.app.updater.start_polling(drop_pending_updates=True)
+            # Initialize app (this calls bot.get_me() which can timeout)
+            self.logger.debug("Initializing Telegram application...")
+            await self.app.initialize()
             
-            self.logger.info("✅ Polling mode active")
+            if self.use_webhook:
+                # === WEBHOOK MODE (Production) ===
+                self.logger.info(f"Setting webhook: {self.webhook_url}")
+                
+                webhook_info = await self.bot.get_webhook_info()
+                
+                if webhook_info.url != self.webhook_url:
+                    await self.bot.set_webhook(
+                        url=self.webhook_url,
+                        allowed_updates=["message"],
+                        drop_pending_updates=True
+                    )
+                    self.logger.info("✅ Webhook configured successfully")
+                else:
+                    self.logger.info("✅ Webhook already configured")
+                    
+            else:
+                # === POLLING MODE (Local Development) ===
+                self.logger.info("Starting polling mode for local development...")
+                
+                # Add message handler
+                self.app.add_handler(
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND, 
+                        self._handle_message_polling
+                    )
+                )
+                
+                # Start polling
+                await self.app.start()
+                await self.app.updater.start_polling(drop_pending_updates=True)
+                
+                self.logger.info("✅ Polling mode active")
+            
+            self._initialized = True
+            self.logger.info(f"Telegram bot initialization complete ({mode} mode)")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Telegram bot: {e}", exc_info=True)
+            # Clean up partial initialization
+            if self.app:
+                try:
+                    await self.app.shutdown()
+                except:
+                    pass
+            self.app = None
+            self.bot = None
+            raise  # Re-raise to let caller handle
         
-        self._initialized = True
-
     async def shutdown(self):
         """Shutdown the bot"""
         if not self._initialized:

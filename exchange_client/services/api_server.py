@@ -45,24 +45,60 @@ async def lifespan(app: FastAPI):
     global telegram
     
     # Startup
-    apiserver_logger.info("Starting API server lifespan...")    
+    apiserver_logger.info("Starting API server lifespan...")
+    
     # Initialize Telegram if configured
     if config.telegram_bot_token and config.chat_group_id and config.telegram_enabled:
         webhook_url = getattr(config, 'telegram_webhook_url', None)
         apiserver_logger.info("Initializing Telegram bot...")
+        
         telegram = TelegramService(
             token=config.telegram_bot_token,
             allowed_chat_id=config.chat_group_id,
-            webhook_url=webhook_url  # None = polling, URL = webhook
+            webhook_url=webhook_url
         )
         set_telegram(telegram)
         
-        # Initialize the webhook
-        await telegram.initialize()
+        # Try to initialize with retry logic
+        max_retries = 3
+        retry_delay = 5  # seconds
         
-        # Send startup notification
-        mode = "Webhook" if telegram.use_webhook else "Polling (Local)"
-        await telegram.send_message(f"🚀 API Started ({mode} mode)")
+        for attempt in range(max_retries):
+            try:
+                apiserver_logger.info(f"Telegram initialization attempt {attempt + 1}/{max_retries}...")
+                await asyncio.wait_for(telegram.initialize(), timeout=30.0)
+                
+                # Send startup notification
+                mode = "Webhook" if telegram.use_webhook else "Polling (Local)"
+                await telegram.send_message(f"🚀 API Started ({mode} mode)")
+                apiserver_logger.info("Telegram bot initialized successfully")
+                break
+                
+            except asyncio.TimeoutError:
+                apiserver_logger.warning(
+                    f"Telegram initialization timed out (attempt {attempt + 1}/{max_retries})"
+                )
+                if attempt < max_retries - 1:
+                    apiserver_logger.info(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    apiserver_logger.error(
+                        "Telegram initialization failed after all retries. "
+                        "Bot will be disabled but API will continue."
+                    )
+                    telegram = None  # Disable Telegram
+                    
+            except Exception as e:
+                apiserver_logger.error(f"Error initializing Telegram: {e}", exc_info=True)
+                if attempt < max_retries - 1:
+                    apiserver_logger.info(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    apiserver_logger.error(
+                        "Telegram initialization failed after all retries. "
+                        "Bot will be disabled but API will continue."
+                    )
+                    telegram = None  # Disable Telegram
     else:
         apiserver_logger.warning("Telegram not configured - skipping")
     
@@ -71,10 +107,21 @@ async def lifespan(app: FastAPI):
     # Shutdown
     apiserver_logger.info("Shutting down...")
     
-    if telegram:
-        await telegram.send_message("🛑 API Shutting Down")
-        await telegram.shutdown()
+    if telegram and telegram._initialized:
+        try:
+            await asyncio.wait_for(
+                telegram.send_message("🛑 API Shutting Down"),
+                timeout=5.0
+            )
+            await asyncio.wait_for(telegram.shutdown(), timeout=10.0)
+        except asyncio.TimeoutError:
+            apiserver_logger.warning("Telegram shutdown timed out")
+        except Exception as e:
+            apiserver_logger.error(f"Error during Telegram shutdown: {e}")
+    
+    apiserver_logger.info("API server shutdown complete")
 
+    
 app = FastAPI(title="Trading API", lifespan=lifespan)
 
 @app.exception_handler(HTTPException)
