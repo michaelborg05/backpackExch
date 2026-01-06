@@ -25,7 +25,7 @@ from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
 from db.session import SessionLocal
-from db.crud import save_trade, open_position, close_position, get_open_position_for_symbol
+from db.crud import close_positions_fifo, save_trade, open_position, close_position, get_open_position_for_symbol
 from utils.position_calculator import PositionCalculator
 
 class TradingService:
@@ -99,13 +99,13 @@ class TradingService:
                 f"Could not retrieve balance for {profile_name} {base_asset}, proceeding without validation"
             )
             if order_qty is None:
-                raise ValueError(f"Order quantity '{order.quantity}' requires balance data")
+                raise ValueError(f"Order quantity '{order.quantity}' requires balance data",order.quantity, error_type="invalid_quantity")
             order.quantity = str(order_qty)
             return order
         
         # Check sufficient balance
         if available <= 0:
-            raise ValueError(f"No available balance for {base_asset}")
+            raise ValueError(f"No available balance for {base_asset}",available, error_type="invalid_quantity")
         
         # If "MAX", use all available with buffer
         if order_qty is None:
@@ -404,7 +404,7 @@ class TradingService:
         quantity = Decimal(order.quantity)
         
         if quantity <= 0:
-            raise ValueError("Quantity must be greater than zero")
+            raise ValueError("Quantity must be greater than zero",quantity, error_type="invalid_quantity")
         # Round to step size
         rounded_qty = market_info.round_quantity(quantity)
         
@@ -417,7 +417,7 @@ class TradingService:
         # Validate quantity
         is_valid, error_msg = market_info.validate_quantity(quantity)
         if not is_valid:
-            raise ValueError(error_msg)
+            raise ValueError(error_msg, quantity, error_type="invalid_quantity")
 
         order.quantity = str(quantity)
         
@@ -437,8 +437,8 @@ class TradingService:
             # Validate price
             is_valid, error_msg = market_info.validate_price(price)
             if not is_valid:
-                raise ValueError(f"Invalid price: {error_msg}")
-            
+                raise ValueError(f"Invalid price: {error_msg}", price, error_type="invalid_price")
+
             order.price = str(price)
         
         return order
@@ -495,24 +495,36 @@ class TradingService:
                             f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
                         )
                     else:
-                        position_id = get_open_position_for_symbol(db=db, profile_name=self.profile.name,symbol=saved_trade.symbol)
-                        if position_id is None:
+                        from db.crud import close_positions_fifo
+                        
+                        closed_positions = close_positions_fifo(
+                            db=db,
+                            profile_name=self.profile.name,
+                            symbol=saved_trade.symbol,
+                            sell_trade=saved_trade,
+                            reason=source
+                        )
+                        
+                        if not closed_positions:
                             self.trader_logger.warning(
-                                f"No open position found for symbol {saved_trade.symbol} to close"
+                                f"No open positions found for {saved_trade.symbol} to close"
                             )
                         else:
-                            position = close_position(
-                                db=db,
-                                position_id=position_id.id,
-                                sell_trade=saved_trade,
-                                reason=source
-                            )
+                            # Log details of closed positions
+                            total_profit = sum(p['profit'] for p in closed_positions)
                             
-                            self.trader_logger.info(
-                                f"Position closed: ID {position.id}, "
-                                f"Profit/Loss: {position.profit}"
-                            )
-                    
+                            summary = f"Closed {len(closed_positions)} position(s) for {saved_trade.symbol}:\n"
+                            for p in closed_positions:
+                                summary += (
+                                    f"  - Position {p['position_id']}: {p['status']}, "
+                                    f"Qty: {p['closed_quantity']}, "
+                                    f"P/L: ${p['profit']:.2f} ({p['profit_pct']:+.2f}%)\n"
+                                )
+                            summary += f"Total P/L: ${total_profit:.2f}"
+                            
+                            self.trader_logger.info(summary)
+
+                    # Refresh balance cache after trade
                     self._refresh_balance_cache_after_trade(order_response)
 
                 except Exception as db_error:
@@ -635,6 +647,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
+                source=source,
                 profile_name=profile_name,
                 **kwargs
             )
@@ -643,6 +656,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
             return trading.order_sell(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
+                source=source,
                 profile_name=profile_name,
                 **kwargs
             )

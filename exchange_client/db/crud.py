@@ -1,7 +1,8 @@
 # db/crud.py
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from db.models import Trade, Position
@@ -47,6 +48,9 @@ def open_position(
         profile_name=trade.profile_name,
         symbol=trade.symbol,
         buy_trade_id=trade.id,  # Use database Trade ID
+        quantity=Decimal(trade.quantity),  # ⭐ Track quantity
+        remaining_quantity=Decimal(trade.quantity),  # ⭐ Initially equals quantity
+        entry_price=Decimal(trade.price),
         tp_price=tp_price,
         sl_price=sl_price,
         trailing_sl_price=trailing_sl_price,
@@ -146,6 +150,157 @@ def close_invalid_position(
     db.refresh(position)
     return position
 
+
+def close_positions_fifo(
+    db: Session,
+    profile_name: str,
+    symbol: str,
+    sell_trade: Trade,
+    reason: str = "MANUAL"
+) -> List:
+    """
+    Close positions using FIFO matching
+    
+    Args:
+        db: Database session
+        profile_name: Trading profile name
+        symbol: Symbol to close positions for
+        sell_trade: Sell trade that closes positions
+        reason: Reason for closing
+    
+    Returns:
+        List of closed/partially closed positions
+    """
+    
+    
+    # Get open positions for this symbol, ordered by opened_at (FIFO)
+    open_positions = (
+        db.query(Position)
+        .filter(
+            Position.profile_name == profile_name,
+            Position.symbol == symbol,
+            Position.status == 'OPEN',
+            Position.remaining_quantity > 0
+        )
+        .order_by(Position.created_at.asc())  # FIFO: oldest first
+        .all()
+    )
+    
+    if not open_positions:
+        return []
+    
+    # Quantity to close
+    remaining_to_close = Decimal(sell_trade.quantity)
+    closed_positions = []
+    
+    for position in open_positions:
+        if remaining_to_close <= 0:
+            break
+        
+        # How much of this position can we close?
+        close_qty = min(position.remaining_quantity, remaining_to_close)
+        
+        # Calculate profit for this portion
+        entry_price = position.entry_price
+        exit_price = Decimal(sell_trade.price)
+        profit = (exit_price - entry_price) * close_qty
+        profit_pct = ((exit_price - entry_price) / entry_price) * 100
+        
+        # Update position
+        position.remaining_quantity -= close_qty
+        remaining_to_close -= close_qty
+        
+        if position.remaining_quantity <= Decimal('0.00000001'):  # Fully closed
+            position.status = 'CLOSED'
+            position.sell_trade_id = sell_trade.id
+            position.exit_price = exit_price
+            position.profit = profit
+            position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+            position.close_reason = reason
+            
+            closed_positions.append({
+                'position_id': position.id,
+                'status': 'FULLY_CLOSED',
+                'closed_quantity': close_qty,
+                'profit': profit,
+                'profit_pct': profit_pct
+            })
+        else:  # Partially closed
+            # For partial closes, you might want to create a separate record
+            # or just track in the same position
+            closed_positions.append({
+                'position_id': position.id,
+                'status': 'PARTIALLY_CLOSED',
+                'closed_quantity': close_qty,
+                'remaining_quantity': position.remaining_quantity,
+                'profit': profit,
+                'profit_pct': profit_pct
+            })
+    
+    db.commit()
+    
+    return closed_positions
+
+
+def get_open_position_quantity(
+    db: Session,
+    profile_name: str,
+    symbol: str
+) -> Decimal:
+    """
+    Get total open position quantity for a symbol
+    
+    Args:
+        db: Database session
+        profile_name: Profile name
+        symbol: Symbol
+    
+    Returns:
+        Total open quantity
+    """
+    
+    result = (
+        db.query(func.sum(Position.remaining_quantity))
+        .filter(
+            Position.profile_name == profile_name,
+            Position.symbol == symbol,
+            Position.status == 'OPEN'
+        )
+        .scalar()
+    )
+    
+    return result or Decimal('0')
+
+
+def get_open_positions_for_symbol(
+    db: Session,
+    profile_name: str,
+    symbol: str
+) -> List:
+    """
+    Get all open positions for a symbol (FIFO order)
+    
+    Args:
+        db: Database session
+        profile_name: Profile name
+        symbol: Symbol
+    
+    Returns:
+        List of open positions
+    """
+    
+    return (
+        db.query(Position)
+        .filter(
+            Position.profile_name == profile_name,
+            Position.symbol == symbol,
+            Position.status == 'OPEN',
+            Position.remaining_quantity > 0
+        )
+        .order_by(Position.opened_at.asc())
+        .all()
+    )
+
 def get_profile_by_name(db: Session, name: str) -> Optional[TradingProfileDB]:
     """Get a trading profile by name"""
     return db.query(TradingProfileDB).filter(
@@ -216,3 +371,4 @@ def db_profile_to_pydantic(db_profile: TradingProfileDB) -> TradingProfile:
         default_order_size_pct=db_profile.default_order_size_pct,
         max_position_size=db_profile.max_position_size
     )
+

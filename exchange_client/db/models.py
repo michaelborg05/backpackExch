@@ -1,5 +1,5 @@
 # db/models.py
-from sqlalchemy import Column, Integer, String, Numeric, TIMESTAMP, ForeignKey, CheckConstraint, Boolean
+from sqlalchemy import Column, Integer, String, Numeric, TIMESTAMP, ForeignKey, CheckConstraint, Boolean, Index
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from utils.constants import TradeReason, PositionCloseReason
@@ -56,15 +56,23 @@ class Position(Base):
     id = Column(Integer, primary_key=True)
     profile_name = Column(String, index=True)
     symbol = Column(String, nullable=False)
-    buy_trade_id = Column(Integer, ForeignKey("trades.id"))
-    sell_trade_id = Column(Integer, ForeignKey("trades.id"))
-    tp_price = Column(Numeric, nullable=True)
-    sl_price = Column(Numeric, nullable=True)
-    trailing_sl_price = Column(Numeric, nullable=True)
-    highest_price = Column(Numeric(precision=20, scale=8), nullable=True)
-    profit = Column(Numeric(precision=20, scale=8), nullable=True)
+    
+    quantity = Column(Numeric(20, 8), nullable=False)  # Original quantity
+    remaining_quantity = Column(Numeric(20, 8), nullable=False)  # Amount still open
+    
+    buy_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=False)
+    sell_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
+    
+    entry_price = Column(Numeric(20, 8), nullable=False)
+    exit_price = Column(Numeric(20, 8), nullable=True)
+
+    tp_price = Column(Numeric(20, 8), nullable=True)
+    sl_price = Column(Numeric(20, 8), nullable=True)
+    trailing_sl_price = Column(Numeric(20, 8), nullable=True)
+    highest_price = Column(Numeric(20, 8), nullable=True)
+    profit = Column(Numeric(20, 8), nullable=True)
     status = Column(String, nullable=False)
-    status = Column(String, default="OPEN")  # OPEN or CLOSED
+    status = Column(String, default="OPEN")  # OPEN or CLOSED or PARTIALLY_CLOSED
     close_reason = Column(String, nullable=True) 
     created_at = Column(TIMESTAMP, server_default=func.now())
     closed_at = Column(TIMESTAMP)
@@ -74,4 +82,6 @@ class Position(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('OPEN', 'CLOSED')", name="valid_status"),
+        Index('ix_positions_profile_symbol_status', 'profile_name', 'symbol', 'status'),
+        Index('ix_positions_opened_at', 'created_at'),
     )

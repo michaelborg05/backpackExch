@@ -21,7 +21,8 @@ from db.crud import (
     update_position_trailing_stop,
     close_position,
     get_profile_by_name,
-    save_trade
+    save_trade,
+    close_invalid_position
 )
 
 class MonitoringService:
@@ -98,7 +99,7 @@ class MonitoringService:
         self.logger.debug("Monitoring loop starting...")
         self.logger.debug(f"Log level set to {self.config.log_level}")
         validation_counter = 0
-        validation_interval = 10  # Run validation every 10 cycles (e.g., every 5 min if cycle is 30s)
+        validation_interval = 1  # Run validation every 10 cycles (e.g., every 5 min if cycle is 30s)
     
         try:
             while self.is_running:
@@ -266,8 +267,6 @@ class MonitoringService:
         Validate open positions against cached balances.
         Close positions where the token has been sold but position wasn't updated.
         """
-        from db.utils import get_db_session
-        from db.crud import close_invalid_position
 
         profile_manager = get_profile_manager()
         if profile_manager is None:
@@ -298,13 +297,7 @@ class MonitoringService:
                     # Check if we still hold this token (from cache)
                     balance_info = cached_balances.get(base_asset)
                     
-                    # Get the buy trade to check quantity
-                    buy_trade = position.buy_trade
-                    if not buy_trade:
-                        self.logger.warning(f"Position {position.id} has no buy_trade, skipping")
-                        expected_quantity = 0.01
-                    else:
-                        expected_quantity = float(buy_trade.quantity)
+                    expected_quantity = str(position.remaining_quantity)
 
                     # Check if balance is insufficient
                     if balance_info is None:
@@ -347,25 +340,20 @@ class MonitoringService:
         try:
             # Create TradingService instance for this profile
             trading = TradingService(profile)
-            
-            # Get the quantity from the buy trade
-            if not position.buy_trade:
-                self.logger.warning(f"Position {position.id} has no buy_trade, Closing with MAX")
-                quantity = "MAX"
-            else:
-                quantity = str(position.buy_trade.quantity)
-
             symbol = position.symbol
+            
+            quantity = str(position.remaining_quantity)
             
             self.logger.info(
                 f"Executing close order: {symbol} x {quantity} "
                 f"[{profile.name}] Reason: {reason}"
             )
             
+            error_type = ""
             # Execute sell order with "MAX" to ensure we sell everything
             result = trading.order_sell(
                 symbol=symbol,
-                quantity="MAX",  # Use MAX to sell all available
+                quantity=quantity,  # Use MAX to sell all available
                 source=reason,
                 profile_name=profile.name
             )
@@ -410,6 +398,8 @@ class MonitoringService:
                 f"Error executing close order for {position.symbol} [{profile.name}]: {e}",
                 exc_info=True
             )
+            if error_type == "invalid_quantity":
+                close_invalid_position(db, position.id, reason="INVALID_POSITION")
             self._send_telegram(
                 f"❌ Error closing position for {position.symbol} [{profile.name}]: {str(e)}",
                 MessagePriority.HIGH
