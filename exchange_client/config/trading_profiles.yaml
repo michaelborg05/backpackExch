@@ -38,4 +38,17 @@ profiles:
     default_order_size_pct: 20
 
 
+1m_MB:
+    enabled: true
+    api_key_env: BP_API_KEY_1M
+    secret_env: BP_SECRET_1M
+    take_profit_pct: 0.5
+    max_risk_pct: 0.25
+    stop_loss_pct: 1.5
+    trailing_stop_pct: 1.5
+    use_trailing_stop: true
+    max_position_size: 10
+    max_risk_pct: 1.0
+    default_order_size_pct: 20
+
     
