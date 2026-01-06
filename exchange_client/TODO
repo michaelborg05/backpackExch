@@ -1,7 +1,11 @@
 TO DO
  # change API to allow buy by percentage
  # For telegram listener, when sending B , get balance for all profiles or specific profile passed
- 
+ # fix SL/TP override. Its changing the profile for all future alerts
+ # fix up closing invalid positions by reducing to whats left in the account. 
+ # Add dust conversion with the validation loop
+# if we fail to close a position, confirm we close the posiution if it is out of funds
+
  No need
  # split into separate modules so i can migrate to Azure
  
