@@ -38,7 +38,7 @@ profiles:
     default_order_size_pct: 20
 
 
-1m_MB:
+  1m_MB:
     enabled: true
     api_key_env: BP_API_KEY_1M
     secret_env: BP_SECRET_1M
