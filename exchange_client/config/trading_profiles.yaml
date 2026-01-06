@@ -39,7 +39,7 @@ profiles:
 
 
   1m_MB:
-    enabled: false
+    enabled: true
     api_key_env: BP_API_KEY_1M
     secret_env: BP_SECRET_1M
     take_profit_pct: 0.5
