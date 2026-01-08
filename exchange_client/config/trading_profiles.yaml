@@ -25,7 +25,7 @@ profiles:
     default_order_size_pct: 20
 
   1hr_MB:
-    enabled: false
+    enabled: true
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H
     take_profit_pct: 4.0
