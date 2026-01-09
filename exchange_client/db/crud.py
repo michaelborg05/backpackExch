@@ -96,14 +96,11 @@ def close_position(
     position.status = "CLOSED"
     position.close_reason = reason
     position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+    position.exit_price = sell_trade.price
+    position.remaining_quantity = 0
 
     # Calculate profit
-    buy_trade = position.buy_trade
-    
-    if buy_trade and sell_trade:
-        buy_value = buy_trade.quantity * buy_trade.price
-        sell_value = sell_trade.quantity * sell_trade.price
-        position.profit = sell_value - buy_value
+    position.profit = (position.exit_price - position.entry_price) * position.quantity 
     
     db.commit()
     db.refresh(position)
@@ -203,7 +200,7 @@ def close_positions_fifo(
         # Calculate profit for this portion
         entry_price = position.entry_price
         exit_price = Decimal(sell_trade.price)
-        profit = (exit_price - entry_price) * close_qty
+        profit = (exit_price - entry_price) * position.quantity
         profit_pct = ((exit_price - entry_price) / entry_price) * 100
         
         # Update position
