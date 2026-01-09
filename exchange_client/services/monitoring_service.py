@@ -308,7 +308,7 @@ class MonitoringService:
                         current_balance = float(balance_info.get('available', 0))
                     
                     # If balance is zero or less than 1% of expected, position is invalid
-                    if current_balance < (expected_quantity * 0.01):  # 1% threshold
+                    if current_balance < (float(expected_quantity) * 0.01):  # 1% threshold
                         self.logger.warning(
                             f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
                             f"Expected {expected_quantity}, but balance is {current_balance}"
