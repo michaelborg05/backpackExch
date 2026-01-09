@@ -15,13 +15,16 @@ from services.market_info_cache import get_market_info_cache
 from services.telegram_service import get_telegram
 from api_builders.market_builder import get_market_info
 from services.profile_manager import get_profile_manager
+from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
+
 from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
     update_position_trailing_stop,
     close_position,
     get_profile_by_name,
-    save_trade
+    save_trade,
+    close_invalid_position
 )
 
 class MonitoringService:
@@ -266,8 +269,6 @@ class MonitoringService:
         Validate open positions against cached balances.
         Close positions where the token has been sold but position wasn't updated.
         """
-        from db.utils import get_db_session
-        from db.crud import close_invalid_position
 
         profile_manager = get_profile_manager()
         if profile_manager is None:
@@ -298,13 +299,7 @@ class MonitoringService:
                     # Check if we still hold this token (from cache)
                     balance_info = cached_balances.get(base_asset)
                     
-                    # Get the buy trade to check quantity
-                    buy_trade = position.buy_trade
-                    if not buy_trade:
-                        self.logger.warning(f"Position {position.id} has no buy_trade, skipping")
-                        expected_quantity = 0.01
-                    else:
-                        expected_quantity = float(buy_trade.quantity)
+                    expected_quantity = str(position.remaining_quantity)
 
                     # Check if balance is insufficient
                     if balance_info is None:
@@ -347,27 +342,23 @@ class MonitoringService:
         try:
             # Create TradingService instance for this profile
             trading = TradingService(profile)
-            
-            # Get the quantity from the buy trade
-            if not position.buy_trade:
-                self.logger.warning(f"Position {position.id} has no buy_trade, Closing with MAX")
-                quantity = "MAX"
-            else:
-                quantity = str(position.buy_trade.quantity)
-
             symbol = position.symbol
+            
+            quantity = str(position.remaining_quantity)
             
             self.logger.info(
                 f"Executing close order: {symbol} x {quantity} "
                 f"[{profile.name}] Reason: {reason}"
             )
             
+            error_type = ""
             # Execute sell order with "MAX" to ensure we sell everything
             result = trading.order_sell(
                 symbol=symbol,
-                quantity="MAX",  # Use MAX to sell all available
+                quantity=quantity,  # Use MAX to sell all available
                 source=reason,
-                profile_name=profile.name
+                profile_name=profile.name,
+                position_id=str(position.id)
             )
             
             if result:
@@ -404,16 +395,71 @@ class MonitoringService:
                     f"❌ Failed to close position for {symbol} [{profile.name}]",
                     MessagePriority.HIGH
                 )
+
+        except InvalidQuantityError as e:
+            # Handle invalid quantity - likely position has already been closed externally
+            self.logger.warning(
+                f"Invalid quantity when closing {position.symbol} [{profile.name}]: {e.message}. "
+                f"Details: {e.details}"
+            )
+            
+            # Check if quantity rounded to zero - indicates position is already gone
+            if e.details.get('quantity') == 0 or e.details.get('original_quantity', 0) < 0.01:
+                self.logger.info(
+                    f"Closing invalid position {position.id} - quantity too small or already sold"
+                )
+                close_invalid_position(db, position.id, reason="INVALID_QUANTITY")
                 
-        except Exception as e:
+                self._send_telegram(
+                    f"⚠️ Closed invalid position for {position.symbol} [{profile.name}] - "
+                    f"quantity too small or already sold",
+                    MessagePriority.NORMAL
+                )
+            else:
+                # Some other quantity issue
+                self._send_telegram(
+                    f"❌ Invalid quantity for {position.symbol} [{profile.name}]: {e.message}",
+                    MessagePriority.HIGH
+                )
+        
+        except InsufficientBalanceError as e:
+            # Handle insufficient balance
+            self.logger.warning(
+                f"Insufficient balance when closing {position.symbol} [{profile.name}]: {e.message}. "
+                f"Details: {e.details}"
+            )
+            
+            # Close the position as it's invalid
+            close_invalid_position(db, position.id, reason="INSUFFICIENT_BALANCE")
+            
+            self._send_telegram(
+                f"⚠️ Closed invalid position for {position.symbol} [{profile.name}] - "
+                f"insufficient balance (likely sold externally)",
+                MessagePriority.NORMAL
+            )
+        
+        except TradingException as e:
+            # Handle other trading exceptions
             self.logger.error(
-                f"Error executing close order for {position.symbol} [{profile.name}]: {e}",
+                f"Trading error when closing {position.symbol} [{profile.name}]: {e.message}. "
+                f"Type: {e.error_type}, Details: {e.details}",
                 exc_info=True
             )
             self._send_telegram(
-                f"❌ Error closing position for {position.symbol} [{profile.name}]: {str(e)}",
+                f"❌ Error closing position for {position.symbol} [{profile.name}]: {e.message}",
                 MessagePriority.HIGH
-            )    
+            )
+        
+        except Exception as e:
+            # Handle unexpected errors
+            self.logger.error(
+                f"Unexpected error executing close order for {position.symbol} [{profile.name}]: {e}",
+                exc_info=True
+            )
+            self._send_telegram(
+                f"❌ Unexpected error closing position for {position.symbol} [{profile.name}]: {str(e)}",
+                MessagePriority.HIGH
+            )
     
     def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
         """Helper to send Telegram messages from sync context"""
