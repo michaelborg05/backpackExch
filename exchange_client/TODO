@@ -7,6 +7,15 @@ TO DO
 # if we fail to close a position, confirm we close the posiution if it is out of funds
 
  No need
+ # introduce something to avoid down days. Daily trend filter
+#Minimum viable trend filter (simple + effective)
+#Only allow 15m buys if ALL are true:
+#1H close > 1H EMA50
+#1H RSI > 50
+#Last 1H candle is green
+#This alone would likely flip your 25% win rate closer to 35–40%
+
+No need
  # split into separate modules so i can migrate to Azure
  
  DONE
