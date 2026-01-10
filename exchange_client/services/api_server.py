@@ -39,6 +39,99 @@ WEBHOOK_SECRET = config.webhook_secret if hasattr(config, 'webhook_secret') else
 # Global reference to monitoring service (injected from main.py)
 telegram: Optional[TelegramService] = None
 
+def validate_balance_for_trade(
+    alert: TradingViewAlert,
+    profile_name: str,
+    balance_cache,
+    market_info_cache
+) -> tuple[bool, Optional[str]]:
+    """
+    Validate that profile has sufficient balance before attempting trade
+    Only rejects if balance is zero or below market minimum quantity
+    
+    Args:
+        alert: TradingView alert data
+        profile_name: Name of trading profile
+        balance_cache: BalanceCache instance
+        market_info_cache: MarketInfoCache instance
+        
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    
+    # Parse symbol to get base asset
+    #If sell, get first token, if buy get 2nd token
+    try:
+        if alert.action.upper() == "SELL":
+            base_asset = alert.symbol.split('_')[0]
+        else:
+            base_asset = alert.symbol.split('_')[1]
+    except Exception:
+        return True, None  # Let trading_builder handle invalid symbols
+    
+    # Get cached balance
+    available = balance_cache.get_available_balance(
+        profile_name=profile_name,
+        asset=base_asset
+    )
+    
+    # If no balance data, let it proceed (will fail later with proper error)
+    if available is None:
+        apiserver_logger.debug(
+            f"[{profile_name}] No cached balance for {base_asset}, proceeding with trade"
+        )
+        return True, None
+    
+    # Check if balance is zero
+    if available <= 0:
+        error_msg = f"No available balance for {base_asset}"
+        apiserver_logger.warning(f"[{profile_name}] {error_msg}")
+        return False, error_msg
+
+    #if base_asset is USDC (i.e. its a buy), reject if USDC balance below $5 
+    if base_asset == "USDC" and available < 5:
+        error_msg = f"Balance for {base_asset} below $5"
+        apiserver_logger.warning(f"[{profile_name}] {error_msg}")
+        return False, error_msg
+
+    #If buy order and already passed above checks, return true and continue
+    if alert.action.upper() == "BUY":
+        return True, None
+    
+    # Get market info to check minimum quantity
+    market_info = market_info_cache.get_market_info(alert.symbol)
+    
+    if market_info is None:
+        # No market info - let trading_builder handle it
+        apiserver_logger.debug(
+            f"[{profile_name}] No market info for {alert.symbol}, proceeding with trade"
+        )
+        return True, None
+    
+    # Check if available balance is below minimum quantity
+    # This prevents trades that will definitely fail due to market rules
+    if available < market_info.min_quantity:
+        error_msg = (
+            f"Balance too low for {base_asset}. "
+            f"Available: {available}, Minimum: {market_info.min_quantity}"
+        )
+        apiserver_logger.warning(f"[{profile_name}] {error_msg}")
+        return False, error_msg
+    
+    # Check if balance would round to zero due to step size
+    rounded = market_info.round_quantity(available)
+    if rounded == 0:
+        error_msg = (
+            f"Balance too small for {base_asset}. "
+            f"Available: {available} rounds to 0 (step size: {market_info.step_size})"
+        )
+        apiserver_logger.warning(f"[{profile_name}] {error_msg}")
+        return False, error_msg
+    
+    # Balance is sufficient - let trading_builder adjust if needed
+    return True, None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan events - runs on startup and shutdown"""
@@ -318,16 +411,85 @@ def update_tickers(request: UpdateTickersRequest):
 async def place_order(
     request: OrderRequest
 ):
-    trading: TradingService = TradingService()  
-
     """Place an order"""
     try:
+        # Pre-validate balance for SELL orders only if balance is unusable
+        if request.side.lower() == "sell":
+            try:
+                base_asset = request.symbol.split('_')[0]
+                balance_cache = get_balance_cache()
+                market_info_cache = get_market_info_cache()
+                
+                available = balance_cache.get_available_balance(
+                    profile_name="default",  # Adjust if you support profile in OrderRequest
+                    asset=base_asset
+                )
+                
+                # Only reject if balance is zero
+                if available is not None and available <= 0:
+                    error_msg = f"No available balance for {base_asset}"
+                    apiserver_logger.warning(error_msg)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=error_msg
+                    )
+                
+                # Check against market minimum if we have both balance and market info
+                if available is not None:
+                    market_info = market_info_cache.get_market_info(request.symbol)
+                    
+                    if market_info is not None:
+                        # Check if below minimum quantity
+                        if available < market_info.min_quantity:
+                            error_msg = (
+                                f"Balance too low for {base_asset}. "
+                                f"Available: {available}, Minimum: {market_info.min_quantity}"
+                            )
+                            apiserver_logger.warning(error_msg)
+                            raise HTTPException(
+                                status_code=400,
+                                detail=error_msg
+                            )
+                        
+                        # Check if would round to zero
+                        rounded = market_info.round_quantity(available)
+                        if rounded == 0:
+                            error_msg = (
+                                f"Balance too small for {base_asset}. "
+                                f"Available: {available} rounds to 0 (step size: {market_info.step_size})"
+                            )
+                            apiserver_logger.warning(error_msg)
+                            raise HTTPException(
+                                status_code=400,
+                                detail=error_msg
+                            )
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                # If validation fails for any reason, let trading_builder handle it
+                apiserver_logger.debug(f"Balance pre-validation failed: {e}")
+        
+        # Proceed with trade - trading_builder will adjust quantity if needed
+        trading = TradingService()  
+
         if request.side.lower() == "buy":
-            result = trading.order_buy(request.symbol, request.quantity,source=TradeReason.API)
+            result = trading.order_buy(
+                request.symbol, 
+                request.quantity,
+                source=TradeReason.API
+            )
         elif request.side.lower() == "sell":
-            result = trading.order_sell(request.symbol, request.quantity,source=TradeReason.API)
+            result = trading.order_sell(
+                request.symbol, 
+                request.quantity,
+                source=TradeReason.API
+            )
         else:
-            raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
+            raise HTTPException(
+                status_code=400, 
+                detail="Side must be 'buy' or 'sell'"
+            )
         
         if telegram:
             await telegram.send_order_notification(
@@ -340,9 +502,11 @@ async def place_order(
 
         return result.model_dump()
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
+    
 #@app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)
 @app.post("/webhook/tradingview", response_model=WebhookResponse)
 async def tradingview_webhook(
@@ -399,15 +563,19 @@ async def tradingview_webhook(
         )
         
         # Notify via Telegram
-        if telegram:
-            profiles_str = ', '.join(alert.profiles)
-            await telegram.send_message(
-                f"📊 TradingView Alert\n"
-                f"Action: {alert.action.upper()}\n"
-                f"Symbol: {alert.symbol}\n"
-                f"Price: {alert.current_price}\n"
-                f"Profiles: {profiles_str}"
-            )
+        # if telegram:
+        #     profiles_str = ', '.join(alert.profiles)
+        #     await telegram.send_message(
+        #         f"📊 TradingView Alert\n"
+        #         f"Action: {alert.action.upper()}\n"
+        #         f"Symbol: {alert.symbol}\n"
+        #         f"Price: {alert.current_price}\n"
+        #         f"Profiles: {profiles_str}"
+        #     )
+        
+        # Get caches for pre-validation
+        balance_cache = get_balance_cache()
+        market_info_cache = get_market_info_cache()
         
         # Process alert for each profile
         results = []
@@ -415,6 +583,31 @@ async def tradingview_webhook(
         
         for profile_name in alert.profiles:
             try:
+                # Pre-validate balance for SELL orders
+                # Only rejects if balance is 0 or below minimum/step size
+                is_valid, balance_error = validate_balance_for_trade(
+                    alert, 
+                    profile_name, 
+                    balance_cache,
+                    market_info_cache
+                )
+                
+                if not is_valid:
+                    # Skip this profile - balance unusable
+                    apiserver_logger.warning(
+                        f"[{profile_name}] Skipping trade: {balance_error}"
+                    )
+                    
+                    results.append({
+                        "profile": profile_name,
+                        "success": False,
+                        "error": balance_error,
+                        "error_type": "insufficient_balance"
+                    })
+                    errors.append(f"[{profile_name}] {balance_error}")
+                    continue
+                
+                # Balance check passed, proceed with trade
                 profile = profile_manager.get(profile_name)
                 
                 # Override profile settings if provided in alert
@@ -449,9 +642,9 @@ async def tradingview_webhook(
                     source=TradeReason.WEBHOOK,
                     profile_name=profile_name
                 )
+                
                 executed_price = None
                 try:
-                    
                     executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
                     if executed_price < 1:
                         executed_price = round(executed_price, 6)
@@ -477,10 +670,16 @@ async def tradingview_webhook(
                 error_msg = f"[{profile_name}] Error: {str(e)}"
                 apiserver_logger.error(error_msg, exc_info=True)
                 
+                # Check if it's a trading exception with error type
+                error_type = "unknown"
+                if hasattr(e, 'error_type'):
+                    error_type = e.error_type
+                
                 results.append({
                     "profile": profile_name,
                     "success": False,
-                    "error": str(e)
+                    "error": str(e),
+                    "error_type": error_type
                 })
                 errors.append(error_msg)
         
@@ -493,20 +692,29 @@ async def tradingview_webhook(
             success_count = len(successful_profiles)
             total_count = len(alert.profiles)
             
+                 
+            summary  = f"📊 TradingView Alert\n"
+            summary += f"Action: {alert.action.upper()}\n"
+            summary += f"Symbol: {alert.symbol}\n"
+            summary += f"Price: {alert.current_price}\n"
+
             if success_count == total_count:
-                summary = f"✅  {success_count}/{total_count} profiles succeeded\n"
+                summary += f"✅  {success_count}/{total_count} profiles succeeded\n"
             elif success_count > 0:
-                summary = f"⚠️ {success_count}/{total_count} profiles succeeded\n"
+                summary += f"⚠️ {success_count}/{total_count} profiles succeeded\n"
             else:
-                summary = f"❌ {success_count}/{total_count} profiles succeeded\n"
-            summary += f"Symbol: {alert.symbol} | Action: {alert.action.upper()}\n\n"
+                summary += f"❌ {success_count}/{total_count} profiles succeeded\n"
             
             for result in results:
                 profile_name = result['profile']
                 if result['success']:
                     summary += f"✓ {profile_name}: Price: ${result.get('executed_price', 'N/A')}\n"
                 else:
-                    summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
+                    error_type = result.get('error_type', 'unknown')
+                    if error_type == 'insufficient_balance':
+                        summary += f"⊘ {profile_name}: No balance\n"
+                    else:
+                        summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
             
             await telegram.send_message(summary)
         
