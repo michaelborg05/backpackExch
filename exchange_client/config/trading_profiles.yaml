@@ -43,9 +43,9 @@ profiles:
     secret_env: BP_SECRET_1M
     take_profit_pct: 0.5
     max_risk_pct: 0.25
-    stop_loss_pct: 0.5
-    trailing_stop_pct: 0.7
-    use_trailing_stop: true
+    stop_loss_pct: 0.4
+    trailing_stop_pct: 0.5
+    use_trailing_stop: false
     max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
