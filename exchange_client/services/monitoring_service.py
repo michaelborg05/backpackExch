@@ -245,7 +245,7 @@ class MonitoringService:
                         continue
 
                     # TRAILING STOP LOGIC with ARM THRESHOLD
-                    if profile.use_trailing_stop and position.trailing_sl_price:
+                    if profile.use_trailing_stop:
                         # Get the arm threshold (default to 50% of TP if not specified)
                         arm_threshold_pct = float(getattr(
                             profile, 
@@ -258,6 +258,8 @@ class MonitoringService:
                         if not position.trailing_stop_armed and profit_pct >= arm_threshold_pct:
                             # ARM the trailing stop for the first time
                             position.trailing_stop_armed = True
+                            if position.trailing_sl_price is None:
+                                position.trailing_sl_price = float(price) * (1 - arm_threshold_pct / 100)
                             db.commit()
                             
                             self.logger.info(
