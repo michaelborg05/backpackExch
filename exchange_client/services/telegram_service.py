@@ -385,11 +385,11 @@ class TelegramService:
         """Get emoji based on priority"""
         emoji_map = {
             MessagePriority.LOW: "ℹ️",
-            MessagePriority.NORMAL: "📌",
+            MessagePriority.NORMAL: "",
             MessagePriority.HIGH: "⚠️",
             MessagePriority.CRITICAL: "🚨"
         }
-        return emoji_map.get(priority, "📌")
+        return emoji_map.get(priority, "")
     
     # === SYNC WRAPPERS ===
     

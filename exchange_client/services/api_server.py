@@ -562,17 +562,6 @@ async def tradingview_webhook(
             f"for profiles: {', '.join(alert.profiles)}"
         )
         
-        # Notify via Telegram
-        # if telegram:
-        #     profiles_str = ', '.join(alert.profiles)
-        #     await telegram.send_message(
-        #         f"📊 TradingView Alert\n"
-        #         f"Action: {alert.action.upper()}\n"
-        #         f"Symbol: {alert.symbol}\n"
-        #         f"Price: {alert.current_price}\n"
-        #         f"Profiles: {profiles_str}"
-        #     )
-        
         # Get caches for pre-validation
         balance_cache = get_balance_cache()
         market_info_cache = get_market_info_cache()
@@ -691,20 +680,24 @@ async def tradingview_webhook(
         if telegram:
             success_count = len(successful_profiles)
             total_count = len(alert.profiles)
-            
-                 
-            summary  = f"📊 TradingView Alert\n"
-            summary += f"Action: {alert.action.upper()}\n"
-            summary += f"Symbol: {alert.symbol}\n"
-            summary += f"Price: {alert.current_price}\n"
 
+            action_icon = "🟢" if alert.action.lower() == "buy" else "🔴"
             if success_count == total_count:
-                summary += f"✅  {success_count}/{total_count} profiles succeeded\n"
+                success_icon = "✅"
             elif success_count > 0:
-                summary += f"⚠️ {success_count}/{total_count} profiles succeeded\n"
+                success_icon = "⚠️"
             else:
-                summary += f"❌ {success_count}/{total_count} profiles succeeded\n"
-            
+                success_icon = "❌"
+
+            summary = ( 
+                f"{action_icon}{success_icon} TradingView Alert\n" 
+                f"Action: {alert.action.upper()}\n"
+                f"Symbol: {alert.symbol}\n"
+                f"Price: {alert.current_price}\n"
+                f"{success_icon} {success_count}/{total_count} profiles succeeded\n"
+            )
+
+            no_balance_count = 0
             for result in results:
                 profile_name = result['profile']
                 if result['success']:
@@ -712,12 +705,14 @@ async def tradingview_webhook(
                 else:
                     error_type = result.get('error_type', 'unknown')
                     if error_type == 'insufficient_balance':
+                        no_balance_count += 1
                         summary += f"⊘ {profile_name}: No balance\n"
                     else:
                         summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
-            
-            await telegram.send_message(summary)
-        
+            #If all profiles have no balance, don't bother sending a message
+            if no_balance_count != len(results):
+                await telegram.send_message(summary)
+
         # Build response message
         if overall_success:
             if errors:
