@@ -225,6 +225,10 @@ class MonitoringService:
                         continue
 
                     price = float(price)
+                    entry_price = float(position.entry_price)
+
+                    # Calculate current profit percentage
+                    profit_pct = ((price - entry_price) / entry_price) * 100
 
                     # TAKE PROFIT
                     if position.tp_price and price >= float(position.tp_price):
@@ -240,30 +244,74 @@ class MonitoringService:
                         self._execute_close(db, position, profile, reason="STOP_LOSS")
                         continue
 
-                    # TRAILING STOP LOGIC
+                    # TRAILING STOP LOGIC with ARM THRESHOLD
                     if profile.use_trailing_stop and position.trailing_sl_price:
-                        highest = float(position.highest_price or 0)
-
-                        if price > highest:
-                            new_high = price
-                            trailing_pct = float(profile.trailing_stop_pct)
-                            new_trailing_sl = new_high * (1 - trailing_pct / 100)
-
-                            update_position_trailing_stop(
-                                db,
-                                position.id,
-                                highest_price=new_high,
-                                trailing_sl_price=new_trailing_sl,
+                        # Get the arm threshold (default to 50% of TP if not specified)
+                        arm_threshold_pct = getattr(
+                            profile, 
+                            'arm_trailing_stop_pct', 
+                            float(profile.take_profit_pct) * 0.5
+                        )
+                        
+                        # Check if trailing stop should be armed
+                        # Once armed, it stays armed for the life of the position
+                        if not position.trailing_stop_armed and profit_pct >= arm_threshold_pct:
+                            # ARM the trailing stop for the first time
+                            position.trailing_stop_armed = True
+                            db.commit()
+                            
+                            self.logger.info(
+                                f"🎣 Trailing stop ARMED for {symbol} at {profit_pct:.2f}% profit "
+                                f"(threshold: {arm_threshold_pct:.2f}%) [{profile.name}]"
                             )
+                            #self._send_telegram(
+                            #    f"🎣 Trailing stop ARMED for {symbol} at {profit_pct:.2f}% profit [{profile.name}]",
+                            #    MessagePriority.NORMAL
+                            #)
+                        
+                        # Only process trailing stop logic if it's been armed
+                        if position.trailing_stop_armed:
+                            highest = float(position.highest_price or 0)
 
-                            self.logger.debug(
-                                f"Updated trailing SL for {symbol}: {new_trailing_sl:.4f} [{profile.name}]"
-                            )
-                        elif price <= float(position.trailing_sl_price):
-                            self.logger.info(f"Trailing SL hit for {symbol} @ {price} [{profile.name}]")
-                            self._send_telegram(f"📉 Trailing SL hit for {symbol} @ {price} [{profile.name}]")
-                            self._execute_close(db, position, profile, reason="TRAILING_STOP")
+                            # Update highest price and trailing stop if new high
+                            if price > highest:
+                                new_high = price
+                                trailing_pct = float(profile.trailing_stop_pct)
+                                new_trailing_sl = new_high * (1 - trailing_pct / 100)
 
+                                update_position_trailing_stop(
+                                    db,
+                                    position.id,
+                                    highest_price=new_high,
+                                    trailing_sl_price=new_trailing_sl,
+                                )
+
+                                self.logger.debug(
+                                    f"Updated trailing SL for {symbol}: {new_trailing_sl:.4f} "
+                                    f"(profit: {profit_pct:.2f}%) [{profile.name}]"
+                                )
+                            
+                            # Check if trailing stop was hit
+                            elif price <= float(position.trailing_sl_price):
+                                self.logger.info(
+                                    f"Trailing SL hit for {symbol} @ {price} "
+                                    f"(profit: {profit_pct:.2f}%) [{profile.name}]"
+                                )
+                                self._send_telegram(
+                                    f"📉 Trailing SL hit for {symbol} @ {price} "
+                                    f"(profit: {profit_pct:+.2f}%) [{profile.name}]"
+                                )
+                                self._execute_close(db, position, profile, reason="TRAILING_STOP")
+                        else:
+                            # Trailing stop not armed yet - log if price is close
+                            remaining_to_arm = arm_threshold_pct - profit_pct
+                            if remaining_to_arm < 0.2:  # Log when within 0.2% of arming
+                                self.logger.debug(
+                                    f"Trailing SL not armed for {symbol}: "
+                                    f"need {arm_threshold_pct:.2f}% profit, "
+                                    f"current: {profit_pct:.2f}% [{profile.name}]"
+                                )
+                                
     def _validate_open_positions(self):
         """
         Validate open positions against cached balances.

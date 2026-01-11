@@ -68,6 +68,7 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             take_profit_pct=float(cfg.get("take_profit_pct", 0)),
             stop_loss_pct=float(cfg.get("stop_loss_pct", 0)),
             trailing_stop_pct=float(cfg.get("trailing_stop_pct", 0)),
+            arm_trailing_stop_pct=float(cfg.get("arm_trailing_stop_pct", 0)),
             use_trailing_stop=cfg.get("use_trailing_stop", False),
             max_position_size=float(cfg.get("max_position_size", 0)),
         )

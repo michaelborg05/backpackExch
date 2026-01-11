@@ -70,6 +70,9 @@ class Position(Base):
     sl_price = Column(Numeric(20, 8), nullable=True)
     trailing_sl_price = Column(Numeric(20, 8), nullable=True)
     highest_price = Column(Numeric(20, 8), nullable=True)
+
+    trailing_stop_armed = Column(Boolean, default=False)
+        
     profit = Column(Numeric(20, 8), nullable=True)
     status = Column(String, nullable=False)
     status = Column(String, default="OPEN")  # OPEN or CLOSED or PARTIALLY_CLOSED
