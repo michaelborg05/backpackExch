@@ -2,7 +2,6 @@ TO DO
  # change API to allow buy by percentage
  # fix SL/TP override. Its changing the profile for all future alerts
  # Add dust conversion with the validation loop
-# Add arming of trailing stop only after x percent profit
  # introduce something to avoid down days. Daily trend filter
 #Minimum viable trend filter (simple + effective)
 #Only allow 15m buys if ALL are true:
@@ -15,6 +14,7 @@ No need
  # split into separate modules so i can migrate to Azure
  
  DONE
+# Add arming of trailing stop only after x percent profit
 # if we fail to close a position, confirm we close the posiution if it is out of funds
  # fix up closing invalid positions by reducing to whats left in the account.
  # For telegram listener, when sending B , get balance for all profiles or specific profile passed

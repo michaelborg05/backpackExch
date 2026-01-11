@@ -11,27 +11,41 @@ profiles:
     use_trailing_stop: true
     max_position_size: 25
     default_order_size_pct: 25
+    # Trend filter disabled
+    use_trend_filter: false
 
   15m_MB:
     enabled: false
     api_key_env: BP_API_KEY_15M
     secret_env: BP_SECRET_15M
     take_profit_pct: 1.2
-    max_risk_pct: 0.25
-    stop_loss_pct: 0.8
+    stop_loss_pct: 0.7
     trailing_stop_pct: 0.8
-    arm_trailing_stop_pct: 0.6
+    arm_trailing_stop_pct: 0.7
     use_trailing_stop: true
+    max_risk_pct: 0.25
     max_position_size: 10
-    max_risk_pct: 1.0
     default_order_size_pct: 20
+    # Trend filter settings
+    use_trend_filter: false
+    trend_timeframe: "1h"  # Check 1H trend for 15m trades
+    trend_indicators:
+      - type: "ema_alignment"
+        params: {fast: 20, slow: 50}
+        weight: 1  # Optional: give more weight to certain indicators
+      - type: "rsi_threshold"
+        params: {period: 14, min_value: 50}
+        weight: 1
+      - type: "price_vs_vwap"
+        params: {}
+        weight: 1
+    min_indicators_required: 2  # Need 2/3 indicators bullish
 
   1hr_MB:
     enabled: false
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H
     take_profit_pct: 2
-    max_risk_pct: 0.25
     stop_loss_pct: 2.0
     trailing_stop_pct: 2.0
     arm_trailing_stop_pct: 1
@@ -39,13 +53,23 @@ profiles:
     max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
+    # Trend filter settings - more conservative (all must pass)
+    use_trend_filter: false
+    trend_timeframe: "4h"  # Check 4H trend for 1H trades
+    trend_indicators:
+      - type: "ema_alignment"
+        params: {fast: 20, slow: 50}
+      - type: "rsi_threshold"
+        params: {period: 14, min_value: 50}
+      - type: "price_vs_vwap"
+        params: {}
+    min_indicators_required: 3  # All 3 must be bullish (more conservative)
 
   1m_MB:
     enabled: true
     api_key_env: BP_API_KEY_1M
     secret_env: BP_SECRET_1M
     take_profit_pct: 0.5
-    max_risk_pct: 0.25
     stop_loss_pct: 0.4
     trailing_stop_pct: 0.5
     arm_trailing_stop_pct: 0.3
@@ -53,5 +77,6 @@ profiles:
     max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
-
+    # No trend filter for scalping
+    use_trend_filter: false
     

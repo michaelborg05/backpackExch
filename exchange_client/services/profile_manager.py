@@ -53,11 +53,49 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         if not cfg.get("enabled", False):
             skipped_profiles.append(name)
             continue
+            
         api_key = os.getenv(cfg["api_key_env"])
         secret = os.getenv(cfg["secret_env"])
 
         if not api_key or not secret:
             raise RuntimeError(f"Missing env vars for profile '{name}'")
+
+        # Load trend filter configuration
+        use_trend_filter = cfg.get("use_trend_filter", False)
+        trend_timeframe = cfg.get("trend_timeframe", "1h")
+        trend_indicators = cfg.get("trend_indicators", None)
+        min_indicators_required = cfg.get("min_indicators_required", 2)
+        
+        # Validate trend indicators if trend filter is enabled
+        if use_trend_filter and trend_indicators:
+            # Ensure trend_indicators is a list
+            if not isinstance(trend_indicators, list):
+                print(f"WARNING: Profile '{name}' has invalid trend_indicators format, disabling trend filter")
+                use_trend_filter = False
+                trend_indicators = None
+            else:
+                # Validate each indicator config
+                valid_indicators = []
+                for indicator in trend_indicators:
+                    if isinstance(indicator, dict) and "type" in indicator:
+                        valid_indicators.append(indicator)
+                    else:
+                        print(f"WARNING: Profile '{name}' has invalid indicator config: {indicator}")
+                
+                if len(valid_indicators) == 0:
+                    print(f"WARNING: Profile '{name}' has no valid indicators, disabling trend filter")
+                    use_trend_filter = False
+                    trend_indicators = None
+                else:
+                    trend_indicators = valid_indicators
+                    
+                    # Adjust min_indicators_required if it exceeds available indicators
+                    if min_indicators_required > len(trend_indicators):
+                        print(
+                            f"WARNING: Profile '{name}' min_indicators_required ({min_indicators_required}) "
+                            f"exceeds available indicators ({len(trend_indicators)}), adjusting to {len(trend_indicators)}"
+                        )
+                        min_indicators_required = len(trend_indicators)
 
         profiles[name] = TradingProfile(
             name=name,
@@ -71,12 +109,29 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             arm_trailing_stop_pct=float(cfg.get("arm_trailing_stop_pct", 0)),
             use_trailing_stop=cfg.get("use_trailing_stop", False),
             max_position_size=float(cfg.get("max_position_size", 0)),
+            # NEW: Trend filter fields
+            use_trend_filter=use_trend_filter,
+            trend_timeframe=trend_timeframe,
+            trend_indicators=trend_indicators,
+            min_indicators_required=min_indicators_required,
         )
-    print(f"Loaded {len(profiles)} enabled profiles from YAML")
+        
+        # Log trend filter status for this profile
+        if use_trend_filter:
+            indicator_types = [ind.get("type") for ind in (trend_indicators or [])]
+            print(
+                f"  └─ {name}: Trend filter ENABLED on {trend_timeframe} "
+                f"({min_indicators_required}/{len(trend_indicators)} required: {', '.join(indicator_types)})"
+            )
+        else:
+            print(f"  └─ {name}: Trend filter DISABLED")
+    
+    print(f"\nLoaded {len(profiles)} enabled profiles from YAML")
     if skipped_profiles:
         print(f"Skipped {len(skipped_profiles)} disabled profiles: {', '.join(skipped_profiles)}")
     
     return ProfileManager(profiles)
+
 # Global instance
 _profile_manager = None
 
@@ -88,5 +143,3 @@ def set_profile_manager(pm: ProfileManager):
 def get_profile_manager() -> ProfileManager:
     """Get the global profile manager instance"""
     return _profile_manager
-
-

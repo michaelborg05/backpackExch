@@ -15,6 +15,8 @@ from services.balance_cache import get_balance_cache
 from services.telegram_service import TelegramService, set_telegram, get_telegram
 from services.market_info_cache import get_market_info_cache
 from services.portfolio_cache import get_portfolio_cache
+from models.webhook import TrendUpdateAlert, TrendData
+from services.trend_service import get_trend_cache
 from utils.config import Config
 from utils.logging import log_manager
 from utils.constants import TradeReason
@@ -29,6 +31,7 @@ from utils.security import (
 from db.session import SessionLocal 
 from db.crud import save_trade, open_position, close_position
 from decimal import Decimal
+from time import time
 
 db = SessionLocal()
 config = Config()
@@ -565,7 +568,8 @@ async def tradingview_webhook(
         # Get caches for pre-validation
         balance_cache = get_balance_cache()
         market_info_cache = get_market_info_cache()
-        
+        trend_cache = get_trend_cache()
+
         # Process alert for each profile
         results = []
         errors = []
@@ -598,7 +602,36 @@ async def tradingview_webhook(
                 
                 # Balance check passed, proceed with trade
                 profile = profile_manager.get(profile_name)
-                
+
+                if alert.action.lower() == "buy" and profile.use_trend_filter:
+                    apiserver_logger.debug(
+                        f"[{profile_name}] Checking trend filter: {profile.get_trend_config_summary()}"
+                    )
+                    
+                    is_bullish, reason = trend_cache.is_bullish(
+                        symbol=alert.symbol,
+                        timeframe=profile.trend_timeframe,
+                        indicators_config=profile.trend_indicators,
+                        min_indicators_required=profile.min_indicators_required
+                    )
+                    
+                    if not is_bullish:
+                        apiserver_logger.info(
+                            f"[{profile_name}] ⊘ Skipping BUY - Trend filter: {reason}"
+                        )
+                        results.append({
+                            "profile": profile_name,
+                            "success": False,
+                            "error": f"Trend not bullish: {reason}",
+                            "error_type": "trend_filter"
+                        })
+                        errors.append(f"[{profile_name}] Trend filter blocked trade")
+                        continue  # Skip this profile
+                    else:
+                        apiserver_logger.info(
+                            f"[{profile_name}] ✓ Trend check passed: {reason}"
+                        )
+                  
                 # Override profile settings if provided in alert
                 if alert.take_profit:
                     apiserver_logger.info(
@@ -681,6 +714,10 @@ async def tradingview_webhook(
             success_count = len(successful_profiles)
             total_count = len(alert.profiles)
 
+            # Count different types of failures
+            trend_filtered = sum(1 for r in results if r.get("error_type") == "trend_filter")
+            no_balance = sum(1 for r in results if r.get("error_type") == "insufficient_balance")
+
             action_icon = "🟢" if alert.action.lower() == "buy" else "🔴"
             if success_count == total_count:
                 success_icon = "✅"
@@ -697,7 +734,6 @@ async def tradingview_webhook(
                 f"{success_icon} {success_count}/{total_count} profiles succeeded\n"
             )
 
-            no_balance_count = 0
             for result in results:
                 profile_name = result['profile']
                 if result['success']:
@@ -705,12 +741,15 @@ async def tradingview_webhook(
                 else:
                     error_type = result.get('error_type', 'unknown')
                     if error_type == 'insufficient_balance':
-                        no_balance_count += 1
                         summary += f"⊘ {profile_name}: No balance\n"
+                    elif error_type == 'trend_filter':
+                        summary += f"⊘ {profile_name}: Trend bearish\n"
                     else:
                         summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
-            #If all profiles have no balance, don't bother sending a message
-            if no_balance_count != len(results):
+
+            # Only send if at least one profile succeeded OR if failures aren't just balance/trend issues
+            if (no_balance + trend_filtered) < total_count:
+            #if success_count > 0 or (trend_filtered > 0 and trend_filtered != total_count):
                 await telegram.send_message(summary)
 
         # Build response message
@@ -731,7 +770,8 @@ async def tradingview_webhook(
                 "symbol": alert.symbol,
                 "profiles_attempted": alert.profiles,
                 "successful_count": len(successful_profiles),
-                "failed_count": len(errors)
+                "failed_count": len(errors),
+                "trend_filtered_count": trend_filtered if 'trend_filtered' in locals() else 0
             }
         )
         
@@ -801,4 +841,69 @@ def get_all_markets_endpoint():
     return {
         "markets": {symbol: info.to_dict() for symbol, info in markets.items()},
         "cache_info": cache.get_cache_info()
+    }
+
+@app.post("/webhook/tradingview/trend")
+async def tradingview_trend_webhook(alert: TrendUpdateAlert):
+    """
+    Receive trend updates from TradingView
+    
+    This endpoint receives periodic updates (e.g., every 5min) with
+    trend indicator values (EMA, RSI, VWAP) for multiple symbols
+    """
+    try:
+        # Validate secret
+        if alert.secret != WEBHOOK_SECRET:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+        
+        apiserver_logger.info(
+            f"Received trend update for {len(alert.trends)} symbol(s)"
+        )
+        
+        # Update trend cache
+        trend_cache = get_trend_cache()
+        
+        for trend_data in alert.trends:
+            trend_cache.update(trend_data)
+        
+        return {
+            "success": True,
+            "message": f"Updated trends for {len(alert.trends)} symbol(s)",
+            "cache_info": trend_cache.get_cache_info()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error processing trend update: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/trend/{symbol}/{timeframe}")
+async def get_trend_status(symbol: str, timeframe: str):
+    """Get current trend status for a symbol"""
+    trend_cache = get_trend_cache()
+    trend = trend_cache.get(symbol, timeframe)
+    
+    if not trend:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No trend data for {symbol} ({timeframe})"
+        )
+    
+    is_bullish, reason = trend_cache.is_bullish(symbol, timeframe)
+    
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "is_bullish": is_bullish,
+        "reason": reason,
+        "data": {
+            "ema20": trend.ema20,
+            "ema50": trend.ema50,
+            "rsi": trend.rsi,
+            "vwap": trend.vwap,
+            "price": trend.price,
+            "age_seconds": time.time() - (trend.timestamp or 0)
+        }
     }

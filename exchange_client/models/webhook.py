@@ -8,7 +8,7 @@ class TradingViewAction(str, Enum):
     CLOSE = "close"
     CLOSE_LONG = "close_long"
     CLOSE_SHORT = "close_short"
-
+    TREND_UPDATE = "trend_update"
 
 class TradingViewAlert(BaseModel):
     """Model for TradingView webhook alert"""
@@ -92,3 +92,28 @@ class WebhookResponse(BaseModel):
     message: str
     results: List[dict] = Field(default_factory=list, description="Results per profile")
     details: Optional[dict] = None
+
+class TrendData(BaseModel):
+    """Trend indicator data from TradingView"""
+    symbol: str
+    timeframe: str  # e.g., "1h", "4h"
+    ema20: float
+    ema50: float
+    rsi: float
+    vwap: float
+    price: float
+    timestamp: Optional[float] = None
+    
+    def is_bullish(self, min_rsi: float = 50) -> bool:
+        """Quick check if trend is bullish"""
+        return (
+            self.ema20 > self.ema50 and 
+            self.rsi > min_rsi and 
+            self.price > self.vwap
+        )
+
+class TrendUpdateAlert(BaseModel):
+    """Alert from TradingView trend monitor"""
+    action: str = Field(default="trend_update")
+    secret: str
+    trends: List[TrendData]  # Can send multiple symbols at once
