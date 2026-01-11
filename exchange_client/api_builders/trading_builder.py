@@ -533,6 +533,17 @@ class TradingService:
                                     sell_trade=saved_trade,
                                     reason=source
                                 )
+
+                                closed_positions = [{
+                                    'position_id': closed_position.id,
+                                    'status': 'FULLY_CLOSED',
+                                    'closed_quantity': closed_position.quantity,
+                                    'profit': closed_position.profit,
+                                    'profit_pct': (
+                                        (closed_position.exit_price - closed_position.entry_price)
+                                        / closed_position.entry_price
+                                    ) * 100
+                                }]                                
                                 
                                 # Calculate P/L for logging
                                 entry_price = closed_position.entry_price
