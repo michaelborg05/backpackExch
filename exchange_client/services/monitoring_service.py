@@ -247,11 +247,11 @@ class MonitoringService:
                     # TRAILING STOP LOGIC with ARM THRESHOLD
                     if profile.use_trailing_stop and position.trailing_sl_price:
                         # Get the arm threshold (default to 50% of TP if not specified)
-                        arm_threshold_pct = getattr(
+                        arm_threshold_pct = float(getattr(
                             profile, 
                             'arm_trailing_stop_pct', 
                             float(profile.take_profit_pct) * 0.5
-                        )
+                        ))
                         
                         # Check if trailing stop should be armed
                         # Once armed, it stays armed for the life of the position
