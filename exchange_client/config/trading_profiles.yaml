@@ -28,7 +28,7 @@ profiles:
     default_order_size_pct: 20
     # Trend filter settings
     use_trend_filter: true
-    trend_timeframe: "1h"  # Check 1H trend for 15m trades
+    trend_timeframe: "60"  # Check 1H trend for 15m trades
     trend_indicators:
       - type: "ema_alignment"
         params: {fast: 20, slow: 50}
