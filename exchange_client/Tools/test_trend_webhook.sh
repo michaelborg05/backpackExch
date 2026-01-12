@@ -6,10 +6,10 @@ curl -X POST http://localhost:8000/webhook/tradingview/trend \
     "trends": [{
       "symbol": "SOL_USDC",
       "timeframe": "1h",
-      "ema20": 142.50,
-      "ema50": 141.20,
-      "rsi": 58.5,
-      "vwap": 140.90,
-      "price": 142.80
+      "ema20": 139.26,
+      "ema50": 137.97,
+      "rsi": 73.3,
+      "vwap": 141.57,
+      "price": 142.62
     }]
   }'

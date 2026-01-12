@@ -27,7 +27,7 @@ profiles:
     max_position_size: 10
     default_order_size_pct: 20
     # Trend filter settings
-    use_trend_filter: false
+    use_trend_filter: true
     trend_timeframe: "1h"  # Check 1H trend for 15m trades
     trend_indicators:
       - type: "ema_alignment"

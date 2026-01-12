@@ -55,12 +55,18 @@ class TelegramService:
         logging.getLogger("telegram").setLevel(logging.WARNING)
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._shutting_down = False
+
     async def initialize(self):
         """Initialize bot - auto-detects polling vs webhook mode with timeout protection"""
         if self._initialized:
             self.logger.warning("Bot already initialized")
             return
         
+        # Store reference to the main event loop
+        self._main_loop = asyncio.get_running_loop()
+
         mode = "WEBHOOK" if self.use_webhook else "POLLING"
         self.logger.info(f"Initializing Telegram bot in {mode} mode...")
         
@@ -131,6 +137,8 @@ class TelegramService:
         
     async def shutdown(self):
         """Shutdown the bot"""
+        self._shutting_down = True
+
         if not self._initialized:
             return
         
@@ -145,6 +153,7 @@ class TelegramService:
             await self.app.shutdown()
         
         self._initialized = False
+        self._main_loop = None
         self.logger.info("Telegram bot shut down")
 
     async def _handle_message_polling(
@@ -400,46 +409,42 @@ class TelegramService:
         parse_mode: str = "HTML"
     ) -> bool:
         """
-        Synchronous wrapper for send_message.
-        Works from any thread, including background monitoring threads.
+        Thread-safe synchronous wrapper for send_message.
+        Schedules the coroutine on the MAIN event loop (where bot was initialized).
         """
+        if not self._initialized or self._shutting_down:
+            self.logger.debug("Telegram not ready - skipping message")
+            return False
+        
+        if not self._main_loop:
+            self.logger.warning("Main event loop not available")
+            return False
+        
         try:
-            import asyncio
-            import threading
+            # Schedule the coroutine on the main event loop (thread-safe)
+            future = asyncio.run_coroutine_threadsafe(
+                self.send_message(message, priority, parse_mode),
+                self._main_loop
+            )
             
-            # Try to get current event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context - create task
-                asyncio.create_task(self.send_message(message, priority, parse_mode))
-                return True
-            except RuntimeError:
-                # No running loop - we're in a sync context
-                # Create new event loop in a separate thread
-                result = [False]  # Use list to allow modification in thread
-                
-                def run_in_thread():
-                    try:
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            result[0] = new_loop.run_until_complete(
-                                self.send_message(message, priority, parse_mode)
-                            )
-                        finally:
-                            new_loop.close()
-                    except Exception as e:
-                        self.logger.error(f"Error in telegram thread: {e}")
-                
-                thread = threading.Thread(target=run_in_thread, daemon=True)
-                thread.start()
-                thread.join(timeout=5)  # Wait max 5 seconds
-                return result[0]
-                
+            # Wait for result with timeout
+            result = future.result(timeout=5.0)
+            return result
+            
+        except TimeoutError:
+            self.logger.warning("Telegram send timed out (5s)")
+            return False
+        except RuntimeError as e:
+            if "Event loop is closed" in str(e):
+                self.logger.debug("Event loop closed - skipping message")
+                self._shutting_down = True  # Mark as shutting down
+            else:
+                self.logger.error(f"Runtime error in send_message_sync: {e}")
+            return False
         except Exception as e:
             self.logger.error(f"Error in send_message_sync: {e}")
             return False
-            
+    
     def send_error_notification_sync(
         self, 
         error_type: str,
@@ -447,23 +452,28 @@ class TelegramService:
         endpoint: Optional[str] = None,
         details: Optional[dict] = None
     ) -> bool:
-        """Synchronous wrapper for send_error_notification"""
+        """Thread-safe synchronous wrapper for send_error_notification"""
+        if not self._initialized or self._shutting_down:
+            return False
+        
+        if not self._main_loop:
+            return False
+        
         try:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.create_task(
-                    self.send_error_notification(error_type, error_message, endpoint, details)
-                )
-                return True
-            except RuntimeError:
-                return asyncio.run(
-                    self.send_error_notification(error_type, error_message, endpoint, details)
-                )
+            future = asyncio.run_coroutine_threadsafe(
+                self.send_error_notification(error_type, error_message, endpoint, details),
+                self._main_loop
+            )
+            
+            result = future.result(timeout=5.0)
+            return result
+            
+        except TimeoutError:
+            self.logger.warning("Error notification send timed out")
+            return False
         except Exception as e:
             self.logger.error(f"Error in send_error_notification_sync: {e}")
             return False
-
 
 # Global instance
 _telegram: Optional[TelegramService] = None

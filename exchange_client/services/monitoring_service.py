@@ -512,13 +512,35 @@ class MonitoringService:
             )
     
     def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
-        """Helper to send Telegram messages from sync context"""
+        """
+        Helper to send Telegram messages from sync monitoring thread.
+        Uses thread-safe scheduling to main event loop.
+        """
+        # Don't send if monitoring is stopped
+        if not self.is_running:
+            return
+        
         try:
             telegram = get_telegram()
-            if telegram and telegram._initialized:
-                telegram.send_message_sync(message, priority)
+            if not telegram:
+                return
+            
+            if not telegram._initialized:
+                self.logger.debug("Telegram not initialized - skipping message")
+                return
+            
+            # Use the thread-safe sync wrapper
+            success = telegram.send_message_sync(message, priority)
+            
+            if not success:
+                # Only log if we're still running (not shutting down)
+                if self.is_running and telegram._initialized:
+                    self.logger.debug(f"Failed to send Telegram message (may be shutting down)")
+                    
         except Exception as e:
-            self.logger.debug(f"Could not send Telegram message: {e}")
+            # Catch any unexpected errors
+            if self.is_running:
+                self.logger.debug(f"Could not send Telegram message: {e}")
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
