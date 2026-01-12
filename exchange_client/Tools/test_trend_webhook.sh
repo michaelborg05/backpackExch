@@ -4,12 +4,12 @@ curl -X POST http://localhost:8000/webhook/tradingview/trend \
     "action": "trend_update",
     "secret": "h&ppyfestivu$",
     "trends": [{
-      "symbol": "SOL_USDC",
-      "timeframe": "1h",
-      "ema20": 139.26,
-      "ema50": 137.97,
-      "rsi": 73.3,
-      "vwap": 141.57,
-      "price": 142.62
+      "symbol": "ETH_USDC",
+      "timeframe": "60",
+      "ema20": 3125.43,
+      "ema50": 3114.91,
+      "rsi": 46.6,
+      "vwap": 3132.68,
+      "price": 3114.39
     }]
   }'

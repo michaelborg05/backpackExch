@@ -17,12 +17,20 @@ class TrendCache:
         trend_data.timestamp = time.time()
         self._cache[key] = trend_data
         
-        self.logger.info(
-            f"Updated trend: {trend_data.symbol} ({trend_data.timeframe}) - "
-            f"EMA: {trend_data.ema20:.2f}/{trend_data.ema50:.2f}, "
-            f"RSI: {trend_data.rsi:.1f}, "
-            f"Price: ${trend_data.price:.2f}, VWAP: ${trend_data.vwap:.2f}"
-        )
+        if trend_data.price < 1:
+            self.logger.info(
+                f"Updated trend: {trend_data.symbol} ({trend_data.timeframe}) - "
+                f"EMA: {trend_data.ema20:.5f}/{trend_data.ema50:.5f}, "
+                f"RSI: {trend_data.rsi:.1f}, "
+                f"Price: ${trend_data.price:.5f}, VWAP: ${trend_data.vwap:.5f}"
+            )
+        else:
+            self.logger.info(
+                f"Updated trend: {trend_data.symbol} ({trend_data.timeframe}) - "
+                f"EMA: {trend_data.ema20:.2f}/{trend_data.ema50:.2f}, "
+                f"RSI: {trend_data.rsi:.1f}, "
+                f"Price: ${trend_data.price:.2f}, VWAP: ${trend_data.vwap:.2f}"
+            )
     
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
         """Get cached trend data if still valid"""
@@ -98,7 +106,7 @@ class TrendCache:
                 results.append((is_bullish, msg))
         
         # Count bullish indicators
-        bullish_count = sum(1 for is_bull, _ in results)
+        bullish_count = sum(1 for is_bullish, _ in results if is_bullish)
         total_count = len(results)
         
         # Build detailed reason
