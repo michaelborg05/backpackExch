@@ -118,6 +118,8 @@ class OrderResponse(BaseModel):
     slippage_tolerance: Optional[str] = Field(None, alias="slippageTolerance")
     slippage_tolerance_type: Optional[SlippageToleranceType] = Field(None, alias="slippageToleranceType")
 
+    profit: Optional[str] = Field(None, alias="profit")
+
     class Config:
         populate_by_name = True
         use_enum_values = True

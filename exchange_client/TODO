@@ -2,13 +2,38 @@ TO DO
  # change API to allow buy by percentage
  # fix SL/TP override. Its changing the profile for all future alerts
  # Add dust conversion with the validation loop
- # introduce something to avoid down days. Daily trend filter
-#Minimum viable trend filter (simple + effective)
-#Only allow 15m buys if ALL are true:
-#1H close > 1H EMA50
-#1H RSI > 50
-#Last 1H candle is green
-#This alone would likely flip your 25% win rate closer to 35–40%
+ #look at option to extend profit % by 50% if all 3 trend indicators are bullish
+ # validate balances against open positions. If something doesn't match, sell it
+ # possibly sell as MAX if no other positions available
+# if trailing stop armed, set price to max of entry price + 0.05% or calculated trailing price. Means we can break even on more if it drops below entry
+ if trailing_stop_armed:
+    trailing_sl_price = max(
+        trailing_sl_price,
+        entry_price * 1.0005  # +0.05%
+    )
+
+    # to reduce fees, switch to MAKER buy orders
+    #ATR gate for 1m trades
+    atr = atr_1m(period=14)
+atr_baseline = sma(atr, period=50)
+
+volatility_ok = atr > atr_baseline * 1.05
+
+if volatility_ok:
+    allow_entry = True
+else:
+    allow_entry = False
+    # phase 1 - Log but dont enable the new feature
+    # Phase 2 — Enable filter
+Do not change TP / SL / TSL
+Let it run at least 48 hours
+Compare:
+Trades/day
+
+Net PnL
+
+Fees paid
+
 
 No need
  # split into separate modules so i can migrate to Azure
@@ -32,4 +57,10 @@ No need
 # Add trailing stop loss once certain percent is hit. I.e. Once 5% profit, set a trailing stop loss at 2%
   # Add take profit/stop loss options
  # If cache isnt up to date, go make live calls
-
+ # introduce something to avoid down days. Daily trend filter
+#Minimum viable trend filter (simple + effective)
+#Only allow 15m buys if ALL are true:
+#1H close > 1H EMA50
+#1H RSI > 50
+#Last 1H candle is green
+#This alone would likely flip your 25% win rate closer to 35–40%

@@ -594,6 +594,7 @@ class TradingService:
                             summary += f"Total P/L: ${total_profit:.2f}"
                             
                             self.trader_logger.info(summary)
+                            order_response.profit = total_profit
 
                     # Refresh balance cache after trade
                     self._refresh_balance_cache_after_trade(order_response)

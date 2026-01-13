@@ -233,14 +233,14 @@ class MonitoringService:
                     # TAKE PROFIT
                     if position.tp_price and price >= float(position.tp_price):
                         self.logger.info(f"TP hit for {symbol} @ {price} [{profile.name}]")
-                        self._send_telegram(f"🎯 TP hit for {symbol} @ {price} [{profile.name}]")
+                        #self._send_telegram(f"🎯 TP hit for {symbol} @ {price} [{profile.name}]")
                         self._execute_close(db, position, profile, reason="TAKE_PROFIT")
                         continue
 
                     # STOP LOSS
                     if position.sl_price and price <= float(position.sl_price):
                         self.logger.info(f"SL hit for {symbol} @ {price} [{profile.name}]")
-                        self._send_telegram(f"🛑 SL hit for {symbol} @ {price} [{profile.name}]")
+                        #self._send_telegram(f"🛑 SL hit for {symbol} @ {price} [{profile.name}]")
                         self._execute_close(db, position, profile, reason="STOP_LOSS")
                         continue
 
@@ -299,10 +299,10 @@ class MonitoringService:
                                     f"Trailing SL hit for {symbol} @ {price} "
                                     f"(profit: {profit_pct:.2f}%) [{profile.name}]"
                                 )
-                                self._send_telegram(
-                                    f"📉 Trailing SL hit for {symbol} @ {price} "
-                                    f"(profit: {profit_pct:+.2f}%) [{profile.name}]"
-                                )
+                                #self._send_telegram(
+                                #    f"📉 Trailing SL hit for {symbol} @ {price} "
+                                #    f"(profit: {profit_pct:+.2f}%) [{profile.name}]"
+                                #)
                                 self._execute_close(db, position, profile, reason="TRAILING_STOP")
                         else:
                             # Trailing stop not armed yet - log if price is close
@@ -401,7 +401,6 @@ class MonitoringService:
                 f"[{profile.name}] Reason: {reason}"
             )
             
-            error_type = ""
             # Execute sell order with "MAX" to ensure we sell everything
             result = trading.order_sell(
                 symbol=symbol,
@@ -423,17 +422,19 @@ class MonitoringService:
                 quantity_sold = float(result.executed_quantity)
                 profit = (exit_price - entry_price) * quantity_sold
                 profit_pct = ((exit_price - entry_price) / entry_price) * 100
+
+                icon = "🎯" if profit_pct >= 0 else "🛑"
                 
                 # Send detailed notification
                 self._send_telegram(
-                    f"✅ Position Closed [{profile.name}]\n"
+                    f"{icon} Position Closed [{profile.name}]\n"
                     f"Symbol: {symbol}\n"
                     f"Reason: {reason}\n"
                     f"Entry: ${entry_price:.4f}\n"
                     f"Exit: ${exit_price:.4f}\n"
                     f"Quantity: {quantity_sold:.4f}\n"
                     f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)",
-                    MessagePriority.HIGH
+                    MessagePriority.NORMAL
                 )
                 
                 # Note: Position will be closed automatically by TradingService.ExecuteOrder

@@ -681,7 +681,8 @@ async def tradingview_webhook(
                     "order_id": result.id if result else None,
                     "executed_quantity": result.executed_quantity if result else None,
                     "executed_price": executed_price,
-                    "status": result.status if result else None
+                    "status": result.status if result else None,
+                    "profit": result.profit if result else None
                 })
                 
                 apiserver_logger.info(
@@ -718,7 +719,7 @@ async def tradingview_webhook(
             trend_filtered = sum(1 for r in results if r.get("error_type") == "trend_filter")
             no_balance = sum(1 for r in results if r.get("error_type") == "insufficient_balance")
 
-            action_icon = "🟢" if alert.action.lower() == "buy" else "🔴"
+            action_icon = "📈" if alert.action.lower() == "buy" else "🏁"
             if success_count == total_count:
                 success_icon = "✅"
             elif success_count > 0:
@@ -737,7 +738,12 @@ async def tradingview_webhook(
             for result in results:
                 profile_name = result['profile']
                 if result['success']:
-                    summary += f"✓ {profile_name}: Price: ${result.get('executed_price', 'N/A')}\n"
+                    if result.get('profit') is not None:
+                        profit = float(result.get('profit', '0.0'))
+                        icon = "🎯" if profit >= 0 else "🛑"
+                        summary += f"✓ {profile_name}: {icon} ${profit:2f}\n"
+                    else:
+                        summary += f"✓ {profile_name}: Price: ${result.get('executed_price', 'N/A')}\n"
                 else:
                     error_type = result.get('error_type', 'unknown')
                     if error_type == 'insufficient_balance':
