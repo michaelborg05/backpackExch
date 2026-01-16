@@ -12,7 +12,19 @@ profiles:
     max_position_size: 25
     default_order_size_pct: 25
     # Trend filter disabled
-    use_trend_filter: false
+    use_trend_filter: true
+    trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
+    trend_indicators:
+      - type: "ema_alignment"
+        params: {fast: 20, slow: 50}
+        weight: 1  # Optional: give more weight to certain indicators
+      - type: "rsi_threshold"
+        params: {period: 14, min_value: 50}
+        weight: 1
+      - type: "price_vs_vwap"
+        params: {}
+        weight: 1
+    min_indicators_required: 2  # Need 2/3 indicators bullish
 
   15m_MB:
     enabled: true
