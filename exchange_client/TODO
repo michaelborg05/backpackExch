@@ -1,11 +1,26 @@
 TO DO
- # change API to allow buy by percentage
+ 
+
+# change API to allow buy by percentage
  # fix SL/TP override. Its changing the profile for all future alerts
  # Add dust conversion with the validation loop
- #look at option to extend profit % by 50% if all 3 trend indicators are bullish
+ # look at option to extend profit % by 50% if all 3 trend indicators are bullish
  # validate balances against open positions. If something doesn't match, sell it
  # possibly sell as MAX if no other positions available
-# if trailing stop armed, set price to max of entry price + 0.05% or calculated trailing price. Means we can break even on more if it drops below entry
+
+ Gemini Suggestions
+# Possibly add a trend filter even on 1m profile - but using smaller timeframe. If thats not possible maybe some other indicator to indicate market trend
+ #  5% gain or loss circuit breaker trading pause. I.e. If profile drops by X% within 24 hours or shorter, pause trading for 12 hours
+ # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought
+# on 1m, can Add simple Price > ema 200 filter
+#Look at possibly getting a new buy indicator. Seems to indicate on trend confirmation insted of reversals so buy is too late
+
+Chatgpt
+# loss/gain circuit breakers 
+#market level regime gate - BTC/SOL 1hr trend to stop trading down markets
+# time space trades on 1m to reduce noise. After a TP or SL maybe pause for 5mins
+
+ # if trailing stop armed, set price to max of entry price + 0.05% or calculated trailing price. Means we can break even on more if it drops below entry
  if trailing_stop_armed:
     trailing_sl_price = max(
         trailing_sl_price,
