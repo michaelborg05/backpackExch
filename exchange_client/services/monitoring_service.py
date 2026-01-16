@@ -259,7 +259,12 @@ class MonitoringService:
                             # ARM the trailing stop for the first time
                             position.trailing_stop_armed = True
                             if position.trailing_sl_price is None:
-                                position.trailing_sl_price = float(price) * (1 - arm_threshold_pct / 100)
+                                # Set initial Trailing stop loss price to arm threshold
+                                trailing_pct = float(profile.trailing_stop_pct)
+                                position.trailing_sl_price = max(
+                                    float(price) * (1 - trailing_pct / 100),
+                                    float(position.entry_price) * 1.0005  # +0.05%
+                                )
                             db.commit()
                             
                             self.logger.info(
@@ -279,7 +284,7 @@ class MonitoringService:
                             if price > highest:
                                 new_high = price
                                 trailing_pct = float(profile.trailing_stop_pct)
-                                new_trailing_sl = new_high * (1 - trailing_pct / 100)
+                                new_trailing_sl = max(float(price) * (1 - trailing_pct / 100), float(position.entry_price) * 1.0005)  # +0.05%
 
                                 update_position_trailing_stop(
                                     db,
