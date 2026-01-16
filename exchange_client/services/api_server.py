@@ -11,6 +11,7 @@ from api_builders.market_builder import get_price
 from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService, process_tradingview_alert
+from services.atr_cache import get_atr_cache
 from services.balance_cache import get_balance_cache
 from services.telegram_service import TelegramService, set_telegram, get_telegram
 from services.market_info_cache import get_market_info_cache
@@ -569,6 +570,7 @@ async def tradingview_webhook(
         balance_cache = get_balance_cache()
         market_info_cache = get_market_info_cache()
         trend_cache = get_trend_cache()
+        atr_cache = get_atr_cache()
 
         # Process alert for each profile
         results = []
@@ -602,6 +604,51 @@ async def tradingview_webhook(
                 
                 # Balance check passed, proceed with trade
                 profile = profile_manager.get(profile_name)
+
+                # If buy order and use_atr_filter true, check volatility
+                if alert.action.lower() == "buy" and profile.use_atr_filter:  # New profile setting
+                    apiserver_logger.debug(
+                        f"[{profile_name}] Checking ATR filter: "
+                        f"timeframe={profile.atr_timeframe}, "
+                        f"threshold={profile.atr_threshold}"
+                    )
+                    
+                    is_volatile, reason = atr_cache.is_volatile(
+                        symbol=alert.symbol,
+                        timeframe=profile.atr_timeframe,
+                        threshold=profile.atr_threshold
+                    )
+                    
+                    if profile.atr_filter_mode == "require_high" and not is_volatile:
+                        apiserver_logger.info(
+                            f"[{profile_name}] ⊘ Skipping BUY - ATR too low: {reason}"
+                        )
+                        results.append({
+                            "profile": profile_name,
+                            "success": False,
+                            "error": f"ATR filter: {reason}",
+                            "error_type": "atr_filter"
+                        })
+                        errors.append(f"[{profile_name}] ATR filter blocked trade")
+                        #continue
+                    
+                    elif profile.atr_filter_mode == "require_low" and is_volatile:
+                        apiserver_logger.info(
+                            f"[{profile_name}] ⊘ Skipping BUY - ATR too high: {reason}"
+                        )
+                        results.append({
+                            "profile": profile_name,
+                            "success": False,
+                            "error": f"ATR filter: {reason}",
+                            "error_type": "atr_filter"
+                        })
+                        errors.append(f"[{profile_name}] ATR filter blocked trade")
+                        #continue
+                    
+                    else:
+                        apiserver_logger.info(
+                            f"[{profile_name}] ✓ ATR check passed: {reason}"
+                        )
 
                 if alert.action.lower() == "buy" and profile.use_trend_filter:
                     apiserver_logger.debug(
@@ -913,3 +960,34 @@ async def get_trend_status(symbol: str, timeframe: str):
             "age_seconds": time.time() - (trend.timestamp or 0)
         }
     }
+
+@app.get("/atr/{symbol}/{timeframe}")
+async def get_atr_status(symbol: str, timeframe: str):
+    """Get current ATR status for a symbol"""
+    atr_cache = get_atr_cache()
+    atr_data = atr_cache.get(symbol, timeframe)
+    
+    if not atr_data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ATR data for {symbol} ({timeframe})"
+        )
+    
+    is_volatile, reason = atr_cache.is_volatile(symbol, timeframe)
+    
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "atr": str(atr_data.atr),
+        "atr_sma": str(atr_data.atr_sma),
+        "ratio": str(atr_data.get_ratio()),
+        "is_volatile": is_volatile,
+        "reason": reason,
+        "timestamp": atr_data.timestamp.isoformat()
+    }
+
+@app.get("/atr/all")
+async def get_all_atr():
+    """Get all ATR data from cache"""
+    atr_cache = get_atr_cache()
+    return atr_cache.get_cache_info()

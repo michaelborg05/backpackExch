@@ -11,7 +11,6 @@ profiles:
     use_trailing_stop: true
     max_position_size: 25
     default_order_size_pct: 25
-    # Trend filter disabled
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
@@ -25,6 +24,7 @@ profiles:
         params: {}
         weight: 1
     min_indicators_required: 2  # Need 2/3 indicators bullish
+    use_atr_filter: false
 
   15m_MB:
     enabled: true
@@ -52,6 +52,10 @@ profiles:
         params: {}
         weight: 1
     min_indicators_required: 2  # Need 2/3 indicators bullish
+    use_atr_filter: true
+    atr_timeframe: "15m"  # Match trading timeframe
+    atr_threshold: 1.05   # ATR must be > 1.05 * ATR_SMA
+    atr_filter_mode: "require_high"  # or "require_low" or "disabled"
 
   1hr_MB:
     enabled: false
@@ -76,6 +80,10 @@ profiles:
       - type: "price_vs_vwap"
         params: {}
     min_indicators_required: 3  # All 3 must be bullish (more conservative)
+    use_atr_filter: false
+    atr_timeframe: "1h"
+    atr_threshold: 0.95       # Below average
+    atr_filter_mode: "require_low"
 
   1m_MB:
     enabled: true
@@ -91,4 +99,10 @@ profiles:
     default_order_size_pct: 20
     # No trend filter for scalping
     use_trend_filter: false
-    
+    # ATR filter for scalping - CRITICAL for 1m trades
+    use_atr_filter: true
+    atr_timeframe: "1m"
+    atr_threshold: 1.1    # Require 10% above average volatility
+    atr_filter_mode: "require_high"  # Only trade when volatility is elevated
+    # Optional: could also set max ATR to avoid extreme volatility
+    # atr_max_threshold: 2.0  # Don't trade if ATR > 2.0 * ATR_SMA
