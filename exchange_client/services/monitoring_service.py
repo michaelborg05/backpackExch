@@ -50,7 +50,7 @@ class MonitoringService:
         self._markets_initialized = False
         self.atr_calculator = get_atr_calculator()
         self._atr_update_counter = 0
-        self._atr_update_interval = 1  # Update ATR every 5 cycles (e.g., every 2.5 min if cycle is 30s)
+        self._atr_update_interval = 5  # Update ATR every 5 cycles (e.g., every 2.5 min if cycle is 30s)
 
 
     def start(self):
