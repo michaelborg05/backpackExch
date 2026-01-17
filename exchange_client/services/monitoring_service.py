@@ -40,7 +40,7 @@ class MonitoringService:
         """
         self.config = Config()
         self.logger = log_manager.get_logger("MonitoringService")
-        self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "MON_USDC"]
+        self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
         self.is_running = False
         self.thread = None
         self.call_count = 0

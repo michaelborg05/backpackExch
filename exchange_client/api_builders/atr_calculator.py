@@ -60,7 +60,7 @@ class ATRCalculator:
     def __init__(
         self,
         atr_period: int = 14,
-        sma_period: int = 20
+        sma_period: int = 50
     ):
         self.logger = log_manager.get_logger("ATRCalculator")
         self.atr_period = atr_period

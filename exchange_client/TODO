@@ -1,5 +1,5 @@
 TO DO
-
+ # adjust RSI indicator. Either > 50 or > 40 and increasing. similarly maybe below 50 is no, or below 60 and decreasing is also no
  # Add dust conversion with the validation loop
  # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
