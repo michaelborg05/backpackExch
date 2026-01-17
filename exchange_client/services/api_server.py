@@ -630,7 +630,7 @@ async def tradingview_webhook(
                             "error_type": "atr_filter"
                         })
                         errors.append(f"[{profile_name}] ATR filter blocked trade")
-                        #continue
+                        continue
                     
                     elif profile.atr_filter_mode == "require_low" and is_volatile:
                         apiserver_logger.info(
@@ -643,7 +643,7 @@ async def tradingview_webhook(
                             "error_type": "atr_filter"
                         })
                         errors.append(f"[{profile_name}] ATR filter blocked trade")
-                        #continue
+                        continue
                     
                     else:
                         apiserver_logger.info(
