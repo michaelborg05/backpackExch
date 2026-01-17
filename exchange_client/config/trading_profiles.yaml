@@ -18,7 +18,7 @@ profiles:
         params: {fast: 20, slow: 50}
         weight: 1  # Optional: give more weight to certain indicators
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 50}
+        params: {period: 14, min_value: 46}
         weight: 1
       - type: "price_vs_vwap"
         params: {}
@@ -46,7 +46,7 @@ profiles:
         params: {fast: 20, slow: 50}
         weight: 1  # Optional: give more weight to certain indicators
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 40}
+        params: {period: 14, min_value: 46}
         weight: 1
       - type: "price_vs_vwap"
         params: {}
