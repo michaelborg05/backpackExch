@@ -10,6 +10,7 @@ from api_builders.trading_builder import TradingService
 from models.balance import BalanceReader
 from services.balance_cache import get_balance_cache
 from services.price_cache import get_price_cache
+from api_builders.atr_calculator import get_atr_calculator
 from services.portfolio_cache import get_portfolio_cache
 from services.market_info_cache import get_market_info_cache
 from services.telegram_service import get_telegram
@@ -47,6 +48,10 @@ class MonitoringService:
         self.price_cache = get_price_cache()    # Get price cache instance
         self.market_info_cache = get_market_info_cache()
         self._markets_initialized = False
+        self.atr_calculator = get_atr_calculator()
+        self._atr_update_counter = 0
+        self._atr_update_interval = 1  # Update ATR every 5 cycles (e.g., every 2.5 min if cycle is 30s)
+
 
     def start(self):
         """Start the monitoring loop in a background thread"""
@@ -107,6 +112,8 @@ class MonitoringService:
             while self.is_running:
                 self.call_count += 1
                 validation_counter += 1
+                self._atr_update_counter += 1
+
                 self.logger.debug(f"Beginning loop #{self.call_count}")
                 
                 # Monitor prices for all tickers
@@ -117,6 +124,11 @@ class MonitoringService:
 
                 # Monitor open balances and check for SL/TP/Trailing SL
                 self._monitor_open_positions()
+
+                # Update ATR periodically (less frequently than prices)
+                if self._atr_update_counter >= self._atr_update_interval:
+                    self._monitor_atr()
+                    self._atr_update_counter = 0
 
                 # Validate positions periodically (less frequently)
                 if validation_counter >= validation_interval:
@@ -516,7 +528,34 @@ class MonitoringService:
                 f"❌ Unexpected error closing position for {position.symbol} [{profile.name}]: {str(e)}",
                 MessagePriority.HIGH
             )
-    
+    def _monitor_atr(self):
+        """Monitor ATR for all tickers"""
+        try:
+            # Update ATR for all monitored tickers
+            # You can specify different timeframes for different profiles
+            results = self.atr_calculator.update_multiple(
+                symbols=self.tickers,
+                timeframe="1m"  # Default to 1m for scalping
+            )
+            
+            # Log summary
+            for symbol, atr_data in results.items():
+                if atr_data:
+                    ratio = atr_data.get_ratio()
+                    volatile = atr_data.is_volatile()
+                    
+                    self.logger.info(
+                        f"ATR {symbol}: {atr_data.atr:.6f} "
+                        f"(SMA: {atr_data.atr_sma:.6f}, "
+                        f"Ratio: {ratio:.2f}, "
+                        f"Volatile: {'YES' if volatile else 'NO'})"
+                    )
+                else:
+                    self.logger.warning(f"Failed to update ATR for {symbol}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error monitoring ATR: {e}", exc_info=True)
+
     def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
         """
         Helper to send Telegram messages from sync monitoring thread.
@@ -558,4 +597,5 @@ def get_monitoring_service() -> MonitoringService:
     if _monitoring_service is None:
         return None
     return _monitoring_service
+
 

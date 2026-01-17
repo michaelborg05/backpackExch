@@ -17,11 +17,12 @@ class APIEndpoints:
         """Backpack balances endpoint"""
         return f"{cls.BACKPACK_BASE}/api/v1/capital"
 
-
+    @classmethod
     def backpack_depth(cls, ticker: str = "SOL_USDC") -> str:
         """backpack depth endpoint"""
         return f"{cls.BACKPACK_BASE}/api/v1/depth?symbol={ticker}"
-
+    
+    @classmethod
     def backpack_klines(cls, ticker: str = "SOL_USDC", interval: str = "4h",startTime: str = None) -> str:
         """backpack klines endpoint"""
         if startTime is None:

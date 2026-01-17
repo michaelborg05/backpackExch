@@ -26,6 +26,12 @@ class TradingProfile(BaseModel):
     trend_indicators: Optional[List[Dict[str, Any]]] = None  # List of indicator configs
     min_indicators_required: int = Field(default=2, ge=1)  # Minimum that must be bullish
 
+    # ATR Filters
+    use_atr_filter: bool = False
+    atr_timeframe: str = "15m"
+    atr_threshold: float = 1.05
+    atr_filter_mode: str = "require_high"
+
     class Config:
         json_encoders = {
             Decimal: lambda v: float(v)
@@ -45,3 +51,65 @@ class TradingProfile(BaseModel):
             f"Require {self.min_indicators_required}/{len(self.trend_indicators)} "
             f"({', '.join(indicator_names)})"
         )    
+
+    def get_atr_config_summary(self) -> str:
+        """Get human-readable ATR config summary"""
+        if not self.use_atr_filter:
+            return "ATR filter: disabled"
+        
+        summary = (
+            f"ATR filter: {self.atr_timeframe}, "
+            f"threshold={self.atr_threshold}, "
+            f"mode={self.atr_filter_mode}"
+        )
+        
+        if self.atr_max_threshold:
+            summary += f", max={self.atr_max_threshold}"
+        
+        return summary
+    
+ 
+    def validate_filters(self, alert, balance_cache, market_info_cache, trend_cache, atr_cache) -> tuple[bool, Optional[str]]:
+        """
+        Validate all filters for a trade
+        
+        Returns:
+            (is_valid, error_message) tuple
+        """
+        # Only validate for BUY orders
+        if alert.action.lower() != "buy":
+            return True, None
+        
+        # Check trend filter
+        if self.use_trend_filter:
+            is_bullish, reason = trend_cache.is_bullish(
+                symbol=alert.symbol,
+                timeframe=self.trend_timeframe,
+                indicators_config=self.trend_indicators,
+                min_indicators_required=self.min_indicators_required
+            )
+            
+            if not is_bullish:
+                return False, f"Trend filter: {reason}"
+        
+        # Check ATR filter
+        if self.use_atr_filter:
+            is_volatile, reason = atr_cache.is_volatile(
+                symbol=alert.symbol,
+                timeframe=self.atr_timeframe,
+                threshold=self.atr_threshold
+            )
+            
+            if self.atr_filter_mode == "require_high" and not is_volatile:
+                return False, f"ATR too low: {reason}"
+            
+            elif self.atr_filter_mode == "require_low" and is_volatile:
+                return False, f"ATR too high: {reason}"
+            
+            # Check max threshold if set
+            if self.atr_max_threshold:
+                atr_data = atr_cache.get(alert.symbol, self.atr_timeframe)
+                if atr_data and atr_data.get_ratio() > self.atr_max_threshold:
+                    return False, f"ATR exceeds maximum: {atr_data.get_ratio():.2f} > {self.atr_max_threshold}"
+        
+        return True, None    
