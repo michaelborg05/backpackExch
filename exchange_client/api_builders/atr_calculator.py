@@ -1,6 +1,7 @@
 from typing import List, Optional
 from decimal import Decimal
 from collections import deque
+import time
 from services.client import api_request
 from utils.endpoints import APIEndpoints
 from utils.logging import log_manager
@@ -60,7 +61,6 @@ class ATRCalculator:
         self,
         atr_period: int = 14,
         sma_period: int = 20
-        
     ):
         self.logger = log_manager.get_logger("ATRCalculator")
         self.atr_period = atr_period
@@ -115,8 +115,6 @@ class ATRCalculator:
             List of Candle objects, oldest first
         """
         try:
-            import time
-
             # Calculate start time based on limit and timeframe
             seconds_per_candle = self._timeframe_to_seconds(timeframe)
             current_time = int(time.time())
@@ -130,7 +128,7 @@ class ATRCalculator:
 
             self.logger.debug(
                 f"Fetching candles for {symbol} ({timeframe}): "
-                f"startTime={start_time * 1000}, lookback={lookback / 1000:.0f}s"
+                f"startTime={start_time}, lookback={lookback:.0f}s"
             )
 
             url = APIEndpoints.backpack_klines(ticker=symbol, interval=timeframe, startTime=start_time)
@@ -199,6 +197,9 @@ class ATRCalculator:
         """
         Calculate SMA of ATR values
         Maintains a rolling window of ATR values
+        
+        On first call, uses the current ATR as the SMA (bootstrap)
+        Subsequent calls build up history until we have full SMA period
         """
         key = f"{symbol}_{timeframe}"
         
@@ -209,35 +210,80 @@ class ATRCalculator:
         # Add current ATR to history
         self._atr_history[key].append(current_atr)
         
-        # Calculate SMA
+        # Calculate SMA from available data
         atr_values = list(self._atr_history[key])
         return sum(atr_values) / len(atr_values)
     
-    def update_atr(self, symbol: str, timeframe: str = "1m") -> Optional[ATRData]:
+    def update_atr(self, symbol: str, timeframe: str = "1m", bootstrap: bool = True) -> Optional[ATRData]:
         """
         Fetch candles, calculate ATR and ATR_SMA, update cache
         
         Args:
             symbol: Trading pair
             timeframe: Candle interval
+            bootstrap: If True and no history exists, bootstrap SMA from historical ATRs
             
         Returns:
             ATRData object or None if calculation failed
         """
         try:
-            # Fetch enough candles for ATR + some buffer
-            limit = self.atr_period + self.sma_period + 10
+            key = f"{symbol}_{timeframe}"
+            
+            # Check if we need to bootstrap
+            needs_bootstrap = (
+                bootstrap and 
+                (key not in self._atr_history or len(self._atr_history[key]) < self.sma_period)
+            )
+            
+            if needs_bootstrap:
+                # Fetch extra candles to bootstrap the SMA
+                # Need enough candles to calculate multiple ATRs
+                limit = self.atr_period + self.sma_period + 10
+                self.logger.info(
+                    f"Bootstrapping ATR history for {symbol} ({timeframe}) "
+                    f"with {limit} candles"
+                )
+            else:
+                # Normal update - just need enough for one ATR
+                limit = self.atr_period + 10
+            
             candles = self.fetch_candles(symbol, timeframe, limit)
             
             if not candles:
                 return None
             
-            # Calculate ATR
+            # Bootstrap mode: Calculate multiple historical ATRs
+            if needs_bootstrap and len(candles) >= self.atr_period + self.sma_period:
+                self.logger.debug(f"Calculating {self.sma_period} historical ATRs for bootstrap")
+                
+                # Calculate ATR for each window
+                for i in range(self.sma_period):
+                    # Get a window of candles for this ATR calculation
+                    window_start = i
+                    window_end = i + self.atr_period + 1
+                    
+                    if window_end > len(candles):
+                        break
+                    
+                    window = candles[window_start:window_end]
+                    atr = self.calculate_atr(window)
+                    
+                    if atr:
+                        # Add to history (but don't update cache yet)
+                        if key not in self._atr_history:
+                            self._atr_history[key] = deque(maxlen=self.sma_period)
+                        self._atr_history[key].append(atr)
+                
+                self.logger.info(
+                    f"Bootstrapped {len(self._atr_history.get(key, []))} ATR values for {symbol}"
+                )
+            
+            # Calculate current ATR (using most recent candles)
             atr = self.calculate_atr(candles)
             if atr is None:
                 return None
             
-            # Calculate ATR SMA
+            # Calculate ATR SMA (will use bootstrapped history if available)
             atr_sma = self.calculate_atr_sma(symbol, timeframe, atr)
             
             # Create ATR data object
@@ -251,7 +297,8 @@ class ATRCalculator:
             )
             
             # Update cache
-            self.atr_cache.update(atr_data)
+            history_count = len(self._atr_history.get(key, []))
+            self.atr_cache.update(atr_data, history_count=history_count)
             
             return atr_data
             

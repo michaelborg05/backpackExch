@@ -100,9 +100,31 @@ profiles:
     # No trend filter for scalping
     use_trend_filter: false
     # ATR filter for scalping - CRITICAL for 1m trades
-    use_atr_filter: true
+    use_atr_filter: false
     atr_timeframe: "1m"
     atr_threshold: 1.1    # Require 10% above average volatility
     atr_filter_mode: "require_high"  # Only trade when volatility is elevated
     # Optional: could also set max ATR to avoid extreme volatility
     # atr_max_threshold: 2.0  # Don't trade if ATR > 2.0 * ATR_SMA
+
+  1m_MB_ATR:
+    enabled: true
+    api_key_env: BP_API_KEY_1M_ATR
+    secret_env: BP_SECRET_1M_ATR
+    take_profit_pct: 0.6
+    stop_loss_pct: 0.4
+    trailing_stop_pct: 0.4
+    arm_trailing_stop_pct: 0.3
+    use_trailing_stop: true
+    max_position_size: 10
+    max_risk_pct: 1.0
+    default_order_size_pct: 20
+    # No trend filter for scalping
+    use_trend_filter: false
+    # ATR filter for scalping - CRITICAL for 1m trades
+    use_atr_filter: true
+    atr_timeframe: "1m"
+    atr_threshold: 1.1    # Require 10% above average volatility
+    atr_filter_mode: "require_high"  # Only trade when volatility is elevated
+    # Optional: could also set max ATR to avoid extreme volatility
+    # atr_max_threshold: 2.0  # Don't trade if ATR > 2.0 * ATR_SMA    

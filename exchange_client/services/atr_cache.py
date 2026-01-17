@@ -70,17 +70,32 @@ class ATRCache:
         self.logger = log_manager.get_logger("ATRCache")
         self._cache: Dict[str, ATRData] = {}  # key: "SYMBOL_TIMEFRAME"
         self._lock = threading.RLock()
+        self._history_counts: Dict[str, int] = {}  # Track how many ATR values we have
         self.ttl_seconds = ttl_seconds
     
-    def update(self, atr_data: ATRData):
-        """Update ATR data for a symbol/timeframe"""
+    def update(self, atr_data: ATRData, history_count: Optional[int] = None):
+        """
+        Update ATR data for a symbol/timeframe
+        
+        Args:
+            atr_data: ATR data object
+            history_count: Number of ATR values in history (for tracking SMA readiness)
+        """
         with self._lock:
             key = f"{atr_data.symbol}_{atr_data.timeframe}"
             self._cache[key] = atr_data
             
+            if history_count is not None:
+                self._history_counts[key] = history_count
+            
+            # Check if SMA is fully ready
+            sma_status = "READY"
+            if history_count and history_count < atr_data.sma_period:
+                sma_status = f"BUILDING ({history_count}/{atr_data.sma_period})"
+            
             self.logger.debug(
                 f"Updated ATR for {atr_data.symbol} ({atr_data.timeframe}): "
-                f"ATR={atr_data.atr:.6f}, SMA={atr_data.atr_sma:.6f}, "
+                f"ATR={atr_data.atr:.6f}, SMA={atr_data.atr_sma:.6f} [{sma_status}], "
                 f"Ratio={atr_data.get_ratio():.2f}, "
                 f"Volatile={atr_data.is_volatile()}"
             )
