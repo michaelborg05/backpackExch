@@ -6,7 +6,7 @@ from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
 from utils import data_converters
 from services.client import api_request
-from services.market_info_cache import get_market_info_cache
+from cache.market_info_cache import get_market_info_cache
 
 config = Config()
 market_logger = log_manager.get_logger("MarketBuilder")

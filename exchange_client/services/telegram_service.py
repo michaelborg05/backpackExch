@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 from utils.logging import log_manager
 from utils.constants import MessagePriority
-from services.portfolio_cache import get_portfolio_cache
+from cache.portfolio_cache import get_portfolio_cache
 from services.profile_manager import get_profile_manager
 
 

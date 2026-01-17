@@ -1,7 +1,7 @@
 from typing import Dict, Optional
 from decimal import Decimal
-from services.balance_cache import get_balance_cache
-from services.price_cache import get_price_cache
+from cache.balance_cache import get_balance_cache
+from cache.price_cache import get_price_cache
 from utils.logging import log_manager
 
 

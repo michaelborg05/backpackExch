@@ -5,7 +5,7 @@ import time
 from services.client import api_request
 from utils.endpoints import APIEndpoints
 from utils.logging import log_manager
-from services.atr_cache import ATRData, get_atr_cache
+from cache.atr_cache import ATRData, get_atr_cache
 from utils.exceptions import ExchangeAPIError
 """         
         

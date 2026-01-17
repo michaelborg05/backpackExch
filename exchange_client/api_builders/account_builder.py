@@ -7,7 +7,7 @@ from utils import data_converters
 from models.balance import BalanceReader
 from decimal import Decimal
 from models.trading_profile import TradingProfile
-from services.balance_cache import get_balance_cache
+from cache.balance_cache import get_balance_cache
 from services.profile_manager import get_profile_manager
 
 config = Config()

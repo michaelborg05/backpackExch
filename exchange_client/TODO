@@ -19,25 +19,6 @@ Chatgpt
 # time space trades on 1m to reduce noise. After a TP or SL maybe pause for 5mins
 
 # to reduce fees, switch to MAKER buy orders
-    #ATR gate for 1m trades
-    atr = atr_1m(period=14)
-atr_baseline = sma(atr, period=50)
-
-volatility_ok = atr > atr_baseline * 1.05
-
-if volatility_ok:
-    allow_entry = True
-else:
-    allow_entry = False
-    # phase 1 - Log but dont enable the new feature
-    # Phase 2 — Enable filter
-Do not change TP / SL / TSL
-Let it run at least 48 hours
-Compare:
-Trades/day
-Net PnL
-Fees paid
-
  # change API to allow buy by percentage
  # fix SL/TP override. Its changing the profile for all future alerts
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish
@@ -73,3 +54,4 @@ No need
 #Last 1H candle is green
 #This alone would likely flip your 25% win rate closer to 35–40%
 # when stop loss armed, set trailing stop loss price to sl % or entry + 0.05% - Which ever is higher
+# ATR implementation

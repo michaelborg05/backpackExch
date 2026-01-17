@@ -11,11 +11,11 @@ from api_builders.market_builder import get_price
 from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from api_builders.trading_builder import TradingService, process_tradingview_alert
-from services.atr_cache import get_atr_cache
-from services.balance_cache import get_balance_cache
+from cache.atr_cache import get_atr_cache
+from cache.balance_cache import get_balance_cache
 from services.telegram_service import TelegramService, set_telegram, get_telegram
-from services.market_info_cache import get_market_info_cache
-from services.portfolio_cache import get_portfolio_cache
+from cache.market_info_cache import get_market_info_cache
+from cache.portfolio_cache import get_portfolio_cache
 from models.webhook import TrendUpdateAlert, TrendData
 from services.trend_service import get_trend_cache
 from utils.config import Config

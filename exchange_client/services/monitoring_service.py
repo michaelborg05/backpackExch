@@ -8,11 +8,11 @@ from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService
 from models.balance import BalanceReader
-from services.balance_cache import get_balance_cache
-from services.price_cache import get_price_cache
+from cache.balance_cache import get_balance_cache
+from cache.price_cache import get_price_cache
 from api_builders.atr_calculator import get_atr_calculator
-from services.portfolio_cache import get_portfolio_cache
-from services.market_info_cache import get_market_info_cache
+from cache.portfolio_cache import get_portfolio_cache
+from cache.market_info_cache import get_market_info_cache
 from services.telegram_service import get_telegram
 from api_builders.market_builder import get_market_info
 from services.profile_manager import get_profile_manager
