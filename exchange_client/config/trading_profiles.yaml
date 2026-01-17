@@ -46,7 +46,7 @@ profiles:
         params: {fast: 20, slow: 50}
         weight: 1  # Optional: give more weight to certain indicators
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 50}
+        params: {period: 14, min_value: 40}
         weight: 1
       - type: "price_vs_vwap"
         params: {}
@@ -76,7 +76,7 @@ profiles:
       - type: "ema_alignment"
         params: {fast: 20, slow: 50}
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 50}
+        params: {period: 14, min_value: 40}
       - type: "price_vs_vwap"
         params: {}
     min_indicators_required: 3  # All 3 must be bullish (more conservative)
