@@ -97,6 +97,13 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
                         )
                         min_indicators_required = len(trend_indicators)
 
+        # Load ATR filter configuration
+        use_atr_filter = cfg.get("use_atr_filter", False)
+        atr_timeframe = cfg.get("atr_timeframe", "1m")
+        atr_threshold = cfg.get("atr_threshold", 1.05)
+        atr_filter_mode = cfg.get("atr_filter_mode", "require_high")
+        atr_max_threshold = cfg.get("atr_max_threshold", None)
+
         profiles[name] = TradingProfile(
             name=name,
             api_key=api_key,
@@ -114,18 +121,37 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             trend_timeframe=trend_timeframe,
             trend_indicators=trend_indicators,
             min_indicators_required=min_indicators_required,
+            # ATR filter fields (NEW)
+            use_atr_filter=use_atr_filter,
+            atr_timeframe=atr_timeframe,
+            atr_threshold=atr_threshold,
+            atr_filter_mode=atr_filter_mode,
+            atr_max_threshold=atr_max_threshold,
         )
-        
+
+
         # Log trend filter status for this profile
+        filter_info = []
+        
         if use_trend_filter:
             indicator_types = [ind.get("type") for ind in (trend_indicators or [])]
-            print(
-                f"  └─ {name}: Trend filter ENABLED on {trend_timeframe} "
+            filter_info.append(
+                f"Trend: {trend_timeframe} "
                 f"({min_indicators_required}/{len(trend_indicators)} required: {', '.join(indicator_types)})"
             )
+
+        if use_atr_filter:
+            atr_desc = f"ATR: {atr_timeframe} (threshold: {atr_threshold}, mode: {atr_filter_mode}"
+            if atr_max_threshold:
+                atr_desc += f", max: {atr_max_threshold}"
+            atr_desc += ")"
+            filter_info.append(atr_desc)
+
+        if filter_info:
+            print(f"  └─ {name}: {' | '.join(filter_info)}")
         else:
-            print(f"  └─ {name}: Trend filter DISABLED")
-    
+            print(f"  └─ {name}: No filters enabled")
+                
     print(f"\nLoaded {len(profiles)} enabled profiles from YAML")
     if skipped_profiles:
         print(f"Skipped {len(skipped_profiles)} disabled profiles: {', '.join(skipped_profiles)}")
