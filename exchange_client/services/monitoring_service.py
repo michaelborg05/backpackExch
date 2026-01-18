@@ -533,26 +533,38 @@ class MonitoringService:
         try:
             # Update ATR for all monitored tickers
             # You can specify different timeframes for different profiles
-            results = self.atr_calculator.update_multiple(
-                symbols=self.tickers,
-                timeframe="1m"  # Default to 1m for scalping
-            )
-            
-            # Log summary
-            for symbol, atr_data in results.items():
-                if atr_data:
+            profile_manager = get_profile_manager()
+
+            atr_timeframes = {
+                profile.atr_timeframe
+                for profile in profile_manager.get_all_profiles()
+                if profile.use_atr_filter
+            }
+ 
+            for timeframe in atr_timeframes:
+                results = self.atr_calculator.update_multiple(
+                    symbols=self.tickers,
+                    timeframe=timeframe
+                )
+
+                for symbol, atr_data in results.items():
+                    if not atr_data:
+                        self.logger.warning(
+                            f"Failed to update ATR for {symbol} [{timeframe}]"
+                        )
+                        continue
+
                     ratio = atr_data.get_ratio()
                     volatile = atr_data.is_volatile()
-                    
+
                     self.logger.info(
-                        f"ATR {symbol}: {atr_data.atr:.6f} "
+                        f"ATR[{timeframe}] {symbol}: "
+                        f"{atr_data.atr:.6f} "
                         f"(SMA: {atr_data.atr_sma:.6f}, "
                         f"Ratio: {ratio:.2f}, "
                         f"Volatile: {'YES' if volatile else 'NO'})"
                     )
-                else:
-                    self.logger.warning(f"Failed to update ATR for {symbol}")
-                    
+                     
         except Exception as e:
             self.logger.error(f"Error monitoring ATR: {e}", exc_info=True)
 
