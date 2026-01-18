@@ -826,7 +826,7 @@ async def tradingview_webhook(
                         summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
 
             # Only send if at least one profile succeeded OR if failures aren't just balance/trend issues
-            if (no_balance + trend_filtered + circuit_blocked + atr_filtered) < total_count:
+            if (no_balance + trend_filtered + atr_filtered) < total_count:
             #if success_count > 0 or (trend_filtered > 0 and trend_filtered != total_count):
                 await telegram.send_message(summary)
             else:
