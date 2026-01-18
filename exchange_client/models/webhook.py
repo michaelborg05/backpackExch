@@ -103,7 +103,10 @@ class TrendData(BaseModel):
     vwap: float
     price: float
     timestamp: Optional[float] = None
-    
+    volume: Optional[float] = None
+    volume_sma: Optional[float] = None  # 20-period average
+    volume_ratio: Optional[float] = None  # current / average
+
     def is_bullish(self, min_rsi: float = 50) -> bool:
         """Quick check if trend is bullish"""
         return (

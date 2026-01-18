@@ -1,14 +1,14 @@
 TO DO
  # Add dust conversion with the validation loop
+ # change TP to a limit order . Need to track open orders and sell if it hits SL or goes above TP and doesnt trigger
  # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
  # possibly sell as MAX if no other positions available
- # change TP to a limit order . Need to track open orders and sell if it hits SL or goes above TP and doesnt trigger
 # remove trades table. not required unless i use this for limit orders to track whats open?
- 
+# Paper trading and generate my own signals
+
  Gemini Suggestions
 # Possibly add a trend filter even on 1m profile - but using smaller timeframe. If thats not possible maybe some other indicator to indicate market trend
- #  5% gain or loss circuit breaker trading pause. I.e. If profile drops by X% within 24 hours or shorter, pause trading for 12 hours
  # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought
 # on 1m, can Add simple Price > ema 200 filter
 #Look at possibly getting a new buy indicator. Seems to indicate on trend confirmation insted of reversals so buy is too late
@@ -56,3 +56,4 @@ No need
 # ATR implementation
 # adjust RSI indicator. Either > 50 or > 40 and increasing. similarly maybe below 50 is no, or below 60 and decreasing is also no
  # loss/gain circuit breakers 
+ #  5% gain or loss circuit breaker trading pause. I.e. If profile drops by X% within 24 hours or shorter, pause trading for 12 hours
