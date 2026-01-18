@@ -932,6 +932,8 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert):
     This endpoint receives periodic updates (e.g., every 5min) with
     trend indicator values (EMA, RSI, VWAP) for multiple symbols
     """
+    apiserver_logger.info(f"Received trend update: {alert}")
+    
     try:
         # Validate secret
         if alert.secret != WEBHOOK_SECRET:
