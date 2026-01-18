@@ -4,27 +4,24 @@ from typing import List,  Dict,Optional
 from utils.logging import log_manager
 from utils.config import Config
 from utils.constants import MessagePriority
+from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 from api_builders.account_builder import get_balances
-from api_builders.market_builder import get_price
+from api_builders.market_builder import get_price, get_market_info
 from api_builders.trading_builder import TradingService
-from models.balance import BalanceReader
+from api_builders.atr_calculator import get_atr_calculator
 from cache.balance_cache import get_balance_cache
 from cache.price_cache import get_price_cache
-from api_builders.atr_calculator import get_atr_calculator
 from cache.portfolio_cache import get_portfolio_cache
 from cache.market_info_cache import get_market_info_cache
+from models.balance import BalanceReader
 from services.telegram_service import get_telegram
-from api_builders.market_builder import get_market_info
+from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager
-from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 
 from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
     update_position_trailing_stop,
-    close_position,
-    get_profile_by_name,
-    save_trade,
     close_invalid_position
 )
 
@@ -46,11 +43,17 @@ class MonitoringService:
         self.call_count = 0
         self.balance_cache = get_balance_cache()  # Get cache instance
         self.price_cache = get_price_cache()    # Get price cache instance
+
         self.market_info_cache = get_market_info_cache()
         self._markets_initialized = False
+
         self.atr_calculator = get_atr_calculator()
         self._atr_update_counter = 0
         self._atr_update_interval = 5  # Update ATR every 5 cycles (e.g., every 2.5 min if cycle is 30s)
+
+        self.circuit_breaker = get_circuit_breaker()
+        self._circuit_breaker_counter = 0
+        self._circuit_breaker_interval = 2  # Check every 2 cycles (e.g., every 60s if cycle is 30s)
 
 
     def start(self):
@@ -113,6 +116,7 @@ class MonitoringService:
                 self.call_count += 1
                 validation_counter += 1
                 self._atr_update_counter += 1
+                self._circuit_breaker_counter += 1 
 
                 self.logger.debug(f"Beginning loop #{self.call_count}")
                 
@@ -121,6 +125,10 @@ class MonitoringService:
                 
                 # Get account balances
                 self._monitor_balances()
+
+                if self._circuit_breaker_counter >= self._circuit_breaker_interval:
+                    self._monitor_circuit_breakers()
+                    self._circuit_breaker_counter = 0
 
                 # Monitor open balances and check for SL/TP/Trailing SL
                 self._monitor_open_positions()
@@ -599,6 +607,32 @@ class MonitoringService:
             if self.is_running:
                 self.logger.debug(f"Could not send Telegram message: {e}")
 
+    def _monitor_circuit_breakers(self):
+        """
+        Monitor circuit breakers for all profiles
+        Proactively checks PnL limits and triggers breakers if needed
+        """
+        try:
+            self.logger.debug("Checking circuit breakers...")
+            
+            # This will check all profiles and trigger breakers if limits exceeded
+            self.circuit_breaker.monitor_all_profiles()
+            
+            # Log status of active breakers
+            active_breakers = self.circuit_breaker.get_all_breakers()
+            
+            if active_breakers:
+                for profile_name, breaker_info in active_breakers.items():
+                    self.logger.info(
+                        f"🚨 [{profile_name}] Circuit breaker active: "
+                        f"{breaker_info['reason']} "
+                        f"({breaker_info['time_remaining_seconds']}s remaining)"
+                    )
+            
+        except Exception as e:
+            self.logger.error(f"Error monitoring circuit breakers: {e}", exc_info=True)
+
+
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
     global _monitoring_service
@@ -609,5 +643,6 @@ def get_monitoring_service() -> MonitoringService:
     if _monitoring_service is None:
         return None
     return _monitoring_service
+
 
 

@@ -3,25 +3,26 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
-from services.monitoring_service import get_monitoring_service
 from contextlib import asynccontextmanager
 from models.webhook import TradingViewAlert, WebhookResponse
-from api_builders.account_builder import get_balances
-from api_builders.market_builder import get_price
 from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
+from models.webhook import TrendUpdateAlert, TrendData
+from api_builders.account_builder import get_balances
+from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService, process_tradingview_alert
+from cache.trend_cache import get_trend_cache
 from cache.atr_cache import get_atr_cache
-from cache.balance_cache import get_balance_cache
-from services.telegram_service import TelegramService, set_telegram, get_telegram
 from cache.market_info_cache import get_market_info_cache
 from cache.portfolio_cache import get_portfolio_cache
-from models.webhook import TrendUpdateAlert, TrendData
-from cache.trend_cache import get_trend_cache
+from cache.balance_cache import get_balance_cache
+from services.monitoring_service import get_monitoring_service
+from services.telegram_service import TelegramService, set_telegram, get_telegram
+from services.circuit_breaker import get_circuit_breaker
+from services.profile_manager import get_profile_manager
 from utils.config import Config
 from utils.logging import log_manager
 from utils.constants import TradeReason
-from services.profile_manager import get_profile_manager
 from utils.security import (
     require_read_permission,
     require_trade_permission,
@@ -571,6 +572,7 @@ async def tradingview_webhook(
         market_info_cache = get_market_info_cache()
         trend_cache = get_trend_cache()
         atr_cache = get_atr_cache()
+        circuit_breaker = get_circuit_breaker() 
 
         # Process alert for each profile
         results = []
@@ -578,6 +580,27 @@ async def tradingview_webhook(
         
         for profile_name in alert.profiles:
             try:
+                # 1. CIRCUIT BREAKER CHECK (FIRST - before any other validation)
+                can_trade, breaker_reason = circuit_breaker.check_circuit_breakers(
+                    profile_name=profile_name,
+                    alert_action=alert.action
+                )
+                
+                if not can_trade:
+                    apiserver_logger.warning(
+                        f"[{profile_name}] 🚨 Circuit breaker blocked trade: {breaker_reason}"
+                    )
+                    
+                    results.append({
+                        "profile": profile_name,
+                        "success": False,
+                        "error": breaker_reason,
+                        "error_type": "circuit_breaker"
+                    })
+                    errors.append(f"[{profile_name}] Circuit breaker active")
+                    continue  # Skip this profile
+                
+
                 # Pre-validate balance for SELL orders
                 # Only rejects if balance is 0 or below minimum/step size
                 is_valid, balance_error = validate_balance_for_trade(
@@ -763,8 +786,10 @@ async def tradingview_webhook(
             total_count = len(alert.profiles)
 
             # Count different types of failures
-            trend_filtered = sum(1 for r in results if r.get("error_type") == "trend_filter")
-            no_balance = sum(1 for r in results if r.get("error_type") == "insufficient_balance")
+            trend_filtered  = sum(1 for r in results if r.get("error_type") == "trend_filter")
+            no_balance      = sum(1 for r in results if r.get("error_type") == "insufficient_balance")
+            atr_filtered    = sum(1 for r in results  if r.get("error_type") == "atr_filter")
+            circuit_blocked = sum(1 for r in results  if r.get("error_type") == "circuit_breaker")
 
             action_icon = "📈" if alert.action.lower() == "buy" else "🏁"
             if success_count == total_count:
@@ -801,9 +826,12 @@ async def tradingview_webhook(
                         summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
 
             # Only send if at least one profile succeeded OR if failures aren't just balance/trend issues
-            if (no_balance + trend_filtered) < total_count:
+            if (no_balance + trend_filtered + circuit_blocked + atr_filtered) < total_count:
             #if success_count > 0 or (trend_filtered > 0 and trend_filtered != total_count):
                 await telegram.send_message(summary)
+            else:
+                apiserver_logger.error(f"Telegram alert: All profiles failed to execute\n {summary}")
+
 
         # Build response message
         if overall_success:
@@ -991,3 +1019,52 @@ async def get_all_atr():
     """Get all ATR data from cache"""
     atr_cache = get_atr_cache()
     return atr_cache.get_cache_info()
+
+@app.get("/circuit-breaker/status")
+async def get_circuit_breaker_status():
+    """Get status of all circuit breakers"""
+    circuit_breaker = get_circuit_breaker()
+    return {
+        "active_breakers": circuit_breaker.get_all_breakers(),
+        "configuration": {
+            "max_daily_profit_pct": str(circuit_breaker.max_daily_profit_pct),
+            "max_daily_loss_pct": str(circuit_breaker.max_daily_loss_pct),
+            "profit_lock_hours": circuit_breaker.profit_lock_hours,
+            "loss_lock_hours": circuit_breaker.loss_lock_hours
+        }
+    }
+
+
+@app.get("/circuit-breaker/daily-summary/{profile_name}")
+async def get_daily_pnl_summary(profile_name: str):
+    """Get daily PnL summary for a profile"""
+    circuit_breaker = get_circuit_breaker()
+    return circuit_breaker.get_daily_summary(profile_name)
+
+
+@app.post("/circuit-breaker/reset/{profile_name}", dependencies=[Depends(require_admin_permission)])
+async def reset_circuit_breaker(profile_name: str):
+    """Manually reset a circuit breaker (admin only)"""
+    circuit_breaker = get_circuit_breaker()
+    success = circuit_breaker.force_reset_breaker(profile_name)
+    
+    if success:
+        return {"message": f"Circuit breaker reset for {profile_name}"}
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No active circuit breaker for {profile_name}"
+        )
+
+
+@app.get("/circuit-breaker/all-summaries")
+async def get_all_daily_summaries():
+    """Get daily PnL summary for all profiles"""
+    profile_manager = get_profile_manager()
+    circuit_breaker = get_circuit_breaker()
+    
+    summaries = {}
+    for profile in profile_manager.get_all_profiles():
+        summaries[profile.name] = circuit_breaker.get_daily_summary(profile.name)
+    
+    return summaries
