@@ -17,7 +17,7 @@ from services.telegram_service import TelegramService, set_telegram, get_telegra
 from cache.market_info_cache import get_market_info_cache
 from cache.portfolio_cache import get_portfolio_cache
 from models.webhook import TrendUpdateAlert, TrendData
-from services.trend_service import get_trend_cache
+from cache.trend_cache import get_trend_cache
 from utils.config import Config
 from utils.logging import log_manager
 from utils.constants import TradeReason
@@ -957,7 +957,7 @@ async def get_trend_status(symbol: str, timeframe: str):
             "rsi": trend.rsi,
             "vwap": trend.vwap,
             "price": trend.price,
-            "age_seconds": time.time() - (trend.timestamp or 0)
+            "age_seconds": time() - (trend.timestamp or 0)
         }
     }
 

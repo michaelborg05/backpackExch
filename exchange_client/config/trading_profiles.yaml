@@ -18,7 +18,11 @@ profiles:
         params: {fast: 20, slow: 50}
         weight: 1  # Optional: give more weight to certain indicators
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 46}
+        params: 
+          period: 14
+          min_value: 50          # Traditional threshold
+          use_momentum: true     # Enable momentum detection
+          early_threshold: 40    # Catch early momentum (RSI > 40 + increasing)
         weight: 1
       - type: "price_vs_vwap"
         params: {}
@@ -46,7 +50,11 @@ profiles:
         params: {fast: 20, slow: 50}
         weight: 1  # Optional: give more weight to certain indicators
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 46}
+        params: 
+          period: 14
+          min_value: 50          # Traditional threshold
+          use_momentum: true     # Enable momentum detection
+          early_threshold: 40    # Catch early momentum (RSI > 40 + increasing)
         weight: 1
       - type: "price_vs_vwap"
         params: {}
@@ -76,7 +84,11 @@ profiles:
       - type: "ema_alignment"
         params: {fast: 20, slow: 50}
       - type: "rsi_threshold"
-        params: {period: 14, min_value: 40}
+        params: 
+          period: 14
+          min_value: 50          # Traditional threshold
+          use_momentum: true     # Enable momentum detection
+          early_threshold: 40    # Catch early momentum (RSI > 40 + increasing)
       - type: "price_vs_vwap"
         params: {}
     min_indicators_required: 3  # All 3 must be bullish (more conservative)

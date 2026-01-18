@@ -8,7 +8,7 @@ curl -X POST http://localhost:8000/webhook/tradingview/trend \
       "timeframe": "60",
       "ema20": 3125.43,
       "ema50": 3114.91,
-      "rsi": 46.6,
+      "rsi": 45.6,
       "vwap": 3132.68,
       "price": 3114.39
     }]
