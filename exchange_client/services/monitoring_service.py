@@ -9,6 +9,7 @@ from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price, get_market_info
 from api_builders.trading_builder import TradingService
 from api_builders.atr_calculator import get_atr_calculator
+from api_builders.dust_conversion import get_dust_converter
 from cache.balance_cache import get_balance_cache
 from cache.price_cache import get_price_cache
 from cache.portfolio_cache import get_portfolio_cache
@@ -54,6 +55,10 @@ class MonitoringService:
         self.circuit_breaker = get_circuit_breaker()
         self._circuit_breaker_counter = 0
         self._circuit_breaker_interval = 2  # Check every 2 cycles (e.g., every 60s if cycle is 30s)
+
+        self.dust_converter = get_dust_converter()
+        self._dust_conversion_counter = 0
+        self._dust_conversion_interval = 2880  # Convert dust every 2880 cycles (24 hours if cycle is 30s)
 
 
     def start(self):
@@ -117,6 +122,7 @@ class MonitoringService:
                 validation_counter += 1
                 self._atr_update_counter += 1
                 self._circuit_breaker_counter += 1 
+                self._dust_conversion_counter += 1
 
                 self.logger.debug(f"Beginning loop #{self.call_count}")
                 
@@ -143,6 +149,10 @@ class MonitoringService:
                     self.logger.info("Running position validation...")
                     self._validate_open_positions()
                     validation_counter = 0
+
+                if self._dust_conversion_counter >= self._dust_conversion_interval:
+                    self._convert_dust()
+                    self._dust_conversion_counter = 0
 
                 # Wait before next iteration
                 if self.is_running:  # Check again before sleeping
@@ -632,6 +642,46 @@ class MonitoringService:
         except Exception as e:
             self.logger.error(f"Error monitoring circuit breakers: {e}", exc_info=True)
 
+    def _convert_dust(self):
+        """
+        Convert dust to USDC for all profiles
+        Runs periodically (default: every 6 hours)
+        """
+        try:
+            self.logger.info("🧹 Starting periodic dust conversion...")
+            
+            # Convert dust for all profiles
+            results = self.dust_converter.convert_dust_all_profiles()
+            
+            # Count successes and log summary
+            successful = sum(1 for r in results.values() if r is not None)
+            total = len(results)
+            
+            if successful > 0:
+                self.logger.info(
+                    f"✅ Dust conversion complete: {successful}/{total} profiles"
+                )
+                
+                # Send Telegram notification with summary
+                self._send_telegram(
+                    f"🧹 Dust conversion complete\n"
+                    f"Converted dust for {successful}/{total} profiles",
+                    MessagePriority.NORMAL
+                )
+            else:
+                self.logger.info("No dust to convert for any profile")
+            
+            # Refresh balances after conversion to update cache
+            if successful > 0:
+                self.logger.debug("Refreshing balances after dust conversion...")
+                self._monitor_balances()
+            
+        except Exception as e:
+            self.logger.error(f"Error converting dust: {e}", exc_info=True)
+            self._send_telegram(
+                f"❌ Error during dust conversion: {str(e)}",
+                MessagePriority.HIGH
+            )
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""

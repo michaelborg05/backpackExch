@@ -148,6 +148,18 @@ class CircuitBreakerService:
             (should_trigger, reason) tuple
         """
         try:
+            # CRITICAL FIX: Don't re-trigger if already active
+            # This prevents the timer from resetting on every check
+            if profile_name in self._active_breakers:
+                breaker = self._active_breakers[profile_name]
+                if breaker.is_active():
+                    # Return the existing breaker's reason without re-triggering
+                    self.logger.debug(
+                        f"[{profile_name}] Circuit breaker already active: "
+                        f"{breaker.time_remaining()}s remaining"
+                    )
+                    return True, breaker.reason
+            
             # Get starting balance for today
             daily_start = self._get_daily_start_balance(profile_name)
             

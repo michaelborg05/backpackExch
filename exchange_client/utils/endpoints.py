@@ -48,3 +48,8 @@ class APIEndpoints:
     def backpack_Markets(cls) -> str:
         """Backpack Markets endpoint"""
         return f"{cls.BACKPACK_BASE}/api/v1/markets"
+
+    @classmethod
+    def backpack_convert_dust(cls) -> str:
+        """Backpack Convert Dust endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/account/convertDust"
