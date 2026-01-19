@@ -131,8 +131,16 @@ profiles:
     max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
-    # No trend filter for scalping
-    use_trend_filter: false
+    use_trend_filter: true
+    trend_timeframe: "60" 
+    trend_indicators:
+      - type: "rsi_threshold"
+        params: 
+          period: 14
+          min_value: 40
+          use_momentum: true
+         early_threshold: 33
+    min_indicators_required: 1
     # ATR filter for scalping - CRITICAL for 1m trades
     use_atr_filter: true
     atr_timeframe: "1m"
