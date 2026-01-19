@@ -123,7 +123,7 @@ profiles:
     enabled: true
     api_key_env: BP_API_KEY_1M_ATR
     secret_env: BP_SECRET_1M_ATR
-    take_profit_pct: 0.6
+    take_profit_pct: 0.8
     stop_loss_pct: 0.4
     trailing_stop_pct: 0.4
     arm_trailing_stop_pct: 0.3
