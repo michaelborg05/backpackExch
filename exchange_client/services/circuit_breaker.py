@@ -321,7 +321,7 @@ class CircuitBreakerService:
             "current_balance": str(current_value),
             "daily_pnl": str(daily_pnl),
             "daily_pnl_pct": f"{daily_pnl_pct:+.2f}%",
-            "hours_elapsed": round(time_since_start / 3600, 1),
+            "hours_remaining": self.loss_lock_hours - round(time_since_start / 3600, 1),
             "profit_limit": f"+{self.max_daily_profit_pct}%",
             "loss_limit": f"-{self.max_daily_loss_pct}%",
             "circuit_breaker_active": profile_name in self._active_breakers

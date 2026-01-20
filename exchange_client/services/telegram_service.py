@@ -295,6 +295,105 @@ class TelegramService:
                         parse_mode="HTML"
                     )
                             
+                case "summary" | "s":
+                    # Send "processing" message first
+                    processing_msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text="💰 Fetching summary..."
+                    )
+                    
+                    try:
+                        from cache.trend_cache import get_trend_cache
+                        from cache.atr_cache import get_atr_cache
+                        from services.circuit_breaker import get_circuit_breaker
+
+                        trend_cache = get_trend_cache()
+                        circuit_breaker = get_circuit_breaker() 
+                        
+                        if not self.profile_manager:
+                            self.logger.warning("Profile manager not initialized")
+                            msg_text = "Profile manager not initialized"
+                            
+                            # Delete "processing" message and send result
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=msg_text,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            profiles = self.profile_manager.get_all_profiles()
+
+                            # Delete "processing" message
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                            
+                            # Send each profile's balance
+                            for profile in profiles:
+                                results = []
+
+                                limit_summary = circuit_breaker.get_daily_summary(profile.name)
+
+                                if not limit_summary:
+                                    msg = f"⚠️ {profile.name}: Circuit breaker cannot be retrieved"
+                                elif "error" in limit_summary:
+                                    msg = f"⚠️ {profile.name}: {limit_summary['error']}"
+                                else:
+                                    status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
+                                    msg = f"{profile.name} 💰 {limit_summary['current_balance']} | Status: {status}"
+
+                                results.append({
+                                    "profile": profile.name,
+                                    "type": "circuit_breaker",
+                                    "msg": msg,
+                                })
+                                
+                                full_message = "\n\n".join([item['msg'] for item in results])
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=full_message,
+                                    parse_mode="HTML"
+                                )
+                            
+                            # Loop through all Trend cache entries
+                            cached_keys = list(trend_cache._cache.keys())
+                            
+                            if not cached_keys:
+                                msg = "No cached trends available"
+                            else:
+                                msg = "📈 Current Trends:\n"
+                                for key in cached_keys:
+                                    # Split the key back into components
+                                    # Using rsplit allows for symbols with underscores if they exist
+                                    symbol, timeframe = key.rsplit('_', 1)
+
+                                    # Call your is_bullish method
+                                    # This will use your configured indicator logic (EMA, RSI, VWAP)
+                                    is_bullish, reason = trend_cache.is_bullish(symbol, timeframe)
+                                
+                                    status_emoji = "🟢" if is_bullish else "🔴"
+                                    msg += f"{status_emoji} {symbol} ({timeframe}): {reason} \n\n"
+
+                            
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=msg,
+                                parse_mode="HTML"
+                            )
+                    
+                    except Exception as e:
+                        # Delete processing message and show error
+                        try:
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                        except:
+                            pass
+                        
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"❌ Error fetching balances: {str(e)}"
+                        )
+                
+
+
                 case _:
                     await bot.send_message(
                         chat_id=chat_id,
