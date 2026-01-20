@@ -115,9 +115,9 @@ profiles:
       - type: "rsi_threshold"
         params: 
           period: 14
-          min_value: 40
+          min_value: 45
           use_momentum: true
-          early_threshold: 33
+          early_threshold: 35
     min_indicators_required: 1
     # ATR filter for scalping - CRITICAL for 1m trades
     use_atr_filter: false
@@ -145,9 +145,9 @@ profiles:
       - type: "rsi_threshold"
         params: 
           period: 14
-          min_value: 40
+          min_value: 45
           use_momentum: true
-          early_threshold: 33
+          early_threshold: 35
     min_indicators_required: 1
     # ATR filter for scalping - CRITICAL for 1m trades
     use_atr_filter: true
