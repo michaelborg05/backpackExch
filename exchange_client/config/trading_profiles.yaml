@@ -27,7 +27,7 @@ profiles:
       - type: "price_vs_vwap"
         params: {}
         weight: 1
-    min_indicators_required: 2  # Need 2/3 indicators bullish
+    min_indicators_required: 1  # Need 2/3 indicators bullish
     use_atr_filter: false
 
   15m_MB:
