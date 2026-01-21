@@ -6,7 +6,7 @@ from models.webhook import TrendData
 class TrendCache:
     """Cache for trend data received from TradingView"""
     
-    def __init__(self, max_age: int = 600):  # 10 min max age
+    def __init__(self, max_age: int = 14400):  # 4hr max age
         self.logger = log_manager.get_logger("TrendCache")
         self.max_age = max_age
         self._cache: Dict[str, TrendData] = {}
