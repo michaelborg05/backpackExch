@@ -6,7 +6,7 @@ from models.webhook import TrendData
 class TrendCache:
     """Cache for trend data received from TradingView"""
     
-    def __init__(self, max_age: int = 14400):  # 4hr max age
+    def __init__(self, max_age: int = 600):  # 10m max age
         self.logger = log_manager.get_logger("TrendCache")
         self.max_age = max_age
         self._cache: Dict[str, TrendData] = {}
@@ -17,33 +17,113 @@ class TrendCache:
     def update(self, trend_data: TrendData):
         """Update trend data for a symbol/timeframe"""
         key = f"{trend_data.symbol}_{trend_data.timeframe}"
+        
+        # Check if this is actually NEW data (indicators changed)
+        old_trend = self._cache.get(key)
+        is_new_data = self._is_significant_change(old_trend, trend_data)
+        
+        # Always update cache (to refresh timestamp and current price)
         trend_data.timestamp = time.time()
         self._cache[key] = trend_data
         
-        # Update RSI history for momentum tracking
-        if key not in self._rsi_history:
-            self._rsi_history[key] = []
+        # Update RSI history ONLY if data actually changed
+        if is_new_data:
+            if key not in self._rsi_history:
+                self._rsi_history[key] = []
+            
+            # Add current RSI to history
+            self._rsi_history[key].append((trend_data.timestamp, trend_data.rsi))
+            
+            # Keep only last 5 entries (enough for momentum calculation)
+            if len(self._rsi_history[key]) > 5:
+                self._rsi_history[key] = self._rsi_history[key][-5:]
+            
+            # Log significant changes
+            if old_trend:
+                self._log_trend_change(trend_data, old_trend)
+            else:
+                self._log_new_trend(trend_data)
+        else:
+            # Just refreshing - log at debug level
+            self.logger.debug(
+                f"Refreshed: {trend_data.symbol} ({trend_data.timeframe}) - "
+                f"RSI: {trend_data.rsi:.1f}, Price: ${trend_data.price:.2f}"
+            )
+    
+    def _is_significant_change(self, old_trend: Optional[TrendData], new_trend: TrendData) -> bool:
+        """
+        Check if new trend data represents a significant change
+        (i.e., indicators changed, not just timestamp/price refresh)
         
-        # Add current RSI to history
-        self._rsi_history[key].append((trend_data.timestamp, trend_data.rsi))
+        Args:
+            old_trend: Previous trend data (can be None)
+            new_trend: New trend data
+            
+        Returns:
+            True if this is new/changed data, False if just a refresh
+        """
+        if old_trend is None:
+            return True  # First time seeing this symbol/timeframe
         
-        # Keep only last 5 entries (enough for momentum calculation)
-        if len(self._rsi_history[key]) > 5:
-            self._rsi_history[key] = self._rsi_history[key][-5:]
-  
+        # Define thresholds for "significant" changes
+        # These represent real indicator movements vs noise/rounding
+        EMA_THRESHOLD = 0.0001      # 0.01% change in EMA
+        RSI_THRESHOLD = 0.1         # 0.1 point change in RSI
+        VWAP_THRESHOLD = 0.0001     # 0.01% change in VWAP
+        VOLUME_THRESHOLD = 0.01     # 1% change in volume
+        
+        # Check if any indicator changed significantly
+        ema20_changed = abs(new_trend.ema20 - old_trend.ema20) > EMA_THRESHOLD
+        ema50_changed = abs(new_trend.ema50 - old_trend.ema50) > EMA_THRESHOLD
+        rsi_changed = abs(new_trend.rsi - old_trend.rsi) > RSI_THRESHOLD
+        vwap_changed = abs(new_trend.vwap - old_trend.vwap) > VWAP_THRESHOLD
+        
+        # Volume can be None, handle safely
+        volume_changed = False
+        if new_trend.volume is not None and old_trend.volume is not None:
+            if old_trend.volume > 0:
+                volume_pct_change = abs(new_trend.volume - old_trend.volume) / old_trend.volume
+                volume_changed = volume_pct_change > VOLUME_THRESHOLD
+        
+        # Return True if ANY indicator changed
+        return (ema20_changed or ema50_changed or rsi_changed or 
+                vwap_changed or volume_changed)
+    
+    def _log_new_trend(self, trend_data: TrendData):
+        """Log when we first start tracking a symbol/timeframe"""
         if trend_data.price < 1:
             self.logger.info(
-                f"Updated trend: {trend_data.symbol} ({trend_data.timeframe}) - "
+                f"🆕 NEW trend tracking: {trend_data.symbol} ({trend_data.timeframe}) - "
                 f"EMA: {trend_data.ema20:.5f}/{trend_data.ema50:.5f}, "
                 f"RSI: {trend_data.rsi:.1f}, "
                 f"Price: ${trend_data.price:.5f}, VWAP: ${trend_data.vwap:.5f}"
             )
         else:
             self.logger.info(
-                f"Updated trend: {trend_data.symbol} ({trend_data.timeframe}) - "
+                f"🆕 NEW trend tracking: {trend_data.symbol} ({trend_data.timeframe}) - "
                 f"EMA: {trend_data.ema20:.2f}/{trend_data.ema50:.2f}, "
                 f"RSI: {trend_data.rsi:.1f}, "
                 f"Price: ${trend_data.price:.2f}, VWAP: ${trend_data.vwap:.2f}"
+            )
+    
+    def _log_trend_change(self, new_trend: TrendData, old_trend: TrendData):
+        """Log when trend indicators change significantly"""
+        changes = []
+        
+        # Check what changed
+        if abs(new_trend.ema20 - old_trend.ema20) > 0.0001:
+            changes.append(f"EMA20: {old_trend.ema20:.4f}→{new_trend.ema20:.4f}")
+        if abs(new_trend.ema50 - old_trend.ema50) > 0.0001:
+            changes.append(f"EMA50: {old_trend.ema50:.4f}→{new_trend.ema50:.4f}")
+        if abs(new_trend.rsi - old_trend.rsi) > 0.1:
+            changes.append(f"RSI: {old_trend.rsi:.1f}→{new_trend.rsi:.1f}")
+        if abs(new_trend.vwap - old_trend.vwap) > 0.0001:
+            changes.append(f"VWAP: {old_trend.vwap:.4f}→{new_trend.vwap:.4f}")
+        
+        if changes:
+            self.logger.info(
+                f"✨ TREND CHANGED: {new_trend.symbol} ({new_trend.timeframe}) - "
+                f"{', '.join(changes)}"
             )
     
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
