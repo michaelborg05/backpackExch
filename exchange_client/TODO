@@ -8,7 +8,10 @@ TO DO
 # move some settings like circuit breaker percents, hours remaining, etc, to db settings table
 # convert all logs to self.logger
 #Move buy amounts for signal generator into yaml - Maybe combine with percentage
-
+# add various data to database so its not reset on reboot
+     - Circuit breaker 
+     - Trend data
+     - 
  Gemini Suggestions
 # Possibly add a trend filter even on 1m profile - but using smaller timeframe. If thats not possible maybe some other indicator to indicate market trend
  # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought

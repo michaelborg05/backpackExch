@@ -4,7 +4,7 @@ profiles:
     api_key_env: BACKPACK_API_KEY
     secret_env: SECRET
 
-    take_profit_pct: 1.5
+    take_profit_pct: 2
     stop_loss_pct: 1.0
     max_risk_pct: 0.25
     trailing_stop_pct: 1
@@ -17,8 +17,8 @@ profiles:
     enable_signal_generation: true    # Enable automated signal generation
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 300      # Wait 5min between signals for same symbol
-    min_signal_confidence: 65.0       # Only trade signals >= 75% confidence
-    min_volume_ratio: 1             # Require 50% above average volume
+    min_signal_confidence: 75.0       # Only trade signals >= 75% confidence
+    min_volume_ratio: 1.25             # Require 50% above average volume
     
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
@@ -148,7 +148,7 @@ profiles:
     take_profit_pct: 0.8
     stop_loss_pct: 0.4
     trailing_stop_pct: 0.4
-    arm_trailing_stop_pct: 0.3
+    arm_trailing_stop_pct: 0.4
     use_trailing_stop: true
     max_position_size: 10
     max_risk_pct: 1.0
@@ -166,7 +166,7 @@ profiles:
     # ATR filter for scalping - CRITICAL for 1m trades
     use_atr_filter: true
     atr_timeframe: "1m"
-    atr_threshold: 1.1    # Require 10% above average volatility
+    atr_threshold: 1.05    # Require 10% above average volatility
     atr_filter_mode: "require_high"  # Only trade when volatility is elevated
     # Optional: could also set max ATR to avoid extreme volatility
     # atr_max_threshold: 2.0  # Don't trade if ATR > 2.0 * ATR_SMA    
