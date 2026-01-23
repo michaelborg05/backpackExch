@@ -15,9 +15,13 @@ from cache.price_cache import get_price_cache
 from cache.portfolio_cache import get_portfolio_cache
 from cache.market_info_cache import get_market_info_cache
 from models.balance import BalanceReader
+from models.trading_profile import TradingProfile
+from models.trading_signal import TradingSignal
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager
+from services.signal_generator import get_signal_generator
+
 
 from db.utils import get_db_session
 from db.crud import (
@@ -59,6 +63,10 @@ class MonitoringService:
         self.dust_converter = get_dust_converter()
         self._dust_conversion_counter = 0
         self._dust_conversion_interval = 2880  # Convert dust every 2880 cycles (24 hours if cycle is 30s)
+
+        self._signal_check_counter = 0
+        self._signal_check_interval = 2  # Check for signals every 10 cycles (2.5 min if cycle is 30s)
+        self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
 
 
     def start(self):
@@ -123,7 +131,7 @@ class MonitoringService:
                 self._atr_update_counter += 1
                 self._circuit_breaker_counter += 1 
                 self._dust_conversion_counter += 1
-
+                self._signal_check_counter += 1
                 self.logger.debug(f"Beginning loop #{self.call_count}")
                 
                 # Monitor prices for all tickers
@@ -160,7 +168,11 @@ class MonitoringService:
                         f"Waiting {self.config.monitor_delay_interval} seconds until next call..."
                     )
                     time.sleep(self.config.monitor_delay_interval)
-                    
+
+                if self._signal_check_counter >= self._signal_check_interval:
+                    self._check_signals()
+                    self._signal_check_counter = 0
+  
         except KeyboardInterrupt:
             self.logger.info("Monitoring loop interrupted by user")
         except Exception as e:
@@ -680,6 +692,184 @@ class MonitoringService:
             self.logger.error(f"Error converting dust: {e}", exc_info=True)
             self._send_telegram(
                 f"❌ Error during dust conversion: {str(e)}",
+                MessagePriority.HIGH
+            )
+
+
+    def _check_signals(self):
+        """
+        Check for trading signals and execute trades
+        Only processes signals from profiles with signal generation enabled
+        """
+        try:
+            profile_manager = get_profile_manager()
+            if profile_manager is None:
+                self.logger.error("Profile manager not initialized")
+                return
+            
+            # Get all profiles that have signal generation enabled
+            signal_profiles = [
+                profile for profile in profile_manager.get_all_profiles()
+                if getattr(profile, 'enable_signal_generation', False)
+            ]
+            
+            if not signal_profiles:
+                self.logger.debug("No profiles with signal generation enabled")
+                return
+            
+            self.logger.info(f"Checking signals for {len(signal_profiles)} profile(s)...")
+            
+            for profile in signal_profiles:
+                try:
+                    self._process_signals_for_profile(profile)
+                except Exception as e:
+                    self.logger.error(
+                        f"Error processing signals for {profile.name}: {e}",
+                        exc_info=True
+                    )
+        
+        except Exception as e:
+            self.logger.error(f"Error checking signals: {e}", exc_info=True)
+    
+    def _process_signals_for_profile(self, profile: TradingProfile):
+        """Process trading signals for a specific profile"""
+        from services.signal_generator import get_signal_generator
+        from api_builders.trading_builder import TradingService
+        from db.crud import get_open_position_for_symbol
+        
+        signal_gen = get_signal_generator(profile)
+        
+        # Scan all monitored tickers
+        signals = signal_gen.scan_symbols(self.tickers)
+        
+        if not signals:
+            self.logger.debug(f"[{profile.name}] No signals generated")
+            return
+        
+        self.logger.info(
+            f"[{profile.name}] Generated {len(signals)} signal(s)"
+        )
+        
+        # Process each signal
+        for signal in signals:
+            try:
+                # Check if we already have an open position for this symbol
+                with get_db_session() as db:
+                    existing_position = get_open_position_for_symbol(
+                        db, 
+                        profile.name, 
+                        signal.symbol
+                    )
+                    
+                    if existing_position:
+                        self.logger.debug(
+                            f"[{profile.name}] Already have open position for {signal.symbol}, skipping"
+                        )
+                        continue
+                
+                # Check cooldown (don't signal same symbol too frequently)
+                cooldown_key = f"{profile.name}_{signal.symbol}"
+                last_signal_time = self._last_signals.get(cooldown_key, 0)
+                cooldown_seconds = getattr(profile, 'signal_cooldown_seconds', 300)  # 5 min default
+                
+                if time.time() - last_signal_time < cooldown_seconds:
+                    remaining = cooldown_seconds - (time.time() - last_signal_time)
+                    self.logger.debug(
+                        f"[{profile.name}] {signal.symbol} on cooldown "
+                        f"({remaining:.0f}s remaining)"
+                    )
+                    continue
+                
+                # Check circuit breakers
+                circuit_breaker = get_circuit_breaker()
+                can_trade, breaker_reason = circuit_breaker.check_circuit_breakers(
+                    profile_name=profile.name,
+                    alert_action="buy"
+                )
+                
+                if not can_trade:
+                    self.logger.warning(
+                        f"[{profile.name}] 🚨 Circuit breaker blocked signal: {breaker_reason}"
+                    )
+                    continue
+                
+                # Execute trade
+                self._execute_signal(signal, profile)
+                
+                # Update last signal time
+                self._last_signals[cooldown_key] = time.time()
+                
+            except Exception as e:
+                self.logger.error(
+                    f"[{profile.name}] Error executing signal for {signal.symbol}: {e}",
+                    exc_info=True
+                )
+    
+    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile):
+        """Execute a trading signal"""
+        from api_builders.trading_builder import TradingService
+        
+        if signal.action != "BUY":
+            self.logger.debug(f"[{profile.name}] Ignoring non-BUY signal")
+            return
+        
+        self.logger.info(
+            f"[{profile.name}] 🎯 EXECUTING SIGNAL: {signal.symbol} "
+            f"({signal.strength.name}, {signal.confidence:.1f}%)"
+        )
+        
+        # Create trading service
+        trading = TradingService(profile)
+        
+        try:
+            match signal.symbol:
+                case "SOL_USDC":
+                    qty = "1.5"
+                case "ETH_USDC":
+                    qty = "0.05"
+                case "HYPE_USDC":
+                    qty = "4"
+                case "SUI_USDC":
+                    qty = "60"
+
+            # Execute market buy
+            result = trading.order_buy(
+                symbol=signal.symbol,
+                quantity=qty,  # Use profile's default order size
+                source=f"SIGNAL_{signal.strength.name}",
+                profile_name=profile.name
+            )
+            
+            if result:
+                self.logger.info(
+                    f"[{profile.name}] ✅ Signal executed: {result.id}, "
+                    f"Qty: {result.executed_quantity}, "
+                    f"Price: ${float(result.executed_quote_quantity)/float(result.executed_quantity):.4f}"
+                )
+                
+                # Send Telegram notification
+                executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
+                
+                self._send_telegram(
+                    f"🎯 Signal Trade Executed [{profile.name}]\n"
+                    f"Symbol: {signal.symbol}\n"
+                    f"Strength: {signal.strength.name} ({signal.confidence:.0f}%)\n"
+                    f"Price: ${executed_price:.4f}\n"
+                    f"Quantity: {result.executed_quantity}\n"
+                    f"Reasons:\n" + "\n".join(f"  {r}" for r in signal.reasons),
+                    MessagePriority.HIGH
+                )
+            
+        except Exception as e:
+            self.logger.error(
+                f"[{profile.name}] Failed to execute signal: {e}",
+                exc_info=True
+            )
+            
+            self._send_telegram(
+                f"❌ Signal execution failed [{profile.name}]\n"
+                f"Symbol: {signal.symbol}\n"
+                f"Error: {str(e)}",
                 MessagePriority.HIGH
             )
 

@@ -6,7 +6,7 @@ from models.webhook import TrendData
 class TrendCache:
     """Cache for trend data received from TradingView"""
     
-    def __init__(self, max_age: int = 600):  # 10m max age
+    def __init__(self, max_age: int = 1200):  # 20m max age
         self.logger = log_manager.get_logger("TrendCache")
         self.max_age = max_age
         self._cache: Dict[str, TrendData] = {}
@@ -69,25 +69,25 @@ class TrendCache:
         # These represent real indicator movements vs noise/rounding
         EMA_THRESHOLD = 0.0001      # 0.01% change in EMA
         RSI_THRESHOLD = 0.1         # 0.1 point change in RSI
-        VWAP_THRESHOLD = 0.0001     # 0.01% change in VWAP
-        VOLUME_THRESHOLD = 0.01     # 1% change in volume
+        #VWAP_THRESHOLD = 0.0001     # 0.01% change in VWAP
+        #VOLUME_THRESHOLD = 0.01     # 1% change in volume
         
         # Check if any indicator changed significantly
         ema20_changed = abs(new_trend.ema20 - old_trend.ema20) > EMA_THRESHOLD
         ema50_changed = abs(new_trend.ema50 - old_trend.ema50) > EMA_THRESHOLD
         rsi_changed = abs(new_trend.rsi - old_trend.rsi) > RSI_THRESHOLD
-        vwap_changed = abs(new_trend.vwap - old_trend.vwap) > VWAP_THRESHOLD
+        #vwap_changed = abs(new_trend.vwap - old_trend.vwap) > VWAP_THRESHOLD
         
         # Volume can be None, handle safely
-        volume_changed = False
-        if new_trend.volume is not None and old_trend.volume is not None:
-            if old_trend.volume > 0:
-                volume_pct_change = abs(new_trend.volume - old_trend.volume) / old_trend.volume
-                volume_changed = volume_pct_change > VOLUME_THRESHOLD
-        
+#
+#        volume_changed = False
+#        if new_trend.volume is not None and old_trend.volume is not None:
+#            if old_trend.volume > 0:
+#                volume_pct_change = abs(new_trend.volume - old_trend.volume) / old_trend.volume
+#                volume_changed = volume_pct_change > VOLUME_THRESHOLD
+      
         # Return True if ANY indicator changed
-        return (ema20_changed or ema50_changed or rsi_changed or 
-                vwap_changed or volume_changed)
+        return (ema20_changed or ema50_changed or rsi_changed )
     
     def _log_new_trend(self, trend_data: TrendData):
         """Log when we first start tracking a symbol/timeframe"""

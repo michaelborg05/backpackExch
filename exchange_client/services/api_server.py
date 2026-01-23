@@ -20,6 +20,7 @@ from services.monitoring_service import get_monitoring_service
 from services.telegram_service import TelegramService, set_telegram, get_telegram
 from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager
+from services.signal_generator import get_signal_generator, get_all_signal_generators
 from utils.config import Config
 from utils.logging import log_manager
 from utils.constants import TradeReason
@@ -1070,3 +1071,172 @@ async def get_all_daily_summaries():
         summaries[profile.name] = circuit_breaker.get_daily_summary(profile.name)
     
     return summaries
+
+@app.get("/signals/status/{profile_name}")
+async def get_signal_status(profile_name: str):
+    """Get signal generation status for a profile"""
+    profile_manager = get_profile_manager()
+    profile = profile_manager.get(profile_name)
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    signal_gen = get_signal_generator(profile)
+    
+    return {
+        "profile": profile_name,
+        "enabled": getattr(profile, 'enable_signal_generation', False),
+        "trading_timeframe": signal_gen.trading_timeframe,
+        "trend_timeframe": signal_gen.trend_timeframe,
+        "min_volume_ratio": signal_gen.min_volume_ratio,
+        "min_confidence": signal_gen.min_confidence,
+        "atr_filter_enabled": profile.use_atr_filter,
+        "trend_filter_enabled": profile.use_trend_filter
+    }
+
+
+@app.post("/signals/scan/{profile_name}")
+async def scan_for_signals(profile_name: str):
+    """
+    Manually trigger signal scan for a profile
+    Returns signals without executing trades
+    """
+    profile_manager = get_profile_manager()
+    profile = profile_manager.get(profile_name)
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    signal_gen = get_signal_generator(profile)
+    
+    # Get monitored tickers
+    monitoring = get_monitoring_service()
+    symbols = monitoring.tickers
+    
+    # Generate signals
+    signals = signal_gen.scan_symbols(symbols)
+    
+    return {
+        "profile": profile_name,
+        "symbols_scanned": len(symbols),
+        "signals_found": len(signals),
+        "signals": [signal.to_dict() for signal in signals]
+    }
+
+
+@app.get("/signals/check/{profile_name}/{symbol}")
+async def check_signal_for_symbol(profile_name: str, symbol: str):
+    """
+    Check if there's a signal for a specific symbol
+    Useful for debugging why a signal was/wasn't generated
+    """
+    profile_manager = get_profile_manager()
+    profile = profile_manager.get(profile_name)
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    signal_gen = get_signal_generator(profile)
+    
+    # Generate signal
+    signal = signal_gen.generate_signal(symbol)
+    
+    if signal:
+        return {
+            "has_signal": True,
+            "signal": signal.to_dict()
+        }
+    else:
+        return {
+            "has_signal": False,
+            "message": f"No signal generated for {symbol}",
+            "note": "Check logs for detailed reasons"
+        }
+
+
+@app.get("/signals/history")
+async def get_signal_history():
+    """
+    Get recent signal execution history
+    (You'd need to implement signal history tracking in monitoring_service)
+    """
+    # TODO: Implement signal history tracking
+    return {
+        "message": "Signal history tracking not yet implemented",
+        "suggestion": "Check trades table with source='SIGNAL_*'"
+    }
+
+
+@app.post("/signals/test/{profile_name}/{symbol}")
+async def test_signal_execution(
+    profile_name: str, 
+    symbol: str,
+    dry_run: bool = True
+):
+    """
+    Test signal execution without actually placing order
+    Useful for debugging
+    """
+    profile_manager = get_profile_manager()
+    profile = profile_manager.get(profile_name)
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    signal_gen = get_signal_generator(profile)
+    signal = signal_gen.generate_signal(symbol)
+    
+    if not signal:
+        return {
+            "success": False,
+            "message": f"No signal generated for {symbol}"
+        }
+    
+    # Check circuit breakers
+    circuit_breaker = get_circuit_breaker()
+    can_trade, breaker_reason = circuit_breaker.check_circuit_breakers(
+        profile_name=profile_name,
+        alert_action="buy"
+    )
+    
+    if not can_trade:
+        return {
+            "success": False,
+            "message": f"Circuit breaker blocked: {breaker_reason}",
+            "signal": signal.to_dict()
+        }
+    
+    if dry_run:
+        return {
+            "success": True,
+            "message": "Signal validation passed (dry run)",
+            "signal": signal.to_dict(),
+            "would_execute": True
+        }
+    else:
+        # Actually execute (use with caution!)
+        from api_builders.trading_builder import TradingService
+        
+        trading = TradingService(profile)
+        
+        try:
+            result = trading.order_buy(
+                symbol=signal.symbol,
+                quantity="MAX",
+                source=f"TEST_SIGNAL_{signal.strength.name}",
+                profile_name=profile_name
+            )
+            
+            return {
+                "success": True,
+                "message": "Signal executed",
+                "signal": signal.to_dict(),
+                "order": result.model_dump()
+            }
+        
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Execution failed: {str(e)}",
+                "signal": signal.to_dict()
+            }

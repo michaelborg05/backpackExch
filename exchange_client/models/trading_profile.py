@@ -32,6 +32,12 @@ class TradingProfile(BaseModel):
     atr_threshold: float = 1.05
     atr_filter_mode: str = "require_high"
 
+    enable_signal_generation: bool = False          # Enable automated signal generation
+    signal_timeframe: str = "15m"                   # Timeframe for entry signals
+    signal_cooldown_seconds: Optional[int] = 300    # Wait 5min between signals for same symbol
+    min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
+    min_volume_ratio: float = 1.5                   # Require 50% above average volume
+
     class Config:
         json_encoders = {
             Decimal: lambda v: float(v)

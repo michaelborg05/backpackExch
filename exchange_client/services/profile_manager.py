@@ -97,6 +97,13 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
                         )
                         min_indicators_required = len(trend_indicators)
 
+
+        enable_signal_generation    = cfg.get("enable_signal_generation",False)
+        signal_timeframe            = cfg.get("signal_timeframe", "15m")
+        signal_cooldown_seconds     = cfg.get("signal_cooldown_seconds", 300)
+        min_signal_confidence       = cfg.get("min_signal_confidence", 75)
+        min_volume_ratio            = cfg.get("min_volume_ratio", 1.5)
+
         # Load ATR filter configuration
         use_atr_filter = cfg.get("use_atr_filter", False)
         atr_timeframe = cfg.get("atr_timeframe", "1m")
@@ -127,6 +134,12 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             atr_threshold=atr_threshold,
             atr_filter_mode=atr_filter_mode,
             atr_max_threshold=atr_max_threshold,
+            #New signal fields
+            enable_signal_generation    = enable_signal_generation,
+            signal_timeframe            = signal_timeframe,
+            signal_cooldown_seconds     = signal_cooldown_seconds,
+            min_signal_confidence       = min_signal_confidence,
+            min_volume_ratio            = min_volume_ratio,
         )
 
 
