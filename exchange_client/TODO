@@ -8,10 +8,12 @@ TO DO
 # move some settings like circuit breaker percents, hours remaining, etc, to db settings table
 # convert all logs to self.logger
 #Move buy amounts for signal generator into yaml - Maybe combine with percentage
+
 # add various data to database so its not reset on reboot
      - Circuit breaker 
      - Trend data
-     - 
+# change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
+
  Gemini Suggestions
 # Possibly add a trend filter even on 1m profile - but using smaller timeframe. If thats not possible maybe some other indicator to indicate market trend
  # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought
@@ -19,17 +21,16 @@ TO DO
 #Look at possibly getting a new buy indicator. Seems to indicate on trend confirmation insted of reversals so buy is too late
 
 Chatgpt
-#market level regime gate - BTC/SOL 1hr trend to stop trading down markets
 # time space trades on 1m to reduce noise. After a TP or SL maybe pause for 5mins
 
 # to reduce fees, switch to MAKER buy orders
  # change API to allow buy by percentage
  # fix SL/TP override. Its changing the profile for all future alerts
- # look at option to extend profit % by 50% if all 3 trend indicators are bullish
 
 
 No need
  # split into separate modules so i can migrate to Azure
+ # look at option to extend profit % by 50% if all 3 trend indicators are bullish
  
  DONE
 # Add arming of trailing stop only after x percent profit
