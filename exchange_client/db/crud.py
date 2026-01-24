@@ -40,7 +40,8 @@ def open_position(
     tp_price: Optional[Decimal] = None,
     sl_price: Optional[Decimal] = None,
     trailing_sl_price: Optional[Decimal] = None,
-    highest_price: Optional[Decimal] = None        
+    highest_price: Optional[Decimal] = None,       
+    lowest_price: Optional[Decimal] = None
 ) -> Position:
     """Open a new position"""
     position = Position(
@@ -54,6 +55,7 @@ def open_position(
         sl_price=sl_price,
         trailing_sl_price=trailing_sl_price,
         highest_price=highest_price or trade.price,  # Initialize with entry price
+        lowest_price=lowest_price or trade.price,  # Initialize with entry price
         status="OPEN",
         created_at=datetime.now(timezone.utc)
     )
@@ -75,6 +77,27 @@ def update_position_trailing_stop(
     
     position.highest_price = highest_price
     position.trailing_sl_price = trailing_sl_price
+    
+    db.commit()
+    db.refresh(position)
+    return position
+
+def update_high_low(
+    db: Session,
+    position_id: int,
+    highest_price: Decimal,
+    lowest_price: Decimal
+) -> Position:
+    """Update position's trailing stop"""
+    position = db.query(Position).filter(Position.id == position_id).first()
+    if not position:
+        raise ValueError(f"Position {position_id} not found")
+    
+    if highest_price > position.highest_price:
+        position.highest_price = highest_price
+
+    if lowest_price < position.lowest_price:
+        position.lowest_price = lowest_price
     
     db.commit()
     db.refresh(position)

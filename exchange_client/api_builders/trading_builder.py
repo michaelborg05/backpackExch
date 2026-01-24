@@ -515,7 +515,8 @@ class TradingService:
                             tp_price=tp_price,
                             sl_price=sl_price,
                             trailing_sl_price=trailing_sl_price,
-                            highest_price=saved_trade.price
+                            highest_price=saved_trade.price,
+                            lowest_price=saved_trade.price
                         )
                         
                         self.trader_logger.info(

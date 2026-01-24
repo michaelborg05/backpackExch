@@ -27,7 +27,8 @@ from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
     update_position_trailing_stop,
-    close_invalid_position
+    close_invalid_position,
+    update_high_low
 )
 
 class MonitoringService:
@@ -360,7 +361,17 @@ class MonitoringService:
                                     f"need {arm_threshold_pct:.2f}% profit, "
                                     f"current: {profit_pct:.2f}% [{profile.name}]"
                                 )
-                                
+
+                    #Price monitoring
+                    if position.lowest_price > price or position.highest_price < price:
+                        update_high_low(
+                            db,
+                            position.id,
+                            highest_price=price,
+                            lowest_price=price,
+                        )
+
+            
     def _validate_open_positions(self):
         """
         Validate open positions against cached balances.
