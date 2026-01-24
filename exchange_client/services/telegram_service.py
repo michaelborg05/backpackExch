@@ -339,7 +339,7 @@ class TelegramService:
                                     msg = f"⚠️ {profile.name}: {limit_summary['error']}"
                                 else:
                                     status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
-                                    msg = f"{profile.name} 💰 {limit_summary['current_balance']} | Status: {status}"
+                                    msg = f"{profile.name} 💰 ${limit_summary['current_balance']}({limit_summary['daily_pnl_pct']}) | Status: {status}"
 
                                 results.append({
                                     "profile": profile.name,

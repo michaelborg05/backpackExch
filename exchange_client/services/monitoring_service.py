@@ -635,25 +635,32 @@ class MonitoringService:
         Proactively checks PnL limits and triggers breakers if needed
         """
         try:
-            self.logger.debug("Checking circuit breakers...")
-            
-            # This will check all profiles and trigger breakers if limits exceeded
+            # Check all profiles and trigger breakers if limits exceeded
             self.circuit_breaker.monitor_all_profiles()
             
-            # Log status of active breakers
+            # Get active breakers for logging (only log if there are any active)
             active_breakers = self.circuit_breaker.get_all_breakers()
             
+            # Only log active breakers once per monitoring cycle to avoid spam
             if active_breakers:
                 for profile_name, breaker_info in active_breakers.items():
-                    self.logger.info(
-                        f"🚨 [{profile_name}] Circuit breaker active: "
-                        f"{breaker_info['reason']} "
-                        f"({breaker_info['time_remaining_seconds']}s remaining)"
-                    )
+                    # Log at INFO level only when first triggered or every ~5 minutes
+                    # Otherwise it's just noise
+                    time_remaining = breaker_info['time_remaining_seconds']
+                    
+                    # Log less frequently for active breakers (every ~5 min)
+                    # Assuming 30s cycles and checking every 2 cycles = 60s
+                    # So this logs roughly every 5 checks = ~5 minutes
+                    if time_remaining % 300 < 60:  # Within 60s of 5-min boundary
+                        self.logger.info(
+                            f"🚨 [{profile_name}] Circuit breaker active: "
+                            f"{breaker_info['reason']} "
+                            f"({time_remaining}s remaining)"
+                        )
             
         except Exception as e:
             self.logger.error(f"Error monitoring circuit breakers: {e}", exc_info=True)
-
+            
     def _convert_dust(self):
         """
         Convert dust to USDC for all profiles

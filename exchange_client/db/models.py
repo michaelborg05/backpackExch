@@ -1,5 +1,5 @@
 # db/models.py
-from sqlalchemy import Column, Integer, String, Numeric, TIMESTAMP, ForeignKey, CheckConstraint, Boolean, Index
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from utils.constants import TradeReason, PositionCloseReason
@@ -28,8 +28,8 @@ class TradingProfileDB(Base):
     
     # Metadata
     is_active = Column(Boolean, default=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 class Trade(Base):
     __tablename__ = "trades"
@@ -43,7 +43,7 @@ class Trade(Base):
     price = Column(Numeric(20, 8), nullable=False)
     exchange = Column(String, default="backpack")
     reason = Column(String, default=TradeReason.MANUAL) 
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint("side IN ('BID', 'ASK')", name="valid_side"),
@@ -77,8 +77,8 @@ class Position(Base):
     status = Column(String, nullable=False)
     status = Column(String, default="OPEN")  # OPEN or CLOSED or PARTIALLY_CLOSED
     close_reason = Column(String, nullable=True) 
-    created_at = Column(TIMESTAMP, server_default=func.now())
-    closed_at = Column(TIMESTAMP)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    closed_at = Column(DateTime(timezone=True))
 
     buy_trade = relationship("Trade", foreign_keys=[buy_trade_id])
     sell_trade = relationship("Trade", foreign_keys=[sell_trade_id])
@@ -87,4 +87,81 @@ class Position(Base):
         CheckConstraint("status IN ('OPEN', 'CLOSED')", name="valid_status"),
         Index('ix_positions_profile_symbol_status', 'profile_name', 'symbol', 'status'),
         Index('ix_positions_opened_at', 'created_at'),
+    )
+
+
+class CircuitBreakerConfig(Base):
+    """Circuit breaker configuration per profile"""
+    __tablename__ = "circuit_breaker_config"
+    
+    id = Column(Integer, primary_key=True)
+    profile_name = Column(String, nullable=False)
+    
+    # Limits
+    max_daily_profit_pct = Column(Numeric(5, 2), default=5.0)
+    max_daily_loss_pct = Column(Numeric(5, 2), default=2.0)
+    
+    # Lock durations (in hours)
+    profit_lock_hours = Column(Integer, default=6)
+    loss_lock_hours = Column(Integer, default=12)
+    
+    # Tracking window (hours for rolling window)
+    tracking_window_hours = Column(Integer, default=24)
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CircuitBreakerEvent(Base):
+    """Circuit breaker trigger events - persistent log"""
+    __tablename__ = "circuit_breaker_events"
+    
+    id = Column(Integer, primary_key=True)
+    profile_name = Column(String, nullable=False, index=True)
+    
+    reason = Column(String, nullable=False)  # PROFIT_LIMIT, LOSS_LIMIT
+    trigger_value_pct = Column(Numeric(10, 4), nullable=True)  # Actual % when triggered
+    
+    # Balance snapshot at trigger time
+    balance_at_trigger = Column(Numeric(20, 8), nullable=True)
+    daily_start_balance = Column(Numeric(20, 8), nullable=True)
+    
+    triggered_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    reset_at = Column(DateTime(timezone=True), nullable=False)
+    manually_reset_at = Column(DateTime(timezone=True), nullable=True)
+    
+    is_active = Column(Boolean, default=True)  # False if expired or manually reset
+    
+    __table_args__ = (
+        Index('ix_circuit_events_active', 'profile_name', 'is_active'),
+    )
+
+
+class DailyBalanceSnapshot(Base):
+    """Daily balance snapshots for tracking rolling 24h performance"""
+    __tablename__ = "daily_balance_snapshots"
+    
+    id = Column(Integer, primary_key=True)
+    profile_name = Column(String, nullable=False, index=True)
+    
+    snapshot_date = Column(DateTime(timezone=True), nullable=False, index=True)  # Start of 24h period
+    starting_balance = Column(Numeric(20, 8), nullable=False)
+    
+    # Optional: track high/low during the period
+    highest_balance = Column(Numeric(20, 8), nullable=True)
+    lowest_balance = Column(Numeric(20, 8), nullable=True)
+    
+    # End of period summary (updated when period ends)
+    ending_balance = Column(Numeric(20, 8), nullable=True)
+    pnl = Column(Numeric(20, 8), nullable=True)
+    pnl_pct = Column(Numeric(10, 4), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('ix_snapshots_profile_date', 'profile_name', 'snapshot_date'),
+        # Prevent duplicate snapshots for same profile/date
+        CheckConstraint('snapshot_date IS NOT NULL', name='valid_snapshot_date'),
     )

@@ -11,7 +11,7 @@ from db.session import engine,SessionLocal
 from db.models import Base
 from utils.logging import log_manager
 import yaml
-from db.crud import create_profile
+from db.crud import create_profile, create_daily_snapshot
 from models.trading_profile import TradingProfile
 
 
@@ -131,23 +131,90 @@ def migrate_yaml_profiles():
     finally:
         db.close()
 
+# Add to manage.py
+
+def migrate_circuit_breaker():
+    """Initialize circuit breaker configs for existing profiles"""
+    db = SessionLocal()
+    
+    try:
+        from db.crud import get_all_profiles, create_circuit_breaker_config
+        from cache.portfolio_cache import get_portfolio_cache
+        from services.profile_manager import get_profile_manager, load_profiles,set_profile_manager
+
+        profile_manager = load_profiles()
+        set_profile_manager(profile_manager)          
+        profiles = profile_manager._profiles.values()
+        
+        for profile in profiles:
+            # Create default config
+            try:
+                create_circuit_breaker_config(
+                    db,
+                    profile_name=profile.name,
+                    max_daily_profit_pct=Decimal("5.0"),
+                    max_daily_loss_pct=Decimal("2.0"),
+                    profit_lock_hours=6,
+                    loss_lock_hours=12
+                )
+                print(f"✓ Created circuit breaker config for {profile.name}")
+                
+                # Create initial balance snapshot
+                #current_value = portfolio.get_total_value(profile.name, "USDC")
+                match profile.name:
+                    case "default":
+                        current_value = 420.16
+                    case "15m_MB":
+                        current_value = 424.31
+                    case "1m_MB":
+                        current_value = 145.55
+                    case "1m_MB_ATR":
+                        current_value = 143.14
+                    
+                create_daily_snapshot(db, profile.name, current_value)
+                print(f"✓ Created initial snapshot for {profile.name}: ${current_value:.2f}")
+                
+            except Exception as e:
+                print(f"✗ Failed to migrate {profile.name}: {e}")
+        
+        print("\n✓ Circuit breaker migration complete!")
+        
+    finally:
+        db.close()
+
+
+# Update the commands dict:
+commands = {
+    "create": create_tables,
+    "drop": drop_tables,
+    "reset": reset_tables,
+    "migrate-profiles": migrate_yaml_profiles,
+    "migrate-circuit-breaker": migrate_circuit_breaker,  # Add this
+    "load-dummy": load_dummy_data,
+    "migrate_circuit_breaker": migrate_circuit_breaker
+}
+
 if __name__ == "__main__":
     commands = {
         "create": create_tables,
         "drop": drop_tables,
         "reset": reset_tables,
         "migrate-profiles": migrate_yaml_profiles,
-        "load-dummy": load_dummy_data
+        "load-dummy": load_dummy_data,
+        "setup_circuit": migrate_circuit_breaker
     }
+    #command = "migrate_circuit_breaker"
+    command= "setup_circuit"
+
+    # if (len(sys.argv) < 2 or sys.argv[1] not in commands) and command is None:
+    #     print("Usage: python manage.py [create|drop|reset]")
+    #     print("  create - Create database tables")
+    #     print("  drop   - Drop all tables (destructive)")
+    #     print("  reset  - Drop and recreate tables (destructive)")
+    #     print("  migrate-profiles - Load profiles from YAML into database")
+    #     print("  load-dummy - Load dummy data into database")
+    #     print("  migrate_circuit_breaker -migrate_circuit_breaker")
+    #     sys.exit(1)
     
-    if len(sys.argv) < 2 or sys.argv[1] not in commands:
-        print("Usage: python manage.py [create|drop|reset]")
-        print("  create - Create database tables")
-        print("  drop   - Drop all tables (destructive)")
-        print("  reset  - Drop and recreate tables (destructive)")
-        print("  migrate-profiles - Load profiles from YAML into database")
-        print("  load-dummy - Load dummy data into database")
-        sys.exit(1)
-    
-    command = sys.argv[1]
+    # command = sys.argv[1]
     commands[command]()

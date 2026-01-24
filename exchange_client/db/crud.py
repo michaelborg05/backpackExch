@@ -3,12 +3,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from decimal import Decimal
 from typing import Optional, List
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 from db.models import Trade, Position
 from models.trade import OrderResponse
 from models.trading_profile import TradingProfile
-from db.models import TradingProfileDB
+from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot
 
 def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL") -> Trade:
     """Save a trade to the database"""
@@ -28,7 +27,7 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
         price=Decimal(str(unit_price)),
         exchange="backpack",
         reason=reason,
-        created_at=datetime.now(ZoneInfo("Australia/Sydney"))
+        created_at=datetime.now(timezone.utc)
     )
     db.add(trade)
     db.commit()
@@ -56,7 +55,7 @@ def open_position(
         trailing_sl_price=trailing_sl_price,
         highest_price=highest_price or trade.price,  # Initialize with entry price
         status="OPEN",
-        created_at=datetime.now(ZoneInfo("Australia/Sydney"))
+        created_at=datetime.now(timezone.utc)
     )
     db.add(position)
     db.commit()
@@ -95,7 +94,7 @@ def close_position(
     position.sell_trade_id = sell_trade.id
     position.status = "CLOSED"
     position.close_reason = reason
-    position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+    position.closed_at = datetime.now(timezone.utc)
     position.exit_price = sell_trade.price
     position.remaining_quantity = 0
 
@@ -140,7 +139,7 @@ def close_invalid_position(
     
     position.status = "CLOSED"
     position.close_reason = reason
-    position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+    position.closed_at = datetime.now(timezone.utc)
     position.profit = None  # No profit calculation since we don't have sell details
     
     db.commit()
@@ -212,7 +211,7 @@ def close_positions_fifo(
             position.sell_trade_id = sell_trade.id
             position.exit_price = exit_price
             position.profit = profit
-            position.closed_at = datetime.now(ZoneInfo("Australia/Sydney"))
+            position.closed_at = datetime.now(timezone.utc)
             position.close_reason = reason
             
             closed_positions.append({
@@ -369,3 +368,228 @@ def db_profile_to_pydantic(db_profile: TradingProfileDB) -> TradingProfile:
         max_position_size=db_profile.max_position_size
     )
 
+
+def get_circuit_breaker_config(
+    db: Session, 
+    profile_name: str
+) -> Optional[CircuitBreakerConfig]:
+    """Get circuit breaker config for a profile"""
+    return db.query(CircuitBreakerConfig).filter(
+        CircuitBreakerConfig.profile_name == profile_name,
+        CircuitBreakerConfig.is_active == True
+    ).first()
+
+
+def create_circuit_breaker_config(
+    db: Session,
+    profile_name: str,
+    max_daily_profit_pct: Decimal = Decimal("5.0"),
+    max_daily_loss_pct: Decimal = Decimal("2.0"),
+    profit_lock_hours: int = 6,
+    loss_lock_hours: int = 12
+) -> CircuitBreakerConfig:
+    """Create default circuit breaker config for a profile"""
+    config = CircuitBreakerConfig(
+        profile_name=profile_name,
+        max_daily_profit_pct=max_daily_profit_pct,
+        max_daily_loss_pct=max_daily_loss_pct,
+        profit_lock_hours=profit_lock_hours,
+        loss_lock_hours=loss_lock_hours
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def update_circuit_breaker_config(
+    db: Session,
+    profile_name: str,
+    **updates
+) -> CircuitBreakerConfig:
+    """Update circuit breaker config"""
+    config = get_circuit_breaker_config(db, profile_name)
+    if not config:
+        raise ValueError(f"Circuit breaker config not found for {profile_name}")
+    
+    for key, value in updates.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+    
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+# ===== Circuit Breaker Events =====
+
+def get_active_circuit_breaker(
+    db: Session, 
+    profile_name: str
+) -> Optional[CircuitBreakerEvent]:
+    """Get active circuit breaker event for a profile"""
+    now = datetime.now(timezone.utc)
+    
+    return db.query(CircuitBreakerEvent).filter(
+        CircuitBreakerEvent.profile_name == profile_name,
+        CircuitBreakerEvent.is_active == True,
+        CircuitBreakerEvent.reset_at > now  # Still locked
+    ).first()
+
+
+def create_circuit_breaker_event(
+    db: Session,
+    profile_name: str,
+    reason: str,
+    trigger_value_pct: Decimal,
+    balance_at_trigger: Decimal,
+    daily_start_balance: Decimal,
+    lock_hours: int
+) -> CircuitBreakerEvent:
+    """Create a new circuit breaker trigger event"""
+    now = datetime.now(timezone.utc)
+    reset_time = now + timedelta(hours=lock_hours)
+    
+    event = CircuitBreakerEvent(
+        profile_name=profile_name,
+        reason=reason,
+        trigger_value_pct=trigger_value_pct,
+        balance_at_trigger=balance_at_trigger,
+        daily_start_balance=daily_start_balance,
+        triggered_at=now,
+        reset_at=reset_time,
+        is_active=True
+    )
+    
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+def expire_circuit_breaker(
+    db: Session,
+    event_id: int
+) -> CircuitBreakerEvent:
+    """Mark a circuit breaker as expired/inactive"""
+    event = db.query(CircuitBreakerEvent).filter(
+        CircuitBreakerEvent.id == event_id
+    ).first()
+    
+    if not event:
+        raise ValueError(f"Circuit breaker event {event_id} not found")
+    
+    event.is_active = False
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+def manually_reset_circuit_breaker(
+    db: Session,
+    profile_name: str
+) -> Optional[CircuitBreakerEvent]:
+    """Manually reset active circuit breaker"""
+    event = get_active_circuit_breaker(db, profile_name)
+    
+    if not event:
+        return None
+    
+    event.is_active = False
+    event.manually_reset_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+# ===== Daily Balance Snapshots =====
+
+def get_current_daily_snapshot(
+    db: Session,
+    profile_name: str
+) -> Optional[DailyBalanceSnapshot]:
+    """Get the current 24h snapshot (within last 24 hours)"""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    
+    return db.query(DailyBalanceSnapshot).filter(
+        DailyBalanceSnapshot.profile_name == profile_name,
+        DailyBalanceSnapshot.snapshot_date >= cutoff
+    ).order_by(DailyBalanceSnapshot.snapshot_date.desc()).first()
+
+
+def create_daily_snapshot(
+    db: Session,
+    profile_name: str,
+    starting_balance: Decimal
+) -> DailyBalanceSnapshot:
+    """Create a new daily snapshot"""
+    snapshot = DailyBalanceSnapshot(
+        profile_name=profile_name,
+        snapshot_date=datetime.now(timezone.utc),
+        starting_balance=starting_balance,
+        highest_balance=starting_balance,
+        lowest_balance=starting_balance
+    )
+    
+    db.add(snapshot)
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+def update_daily_snapshot(
+    db: Session,
+    snapshot_id: int,
+    current_balance: Decimal
+) -> DailyBalanceSnapshot:
+    """Update snapshot with current balance (track high/low)"""
+    snapshot = db.query(DailyBalanceSnapshot).filter(
+        DailyBalanceSnapshot.id == snapshot_id
+    ).first()
+    
+    if not snapshot:
+        raise ValueError(f"Snapshot {snapshot_id} not found")
+    
+    # Update high/low
+    if current_balance > (snapshot.highest_balance or 0):
+        snapshot.highest_balance = current_balance
+    
+    if current_balance < (snapshot.lowest_balance or float('inf')):
+        snapshot.lowest_balance = current_balance
+    
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+def finalize_daily_snapshot(
+    db: Session,
+    snapshot_id: int,
+    ending_balance: Decimal
+) -> DailyBalanceSnapshot:
+    """Finalize a snapshot when 24h period ends"""
+    snapshot = db.query(DailyBalanceSnapshot).filter(
+        DailyBalanceSnapshot.id == snapshot_id
+    ).first()
+    
+    if not snapshot:
+        raise ValueError(f"Snapshot {snapshot_id} not found")
+    
+    snapshot.ending_balance = ending_balance
+    snapshot.pnl = ending_balance - snapshot.starting_balance
+    snapshot.pnl_pct = (snapshot.pnl / snapshot.starting_balance) * 100
+    
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+def get_snapshot_history(
+    db: Session,
+    profile_name: str,
+    limit: int = 30
+) -> List[DailyBalanceSnapshot]:
+    """Get historical snapshots"""
+    return db.query(DailyBalanceSnapshot).filter(
+        DailyBalanceSnapshot.profile_name == profile_name
+    ).order_by(DailyBalanceSnapshot.snapshot_date.desc()).limit(limit).all()
