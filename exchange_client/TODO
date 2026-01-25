@@ -4,20 +4,15 @@ TO DO
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
  # possibly sell as MAX if no other positions available
 # remove trades table. not required unless i use this for limit orders to track whats open?
-# move some settings like circuit breaker percents, hours remaining, etc, to db settings table
 # convert all logs to self.logger
 #Move buy amounts for signal generator into yaml - Maybe combine with percentage
-
-# add various data to database so its not reset on reboot
-     - Circuit breaker 
-     - Trend data
 # change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
+
+# see claude search titled "Trading signal generator optimization and re-entry strategy" - starred. Need to implement RSI momentum logic and blocked signal logging if I think its useful
 
  Gemini Suggestions
 # Possibly add a trend filter even on 1m profile - but using smaller timeframe. If thats not possible maybe some other indicator to indicate market trend
- # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought
 # on 1m, can Add simple Price > ema 200 filter
-#Look at possibly getting a new buy indicator. Seems to indicate on trend confirmation insted of reversals so buy is too late
 Improvement: The "Mean Reversion" Check
 In your trend_cache.py, you currently track price_vs_vwap. A simple way to avoid peaks is to monitor the Distance from VWAP or the EMA20.
 The Logic: If the price is more than X% away from the EMA20, it is "overextended".
@@ -27,11 +22,6 @@ You could update your TrendData or SignalGenerator to store the local_high and l
   if current_price >= local_high * 0.998:  # Price is within 0.2% of local high
       return False, "Too close to local peak/resistance"
 
-Chatgpt
-# time space trades on 1m to reduce noise. After a TP or SL maybe pause for 5mins
-
-# to reduce fees, switch to MAKER buy orders
- # change API to allow buy by percentage
  # fix SL/TP override. Its changing the profile for all future alerts
 
 
@@ -71,3 +61,10 @@ No need
  # loss/gain circuit breakers 
  #  5% gain or loss circuit breaker trading pause. I.e. If profile drops by X% within 24 hours or shorter, pause trading for 12 hours
  # Add dust conversion with the validation loop
+# move some settings like circuit breaker percents, hours remaining, etc, to db settings table
+# add various data to database so its not reset on reboot
+     - Circuit breaker  DONE
+     - Trend data - No need . Data is sent regularly
+ # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought
+#Look at possibly getting a new buy indicator. Seems to indicate on trend confirmation insted of reversals so buy is too late
+# time space trades on 1m to reduce noise. After a TP or SL maybe pause for 5mins

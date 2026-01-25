@@ -76,13 +76,13 @@ class SignalGenerator:
             )
             
             if not can_enter:
-                self.logger.info(
+                self.logger.debug(
                     f"{symbol}: Re-entry blocked - {reentry_reason}"
                 )
                 return None
             else:
                 # Log successful re-entry clearance at debug level
-                self.logger.info(
+                self.logger.debug(
                     f"{symbol}: Re-entry OK - {reentry_reason}"
                 )
                         
