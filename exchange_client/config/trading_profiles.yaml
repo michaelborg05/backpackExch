@@ -142,7 +142,7 @@ profiles:
     # atr_max_threshold: 2.0  # Don't trade if ATR > 2.0 * ATR_SMA
 
   1m_MB_ATR:
-    enabled: true
+    enabled: false
     api_key_env: BP_API_KEY_1M_ATR
     secret_env: BP_SECRET_1M_ATR
     take_profit_pct: 0.8
