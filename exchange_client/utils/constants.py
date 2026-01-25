@@ -64,7 +64,9 @@ class TradeReason(str, enum.Enum):
     TRAILING_STOP = "TRAILING_STOP"
     STRATEGY = "STRATEGY"
     API = "API"
-
+    TREND_INVALIDATION = "TREND_INVALIDATION"
+    STALE_POSITION = "STALE_POSITION"
+    
 class PositionCloseReason(str, enum.Enum):
     """Reasons for position closure"""
     TAKE_PROFIT = "TAKE_PROFIT"
@@ -73,3 +75,5 @@ class PositionCloseReason(str, enum.Enum):
     MANUAL = "MANUAL"
     INVALID_POSITION = "INVALID_POSITION"  # Position exists but token was sold
     FORCE_CLOSE = "FORCE_CLOSE"
+    TREND_INVALIDATION = "TREND_INVALIDATION"
+    STALE_POSITION = "STALE_POSITION"

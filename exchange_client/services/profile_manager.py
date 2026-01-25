@@ -111,6 +111,12 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         atr_filter_mode = cfg.get("atr_filter_mode", "require_high")
         atr_max_threshold = cfg.get("atr_max_threshold", None)
 
+        #Position exit logic
+        use_trend_invalidation_exit = cfg.get("use_trend_invalidation_exit",False)
+        min_position_age_for_trend_check = cfg.get("min_position_age_for_trend_check",2)
+        max_position_hours = cfg.get("max_position_hours",2)
+
+
         profiles[name] = TradingProfile(
             name=name,
             api_key=api_key,
@@ -140,6 +146,10 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             signal_cooldown_seconds     = signal_cooldown_seconds,
             min_signal_confidence       = min_signal_confidence,
             min_volume_ratio            = min_volume_ratio,
+            #position logic
+            use_trend_invalidation_exit = use_trend_invalidation_exit,
+            min_position_age_for_trend_check = min_position_age_for_trend_check,
+            max_position_hours          = max_position_hours,
         )
 
 

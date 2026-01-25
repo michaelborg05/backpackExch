@@ -43,6 +43,12 @@ profiles:
     atr_timeframe: "15m"
     atr_threshold: 1.05
     atr_filter_mode: "require_high"
+    # Trend-based exit (intelligent)
+    use_trend_invalidation_exit: true
+    min_position_age_for_trend_check: 2  # hours
+
+    # Time-based backstop (last resort)
+    max_position_hours: 18  # Force exit if stuck
 
   15m_MB:
     enabled: true

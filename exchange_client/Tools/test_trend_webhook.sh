@@ -5,7 +5,7 @@ curl -X POST http://localhost:8000/webhook/tradingview/trend \
     "secret": "h&ppyfestivu$",
     "trends": [{
       "symbol": "SOL_USDC",
-      "timeframe": "15",
+      "timeframe": "60",
       "ema20": 125.43,
       "ema50": 124.91,
       "rsi": 45.6,

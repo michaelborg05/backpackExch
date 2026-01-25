@@ -38,6 +38,11 @@ class TradingProfile(BaseModel):
     min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
     min_volume_ratio: float = 1.5                   # Require 50% above average volume
 
+    # position exit logic 
+    use_trend_invalidation_exit: Optional[bool] = False
+    min_position_age_for_trend_check: Optional[int] = 2  # hours
+    max_position_hours: Optional[int] = 18  # Force exit if stuck
+
     class Config:
         json_encoders = {
             Decimal: lambda v: float(v)

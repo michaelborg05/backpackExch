@@ -248,8 +248,11 @@ class MonitoringService:
 
     def _monitor_open_positions(self):
         """Check open positions for TP / SL / trailing SL conditions"""
-        
+        from services.position_manager import get_position_manager
+
         profile_manager = get_profile_manager()
+        position_manager = get_position_manager()
+
         if profile_manager is None:
             self.logger.error("Profile manager not initialized. Skipping open position monitoring.")
             return 
@@ -370,6 +373,30 @@ class MonitoringService:
                             highest_price=price,
                             lowest_price=price,
                         )
+
+                    # Trend Invalidation Check for long running trades
+                    should_exit, exit_reason = position_manager.should_exit_position(
+                        position=position,
+                        profile=profile,
+                        current_price=price
+                    )
+                    
+                    if should_exit:
+                        self.logger.info(
+                            f"Position exit: {symbol} @ {price} "
+                            f"(profit: {profit_pct:+.2f}%) [{profile.name}] - {exit_reason}"
+                        )
+                        
+                        # Extract reason type (TREND_INVALIDATION or STALE_POSITION)
+                        reason_type = exit_reason.split(':')[0]
+                        
+                        self._execute_close(
+                            db, 
+                            position, 
+                            profile, 
+                            reason=reason_type
+                        )
+                        continue
 
             
     def _validate_open_positions(self):
