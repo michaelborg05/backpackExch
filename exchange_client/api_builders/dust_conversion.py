@@ -11,9 +11,6 @@ from models.trading_profile import TradingProfile
 from services.profile_manager import get_profile_manager
 from cache.balance_cache import get_balance_cache
 
-dust_logger = log_manager.get_logger("DustConversion")
-
-
 class DustConverter:
     """Handles dust conversion for Backpack Exchange accounts"""
     
@@ -21,7 +18,7 @@ class DustConverter:
     DEFAULT_DUST_THRESHOLD = Decimal("1.0")  # $1 USD equivalent
     
     def __init__(self):
-        self.logger = dust_logger
+        self.logger = log_manager.get_logger("DustConversion")
         
     def convert_dust(
         self, 

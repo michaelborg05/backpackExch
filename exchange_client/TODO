@@ -4,7 +4,6 @@ TO DO
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
  # possibly sell as MAX if no other positions available
 # remove trades table. not required unless i use this for limit orders to track whats open?
-# convert all logs to self.logger
 #Move buy amounts for signal generator into yaml - Maybe combine with percentage
 # change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
 
@@ -68,3 +67,4 @@ No need
  # also consider adding RSI oversold indicators to not buy on 15m/1hr timeframes if overbought
 #Look at possibly getting a new buy indicator. Seems to indicate on trend confirmation insted of reversals so buy is too late
 # time space trades on 1m to reduce noise. After a TP or SL maybe pause for 5mins
+# convert all logs to self.logger

@@ -32,14 +32,14 @@ class TradingService:
     def __init__(self, profile: TradingProfile):
         self.config = Config()
 
-        self.trader_logger = log_manager.get_logger("TradingService")
+        self.logger = log_manager.get_logger("TradingService")
         self.balance_cache = get_balance_cache()
         self.price_cache = get_price_cache()
         self.market_info_cache = get_market_info_cache()  
 
         if profile:
             self.profile = profile  # Store the full profile
-            self.trader_logger.info(f"Initialized with profile: {profile.name}")
+            self.logger.info(f"Initialized with profile: {profile.name}")
         else:
             # Create default profile from config
             self.profile = TradingProfile(
@@ -47,7 +47,7 @@ class TradingService:
                 api_key=self.config.api_key,
                 secret=self.config.secret
             )
-            self.trader_logger.info("Initialized with default config")
+            self.logger.info("Initialized with default config")
             
 
     def _validate_and_adjust_order(self, order: OrderExecuteRequest, profile_name: str = "default") -> OrderExecuteRequest:
@@ -95,7 +95,7 @@ class TradingService:
         
         # Validate we have balance data
         if available is None:
-            self.trader_logger.warning(
+            self.logger.warning(
                 f"Could not retrieve balance for {profile_name} {base_asset}, proceeding without validation"
             )
             if order_qty is None:
@@ -121,7 +121,7 @@ class TradingService:
             # Apply buffer for fees (0.01% safety margin)
             buffered_qty = available * Decimal("0.9999")
             
-            self.trader_logger.info(
+            self.logger.info(
                 f"MAX sell order: {available} {base_asset} → {buffered_qty} (buffered, will be rounded by market rules)"
             )
             order.quantity = str(buffered_qty)
@@ -155,7 +155,7 @@ class TradingService:
         available_quote = self.balance_cache.get_available_balance(profile_name=profile_name, asset=quote_asset)
         
         if available_quote is None:
-            self.trader_logger.warning(
+            self.logger.warning(
                 f"Could not retrieve balance for {quote_asset}, proceeding without validation"
             )
             return order
@@ -167,7 +167,7 @@ class TradingService:
         price = self._get_order_price(order, base_asset, quote_asset)
         
         if price is None:
-            self.trader_logger.warning(
+            self.logger.warning(
                 f"Could not retrieve price for {order.symbol}, proceeding without validation"
             )
             return order
@@ -181,7 +181,7 @@ class TradingService:
             max_base_qty = available_quote / price
             adjusted_qty = self._apply_buffer_and_round(max_base_qty, price)
             
-            self.trader_logger.info(
+            self.logger.info(
                 f"MAX buy order: {available_quote} {quote_asset} @ {price} = {adjusted_qty} {base_asset}"
             )
             order.quantity = str(adjusted_qty)
@@ -190,7 +190,7 @@ class TradingService:
             required_quote = order_qty * price
             
             if required_quote > available_quote:
-                self.trader_logger.warning(
+                self.logger.warning(
                     f"Insufficient {quote_asset} for buy order. "
                     f"Required: {required_quote}, Available: {available_quote}"
                 )
@@ -199,7 +199,7 @@ class TradingService:
                 max_base_qty = available_quote / price
                 adjusted_qty = self._apply_buffer_and_round(max_base_qty, price)
                 
-                self.trader_logger.info(
+                self.logger.info(
                     f"Adjusted buy quantity from {order_qty} to {adjusted_qty} {base_asset}"
                 )
                 order.quantity = str(adjusted_qty)
@@ -229,14 +229,14 @@ class TradingService:
             try:
                 return Decimal(order.price)
             except:
-                self.trader_logger.warning(f"Invalid limit price: {order.price}")
+                self.logger.warning(f"Invalid limit price: {order.price}")
         
         # For market orders, get from cache
         symbol = f"{base_asset}_{quote_asset}"
         cached_price = self.price_cache.get_price(symbol)
         
         if cached_price is None:
-            self.trader_logger.warning(f"Price not found in cache for {symbol}")
+            self.logger.warning(f"Price not found in cache for {symbol}")
         
         return cached_price
 
@@ -332,7 +332,7 @@ class TradingService:
             return order_qty
         
         # Order quantity equals or exceeds balance - need to adjust
-        self.trader_logger.warning(
+        self.logger.warning(
             f"Order quantity close to or exceeds balance for {asset}. "
             f"Requested: {order_qty}, Available: {available}"
         )
@@ -340,7 +340,7 @@ class TradingService:
         # Apply fee buffer (0.01%)
         adjusted = available * Decimal("0.9999")
         
-        self.trader_logger.info(
+        self.logger.info(
             f"Adjusted order quantity from {order_qty} to {adjusted} (with fee buffer, will be rounded by market rules)"
         )
         
@@ -403,7 +403,7 @@ class TradingService:
         market_info = self.market_info_cache.get_market_info(order.symbol)
         
         if market_info is None:
-            self.trader_logger.warning(
+            self.logger.warning(
                 f"Market info not available for {order.symbol}, skipping market rules validation"
             )
             return order
@@ -422,7 +422,7 @@ class TradingService:
         rounded_qty = market_info.round_quantity(quantity)
         
         if rounded_qty != quantity:
-            self.trader_logger.info(
+            self.logger.info(
                 f"Adjusted quantity from {quantity} to {rounded_qty} to comply with step size {market_info.step_size}"
             )
             quantity = rounded_qty
@@ -454,7 +454,7 @@ class TradingService:
             rounded_price = market_info.round_price(price)
             
             if rounded_price != price:
-                self.trader_logger.info(
+                self.logger.info(
                     f"Adjusted price from {price} to {rounded_price} to comply with tick size {market_info.tick_size}"
                 )
                 price = rounded_price
@@ -487,18 +487,18 @@ class TradingService:
         )
 
         try:
-            self.trader_logger.info(f"Debug Trade Request: \r\n{order_data}")
+            self.logger.info(f"Debug Trade Request: \r\n{order_data}")
             trade = api_request(url, headers,requestType=HttpMethod.POST, body=order_data)
 
             if trade:
-                self.trader_logger.debug(f"API call for trade completed successfully\r\n{trade}")
+                self.logger.debug(f"API call for trade completed successfully\r\n{trade}")
                 order_response = OrderResponse(**trade)
-                self.trader_logger.info(f"Trade executed: {order_response}")
+                self.logger.info(f"Trade executed: {order_response}")
                 # Save to database
                 db = SessionLocal()
                 try:
                     saved_trade = save_trade(db, order_response, self.profile.name, source)
-                    self.trader_logger.info(f"Trade saved to database: ID {saved_trade.id}")
+                    self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
                     # Open position if this is a BUY order
                     if order_response.side.upper() == "BID":
                         # Calculate position prices based on profile settings
@@ -519,7 +519,7 @@ class TradingService:
                             lowest_price=saved_trade.price
                         )
                         
-                        self.trader_logger.info(
+                        self.logger.info(
                             f"Position opened: ID {position.id}, "
                             f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
                         )
@@ -553,12 +553,12 @@ class TradingService:
                                 profit = (exit_price - entry_price) * quantity
                                 profit_pct = ((exit_price - entry_price) / entry_price) * 100
                                 
-                                self.trader_logger.info(
+                                self.logger.info(
                                     f"Closed position {position_id}: {closed_position.symbol}, "
                                     f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)"
                                 )
                             except ValueError as e:
-                                self.trader_logger.error(f"Invalid position_id: {position_id}")
+                                self.logger.error(f"Invalid position_id: {position_id}")
                                 # Fall back to FIFO
                                 closed_positions = close_positions_fifo(
                                     db=db,
@@ -578,7 +578,7 @@ class TradingService:
                             )
                                                     
                         if not closed_positions:
-                            self.trader_logger.warning(
+                            self.logger.warning(
                                 f"No open positions found for {saved_trade.symbol} to close"
                             )
                         else:
@@ -594,31 +594,31 @@ class TradingService:
                                 )
                             summary += f"Total P/L: ${total_profit:.2f}"
                             
-                            self.trader_logger.info(summary)
+                            self.logger.info(summary)
                             order_response.profit = total_profit
 
                     # Refresh balance cache after trade
                     self._refresh_balance_cache_after_trade(order_response)
 
                 except Exception as db_error:
-                    self.trader_logger.error(f"Failed to save trade to database: {db_error}")
+                    self.logger.error(f"Failed to save trade to database: {db_error}")
                 finally:
                     db.close()
                 
                 return order_response
             else:
-                self.trader_logger.error(f"API call for trade failed\r\n{trade}")
+                self.logger.error(f"API call for trade failed\r\n{trade}")
                 raise ExchangeAPIError("Empty response from exchange")
         except ExchangeAPIError as e:
             # Log and re-raise as HTTPException for FastAPI
-            self.trader_logger.error(f"Exchange API error: {e.message}")
+            self.logger.error(f"Exchange API error: {e.message}")
             raise HTTPException(
                 status_code=e.status_code or 500,
                 detail=f"Exchange API error: {e.message}"
             )
         except Exception as e:
             # Handle other errors
-            self.trader_logger.error(f"Unexpected error: {e}")
+            self.logger.error(f"Unexpected error: {e}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Trading service error: {str(e)}"
@@ -635,7 +635,7 @@ class TradingService:
         try:
             from api_builders.account_builder import get_balances
             
-            self.trader_logger.info(
+            self.logger.info(
                 f"Refreshing balance cache after {order_response.side} order for {self.profile.name}"
             )
             
@@ -646,13 +646,13 @@ class TradingService:
                 update_cache=True
             )
             
-            self.trader_logger.debug(
+            self.logger.debug(
                 f"Balance cache refreshed successfully for {self.profile.name}"
             )
             
         except Exception as e:
             # Don't fail the trade if cache refresh fails
-            self.trader_logger.warning(
+            self.logger.warning(
                 f"Failed to refresh balance cache after trade: {e}. "
                 "Cache will be updated on next monitoring cycle."
             )        
@@ -763,10 +763,10 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
         trade = api_request(url, headers,requestType="POST")
         
         if trade:
-            trader_logger.debug(f"API call for trade completed successfully\r\n{trade}")
+            logger.debug(f"API call for trade completed successfully\r\n{trade}")
             return trade
         else:
-            trader_logger.error(f"API call for balances failed\r\n{trade}")
+            logger.error(f"API call for balances failed\r\n{trade}")
 
         return None
 
