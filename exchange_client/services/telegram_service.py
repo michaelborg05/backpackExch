@@ -392,7 +392,62 @@ class TelegramService:
                             text=f"❌ Error fetching balances: {str(e)}"
                         )
                 
+                case "exits" | "e" :
+                    from services.reentry_manager import get_reentry_manager
 
+                    processing_msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text="💰 Fetching recent trans..."
+                    )
+                    
+                    try:
+                        
+                        reentry_mgr = get_reentry_manager()
+                        if not self.profile_manager:
+                            self.logger.warning("Profile manager not initialized")
+                            reentry_text = (
+                                f"no profiles found"
+                            )
+                            
+                            # Delete "processing" message and send result
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=reentry_text,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            profiles = self.profile_manager.get_all_profiles()
+                            
+                            # Delete "processing" message
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                            
+                            # Send each profile's balance
+                            for profile in profiles:                    
+                                summary = reentry_mgr.get_recent_exits_summary(profile.name, hours=24)
+                                summary_text = f"\n=== Recent Exits for {profile.name} (24h) ==="
+                                summary_text += f"Total exits: {summary['total_exits']}"
+                                summary_text += f"\nBy reason:"
+                                for reason, count in summary['by_reason'].items():
+                                    summary_text += f"\n  {reason}: {count}"
+
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=summary_text,
+                                    parse_mode="HTML"
+                                )
+                    
+                    except Exception as e:
+                        # Delete processing message and show error
+                        try:
+                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                        except:
+                            pass
+                        
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"❌ Error fetching trans: {str(e)}"
+                        )
 
                 case _:
                     await bot.send_message(

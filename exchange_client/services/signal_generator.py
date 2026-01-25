@@ -60,6 +60,32 @@ class SignalGenerator:
         Returns:
             TradingSignal or None if no signal
         """
+        
+        # 0. Before any signal checks, check reentry conditions to make sure we did not just exit a position
+        from services.reentry_manager import get_reentry_manager
+    
+        reentry_mgr = get_reentry_manager()
+        trend = self.trend_cache.get(symbol, self.trading_timeframe)
+
+        if trend:
+            can_enter, reentry_reason = reentry_mgr.can_reenter(
+                symbol=symbol,
+                profile_name=self.profile.name,
+                timeframe=self.trading_timeframe,
+                current_trend=trend
+            )
+            
+            if not can_enter:
+                self.logger.info(
+                    f"{symbol}: Re-entry blocked - {reentry_reason}"
+                )
+                return None
+            else:
+                # Log successful re-entry clearance at debug level
+                self.logger.info(
+                    f"{symbol}: Re-entry OK - {reentry_reason}"
+                )
+                        
         reasons = []
         indicators = {}
         confidence_score = 0.0
