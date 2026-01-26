@@ -45,7 +45,7 @@ profiles:
     atr_filter_mode: "require_high"
     # Trend-based exit (intelligent)
     use_trend_invalidation_exit: true
-    min_position_age_for_trend_check: 2  # hours
+    min_position_age_for_trend_check: 4  # hours
 
     # Time-based backstop (last resort)
     max_position_hours: 18  # Force exit if stuck
@@ -147,9 +147,9 @@ profiles:
     # Optional: could also set max ATR to avoid extreme volatility
     # atr_max_threshold: 2.0  # Don't trade if ATR > 2.0 * ATR_SMA
     use_trend_invalidation_exit: true
-    min_position_age_for_trend_check: 1  # hours
+    min_position_age_for_trend_check: 2  # hours
     # Time-based backstop (last resort)
-    max_position_hours: 2  # Force exit if stuck
+    max_position_hours: 4  # Force exit if stuck
 
   1m_MB_ATR:
     enabled: false
