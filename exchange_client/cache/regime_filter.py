@@ -165,17 +165,22 @@ class RegimeFilter:
         
         # 3. Check for rapid EMA crossover on lower timeframe (whipsaw)
         if confirm_trend is not None:
-            # If 15m EMAs are crossed opposite to 60m, it's a reversal
+            # Only flag if we have a STRONG trend on 60m being contradicted by 15m
+            # This avoids flagging normal trend formations (15m leads 60m)
             primary_bullish = primary_trend.ema20 > primary_trend.ema50
             confirm_bullish = confirm_trend.ema20 > confirm_trend.ema50
             
+            # Calculate the strength of both trends
+            primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+            confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
+            
+            # Only flag as whipsaw if:
+            # 1. 60m has a STRONG trend (>0.5% separation)
+            # 2. 15m is crossed the opposite way
+            # 3. 15m cross is also strong (>0.5%)
             if primary_bullish != confirm_bullish:
-                # Calculate how recent/severe the cross is
-                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                
-                # If the cross is significant (>0.3%), it's a real reversal
-                if abs(confirm_diff_pct) > 0.3:
-                    return True, f"Trend reversal in progress (60m vs 15m EMA conflict)"
+                if abs(primary_diff_pct) > 0.5 and abs(confirm_diff_pct) > 0.5:
+                    return True, f"Trend reversal in progress (60m {primary_diff_pct:.2f}% vs 15m {confirm_diff_pct:.2f}%)"
         
         return False, None
     
