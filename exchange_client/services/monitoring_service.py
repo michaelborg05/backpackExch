@@ -508,7 +508,7 @@ class MonitoringService:
                 profit = (exit_price - entry_price) * quantity_sold
                 profit_pct = ((exit_price - entry_price) / entry_price) * 100
 
-                icon = "🎯" if profit_pct >= 0 else "🛑"
+                icon = "🟢" if profit_pct >= 0 else "🛑"
                 
                 # Send detailed notification
                 self._send_telegram(
@@ -807,7 +807,7 @@ class MonitoringService:
                     )
                     
                     if existing_position:
-                        self.logger.debug(
+                        self.logger.info(
                             f"[{profile.name}] Already have open position for {signal.symbol}, skipping"
                         )
                         continue
@@ -819,7 +819,7 @@ class MonitoringService:
                 
                 if time.time() - last_signal_time < cooldown_seconds:
                     remaining = cooldown_seconds - (time.time() - last_signal_time)
-                    self.logger.debug(
+                    self.logger.info(
                         f"[{profile.name}] {signal.symbol} on cooldown "
                         f"({remaining:.0f}s remaining)"
                     )
