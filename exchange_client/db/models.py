@@ -1,5 +1,5 @@
 # db/models.py
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from utils.constants import TradeReason, PositionCloseReason
@@ -44,6 +44,7 @@ class Trade(Base):
     exchange = Column(String, default="backpack")
     reason = Column(String, default=TradeReason.MANUAL) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    reason_summary = Column(JSON, nullable=True)
 
     __table_args__ = (
         CheckConstraint("side IN ('BID', 'ASK')", name="valid_side"),

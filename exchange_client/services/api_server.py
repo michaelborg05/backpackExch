@@ -32,7 +32,6 @@ from utils.security import (
     check_rate_limit
 )
 from db.session import SessionLocal 
-from db.crud import save_trade, open_position, close_position
 from decimal import Decimal
 from time import time
 
@@ -628,6 +627,7 @@ async def tradingview_webhook(
                 
                 # Balance check passed, proceed with trade
                 profile = profile_manager.get(profile_name)
+                reasons = []
 
                 # If buy order and use_atr_filter true, check volatility
                 if alert.action.lower() == "buy" and profile.use_atr_filter:  # New profile setting
@@ -670,6 +670,7 @@ async def tradingview_webhook(
                         continue
                     
                     else:
+                        reasons.append(f"ATR filter: {reason}")
                         apiserver_logger.info(
                             f"[{profile_name}] ✓ ATR check passed: {reason}"
                         )
@@ -699,6 +700,7 @@ async def tradingview_webhook(
                         errors.append(f"[{profile_name}] Trend filter blocked trade")
                         continue  # Skip this profile
                     else:
+                        reasons.append(f"Trend filter: {reason}")
                         apiserver_logger.info(
                             f"[{profile_name}] ✓ Trend check passed: {reason}"
                         )
@@ -733,7 +735,8 @@ async def tradingview_webhook(
                     trading, 
                     alert, 
                     source=TradeReason.WEBHOOK,
-                    profile_name=profile_name
+                    profile_name=profile_name,
+                    reason_summary = reasons,
                 )
                 
                 executed_price = None

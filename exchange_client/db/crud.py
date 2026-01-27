@@ -9,7 +9,7 @@ from models.trade import OrderResponse
 from models.trading_profile import TradingProfile
 from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot
 
-def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL") -> Trade:
+def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None) -> Trade:
     """Save a trade to the database"""
     
     if order.price is None or order.price == "0":
@@ -27,7 +27,8 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
         price=Decimal(str(unit_price)),
         exchange="backpack",
         reason=reason,
-        created_at=datetime.now(timezone.utc)
+        created_at=datetime.now(timezone.utc),
+        reason_summary=reason_summary
     )
     db.add(trade)
     db.commit()

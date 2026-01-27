@@ -1,6 +1,6 @@
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from services.client import api_request
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from utils.config import Config
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
@@ -363,19 +363,19 @@ class TradingService:
         quantize_str = "0." + "0" * decimals
         return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
-    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL",profile_name: str = "default", **kwargs) -> OrderResponse:
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL",profile_name: str = "default", reason_summary: List[str] = None,**kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order, profile_name=profile_name)
         order = self._validate_market_rules(order)
-        return self.ExecuteOrder(order, source=source)
+        return self.ExecuteOrder(order, source=source, reason_summary=reason_summary)
 
-    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", profile_name: str = "default",position_id: str =None,**kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", profile_name: str = "default",position_id: str =None, reason_summary: List[str] = None, **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order, profile_name=profile_name)
         order = self._validate_market_rules(order)
-        return self.ExecuteOrder(order, source=source, position_id=position_id)
+        return self.ExecuteOrder(order, source=source, position_id=position_id, reason_summary=reason_summary)
 
     # Order management
     def cancel_order(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None):
@@ -471,7 +471,7 @@ class TradingService:
         
         return order
 
-    def ExecuteOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None) -> OrderResponse:
+    def ExecuteOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None) -> OrderResponse:
         url = APIEndpoints.backpack_ExecuteOrder()
         
         # Convert model to dict, excluding None values
@@ -497,7 +497,7 @@ class TradingService:
                 # Save to database
                 db = SessionLocal()
                 try:
-                    saved_trade = save_trade(db, order_response, self.profile.name, source)
+                    saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary)
                     self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
                     # Open position if this is a BUY order
                     if order_response.side.upper() == "BID":
@@ -657,7 +657,7 @@ class TradingService:
                 "Cache will be updated on next monitoring cycle."
             )        
 
-async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK") -> Optional[OrderResponse]:
+async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK", reason_summary: List[str] = None) -> Optional[OrderResponse]:
     """
     Process TradingView alert and execute appropriate trade
 
@@ -701,6 +701,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
+                reason_summary=reason_summary,
                 **kwargs
             )
         else:
@@ -710,6 +711,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
+                reason_summary=reason_summary,
                 **kwargs
             )
 
@@ -722,6 +724,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
+                reason_summary=reason_summary,
                 **kwargs
             )
         else:
@@ -731,6 +734,7 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
+                reason_summary=reason_summary,
                 **kwargs
             )
 

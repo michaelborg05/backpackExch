@@ -394,7 +394,8 @@ class MonitoringService:
                             db, 
                             position, 
                             profile, 
-                            reason=reason_type
+                            reason=reason_type,
+                            reason_summary=[exit_reason],
                         )
                         continue
 
@@ -464,7 +465,7 @@ class MonitoringService:
                         #     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
                         # )
 
-    def _execute_close(self, db, position, profile, reason: str):
+    def _execute_close(self, db, position, profile, reason: str, reason_summary: list[str] = None):
         """
         Execute a close order for a position
         
@@ -492,7 +493,8 @@ class MonitoringService:
                 quantity=quantity,  # Use MAX to sell all available
                 source=reason,
                 profile_name=profile.name,
-                position_id=str(position.id)
+                position_id=str(position.id),
+                reason_summary=reason_summary,
             )
             
             if result:
@@ -882,7 +884,8 @@ class MonitoringService:
                 symbol=signal.symbol,
                 quantity=qty,  # Use profile's default order size
                 source=f"SIGNAL_{signal.strength.name}",
-                profile_name=profile.name
+                profile_name=profile.name,
+                reason_summary=signal.reasons
             )
             
             if result:
@@ -902,7 +905,7 @@ class MonitoringService:
                     f"Price: ${executed_price:.4f}\n"
                     f"Quantity: {result.executed_quantity}\n"
                     f"Reasons:\n" + "\n".join(f"  {r}" for r in signal.reasons),
-                    MessagePriority.HIGH
+                    MessagePriority.NORMAL
                 )
             
         except Exception as e:
