@@ -114,7 +114,7 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         #Position exit logic
         use_trend_invalidation_exit = cfg.get("use_trend_invalidation_exit",False)
         min_position_age_for_trend_check = cfg.get("min_position_age_for_trend_check",2)
-        max_position_hours = cfg.get("max_position_hours",2)
+        max_position_hours = cfg.get("max_position_hours",None)
 
 
         profiles[name] = TradingProfile(
