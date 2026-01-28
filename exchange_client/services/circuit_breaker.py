@@ -150,21 +150,35 @@ class CircuitBreakerService:
             config = get_circuit_breaker_config(db, profile_name)
             if not config:
                 return False, None
-            
-            # Get daily start balance
-            snapshot = get_current_daily_snapshot(db, profile_name)
-            if not snapshot:
-                # Create initial snapshot
-                portfolio = get_portfolio_cache()
-                current_value = portfolio.get_total_value(profile_name, "USDC")
-                create_daily_snapshot(db, profile_name, current_value)
-                return False, None
-            
-            daily_start = snapshot.starting_balance
-            
-            # Get current value
+
+            #Get current profile balance            
             portfolio = get_portfolio_cache()
             current_value = portfolio.get_total_value(profile_name, "USDC")
+
+            # Get most recent snapshot 
+            snapshot = get_current_daily_snapshot(db, profile_name)
+            #If no snapshot for profile, create and return false
+            if not snapshot:
+                # Create initial snapshot
+                create_daily_snapshot(db, profile_name, current_value)
+                return False, None
+
+            if snapshot:
+                #If snapshot found, confirm age is within 24 hours
+                snapshot_age = (
+                    datetime.now(timezone.utc) - snapshot.snapshot_date
+                ).total_seconds() / 3600
+                
+                if snapshot_age >= 24:
+                    # Finalize old snapshot and create new one. Return false as pnl cannot be calculated on first entry of the day
+                    finalize_daily_snapshot(db, snapshot.id, current_value)
+                    
+                    # Create new snapshot
+                    create_daily_snapshot(db, profile_name, current_value)
+                    return False, None
+
+            #If snapshot within 24 horus old, continue
+            daily_start = snapshot.starting_balance
             
             # Calculate PnL
             daily_pnl_pct = ((current_value - daily_start) / daily_start) * 100

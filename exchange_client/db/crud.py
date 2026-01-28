@@ -532,12 +532,10 @@ def get_current_daily_snapshot(
     db: Session,
     profile_name: str
 ) -> Optional[DailyBalanceSnapshot]:
-    """Get the current 24h snapshot (within last 24 hours)"""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    """Get the latest snapshot"""
     
     return db.query(DailyBalanceSnapshot).filter(
-        DailyBalanceSnapshot.profile_name == profile_name,
-        DailyBalanceSnapshot.snapshot_date >= cutoff
+        DailyBalanceSnapshot.profile_name == profile_name
     ).order_by(DailyBalanceSnapshot.snapshot_date.desc()).first()
 
 
