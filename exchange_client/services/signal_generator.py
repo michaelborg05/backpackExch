@@ -9,6 +9,7 @@ from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
+from api_builders.trading_builder import TradingService
 
 class SignalGenerator:
     """
@@ -61,6 +62,26 @@ class SignalGenerator:
             TradingSignal or None if no signal
         """
         
+                # Create trading service
+        trading = TradingService(self.profile)
+
+        #Check if balance is available to buy before proceeding with signal checks
+        is_valid, balance_error = trading.validate_balance_for_trade(
+            sale_action="BUY", 
+            symbol=symbol,
+            profile_name=self.profile.name
+        )
+        
+        if not is_valid:
+            # Skip this profile - balance unusable
+            self.logger.warning(
+                f"[{self.profile.name}] Skipping trade: {balance_error}"
+            )
+            
+            return None
+
+
+
         # 0. Before any signal checks, check reentry conditions to make sure we did not just exit a position
         from services.reentry_manager import get_reentry_manager
     

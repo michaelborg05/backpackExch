@@ -163,6 +163,10 @@ class MonitoringService:
                     self._convert_dust()
                     self._dust_conversion_counter = 0
 
+                if self._signal_check_counter >= self._signal_check_interval:
+                    self._check_signals()
+                    self._signal_check_counter = 0
+
                 # Wait before next iteration
                 if self.is_running:  # Check again before sleeping
                     self.logger.info(
@@ -170,10 +174,6 @@ class MonitoringService:
                     )
                     time.sleep(self.config.monitor_delay_interval)
 
-                if self._signal_check_counter >= self._signal_check_interval:
-                    self._check_signals()
-                    self._signal_check_counter = 0
-  
         except KeyboardInterrupt:
             self.logger.info("Monitoring loop interrupted by user")
         except Exception as e:
@@ -780,8 +780,8 @@ class MonitoringService:
     
     def _process_signals_for_profile(self, profile: TradingProfile):
         """Process trading signals for a specific profile"""
+        
         from services.signal_generator import get_signal_generator
-        from api_builders.trading_builder import TradingService
         from db.crud import get_open_position_for_symbol
         
         signal_gen = get_signal_generator(profile)

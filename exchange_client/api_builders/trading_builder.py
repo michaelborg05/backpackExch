@@ -657,6 +657,99 @@ class TradingService:
                 "Cache will be updated on next monitoring cycle."
             )        
 
+    def validate_balance_for_trade(self,
+        sale_action: str,
+        symbol: str,
+        profile_name: str
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Validate that profile has sufficient balance before attempting trade
+        Only rejects if balance is zero or below market minimum quantity
+        
+        Args:
+            sale_action: BUY or SELL
+            symbol: SOL_USDC, ETH_USDC, etc
+            profile_name: Name of trading profile
+            balance_cache: BalanceCache instance
+            market_info_cache: MarketInfoCache instance
+            
+        Returns:
+            (is_valid, error_message) tuple
+        """
+        
+        # Parse symbol to get base asset
+        #If sell, get first token, if buy get 2nd token
+        try:
+            if sale_action.upper() == "SELL":
+                base_asset = symbol.split('_')[0]
+            else:
+                base_asset = symbol.split('_')[1]
+        except Exception:
+            return True, None  # Let trading_builder handle invalid symbols
+        
+        # Get cached balance
+        available = self.balance_cache.get_available_balance(
+            profile_name=profile_name,
+            asset=base_asset
+        )
+        
+        # If no balance data, let it proceed (will fail later with proper error)
+        if available is None:
+            self.logger.debug(
+                f"[{profile_name}] No cached balance for {base_asset}, proceeding with trade"
+            )
+            return True, None
+        
+        # Check if balance is zero
+        if available <= 0:
+            error_msg = f"No available balance for {base_asset}"
+            self.logger.warning(f"[{profile_name}] {error_msg}")
+            return False, error_msg
+
+        #if base_asset is USDC (i.e. its a buy), reject if USDC balance below $5 
+        if base_asset == "USDC" and available < 5:
+            error_msg = f"Balance for {base_asset} below $5"
+            self.logger.warning(f"[{profile_name}] {error_msg}")
+            return False, error_msg
+
+        #If buy order and already passed above checks, return true and continue
+        if sale_action.upper() == "BUY":
+            return True, None
+        
+        # Get market info to check minimum quantity
+        market_info = self.market_info_cache.get_market_info(symbol)
+        
+        if market_info is None:
+            # No market info - let trading_builder handle it
+            self.logger.debug(
+                f"[{profile_name}] No market info for {symbol}, proceeding with trade"
+            )
+            return True, None
+        
+        # Check if available balance is below minimum quantity
+        # This prevents trades that will definitely fail due to market rules
+        if available < market_info.min_quantity:
+            error_msg = (
+                f"Balance too low for {base_asset}. "
+                f"Available: {available}, Minimum: {market_info.min_quantity}"
+            )
+            self.logger.warning(f"[{profile_name}] {error_msg}")
+            return False, error_msg
+        
+        # Check if balance would round to zero due to step size
+        rounded = market_info.round_quantity(available)
+        if rounded == 0:
+            error_msg = (
+                f"Balance too small for {base_asset}. "
+                f"Available: {available} rounds to 0 (step size: {market_info.step_size})"
+            )
+            self.logger.warning(f"[{profile_name}] {error_msg}")
+            return False, error_msg
+        
+        # Balance is sufficient - let trading_builder adjust if needed
+        return True, None
+
+
 async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK", reason_summary: List[str] = None) -> Optional[OrderResponse]:
     """
     Process TradingView alert and execute appropriate trade
@@ -775,4 +868,3 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
         return None
 
         """
-    
