@@ -457,7 +457,7 @@ def get_active_circuit_breaker(
     return db.query(CircuitBreakerEvent).filter(
         CircuitBreakerEvent.profile_name == profile_name,
         CircuitBreakerEvent.is_active == True,
-        CircuitBreakerEvent.reset_at > now  # Still locked
+        #CircuitBreakerEvent.reset_at > now  # Still locked
     ).first()
 
 
@@ -549,6 +549,7 @@ def create_daily_snapshot(
         profile_name=profile_name,
         snapshot_date=datetime.now(timezone.utc),
         starting_balance=starting_balance,
+        circuit_breaker_baseline=None,  # ⭐ NEW: Initially None, uses starting_balance
         highest_balance=starting_balance,
         lowest_balance=starting_balance
     )
@@ -557,7 +558,6 @@ def create_daily_snapshot(
     db.commit()
     db.refresh(snapshot)
     return snapshot
-
 
 def update_daily_snapshot(
     db: Session,
@@ -615,3 +615,75 @@ def get_snapshot_history(
     return db.query(DailyBalanceSnapshot).filter(
         DailyBalanceSnapshot.profile_name == profile_name
     ).order_by(DailyBalanceSnapshot.snapshot_date.desc()).limit(limit).all()
+
+
+def reset_circuit_breaker_baseline(
+    db: Session,
+    snapshot_id: int,
+    new_baseline: Decimal
+) -> DailyBalanceSnapshot:
+    """
+    Reset the circuit breaker baseline for a snapshot
+    
+    This updates circuit_breaker_baseline while keeping starting_balance intact
+    for historical tracking. Used when profit limits expire to prevent re-triggering.
+    
+    Args:
+        db: Database session
+        snapshot_id: Snapshot to update
+        new_baseline: New circuit breaker baseline
+        
+    Returns:
+        Updated snapshot
+    """
+    snapshot = db.query(DailyBalanceSnapshot).filter(
+        DailyBalanceSnapshot.id == snapshot_id
+    ).first()
+    
+    if not snapshot:
+        raise ValueError(f"Snapshot {snapshot_id} not found")
+    
+    # Update circuit breaker baseline (starting_balance stays unchanged for historical tracking)
+    snapshot.circuit_breaker_baseline = new_baseline
+    
+    # Also update highest/lowest if needed
+    if new_baseline > (snapshot.highest_balance or 0):
+        snapshot.highest_balance = new_baseline
+    
+    if new_baseline < (snapshot.lowest_balance or float('inf')):
+        snapshot.lowest_balance = new_baseline
+    
+    db.commit()
+    db.refresh(snapshot)
+    
+    return snapshot
+
+def get_recently_expired_circuit_breaker(
+    db: Session,
+    profile_name: str,
+    grace_period_seconds: int = 300  # 5 minutes
+) -> Optional[CircuitBreakerEvent]:
+    """
+    Get a circuit breaker that recently expired but hasn't been marked inactive yet
+    
+    This catches breakers that expired between monitoring cycles so we can:
+    1. Mark them as inactive
+    2. Reset circuit_breaker_baseline for profit limits
+    
+    Args:
+        db: Database session
+        profile_name: Trading profile name
+        grace_period_seconds: How far back to look for expired events (default 5 min)
+        
+    Returns:
+        Recently expired breaker event, or None
+    """
+    now = datetime.now(timezone.utc)
+    grace_period = timedelta(seconds=grace_period_seconds)
+    
+    return db.query(CircuitBreakerEvent).filter(
+        CircuitBreakerEvent.profile_name == profile_name,
+        CircuitBreakerEvent.is_active == True,  # Still marked active
+        CircuitBreakerEvent.reset_at <= now,  # But already expired
+        CircuitBreakerEvent.reset_at >= now - grace_period  # Within grace period
+    ).order_by(CircuitBreakerEvent.reset_at.desc()).first()

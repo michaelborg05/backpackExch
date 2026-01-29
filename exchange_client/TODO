@@ -3,10 +3,8 @@ TO DO
  # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
  # possibly sell as MAX if no other positions available
- # remove trades table. not required unless i use this for limit orders to track whats open?
  # Move buy amounts for signal generator into yaml - Maybe combine with percentage
  # change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
-
 # see claude search titled "Trading signal generator optimization and re-entry strategy" - starred. Need to implement RSI momentum logic and blocked signal logging if I think its useful
 
  Gemini Suggestions
@@ -27,6 +25,7 @@ You could update your TrendData or SignalGenerator to store the local_high and l
 No need
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish
+ # remove trades table. not required unless i use this for limit orders to track whats open?
  
  DONE
 # Add arming of trailing stop only after x percent profit

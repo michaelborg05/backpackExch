@@ -511,7 +511,7 @@ async def tradingview_webhook(
                 profile = profile_manager.get(profile_name)
                 trading = TradingService(profile)
 
-                # Pre-validate balance for SELL orders
+                # Pre-validate balance for orders
                 # Only rejects if balance is 0 or below minimum/step size
                 is_valid, balance_error = trading.validate_balance_for_trade(
                     sale_action=alert.action, 

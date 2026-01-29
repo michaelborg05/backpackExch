@@ -150,6 +150,8 @@ class DailyBalanceSnapshot(Base):
     snapshot_date = Column(DateTime(timezone=True), nullable=False, index=True)  # Start of 24h period
     starting_balance = Column(Numeric(20, 8), nullable=False)
     
+    circuit_breaker_baseline = Column(Numeric(20, 8), nullable=True)
+    
     # Optional: track high/low during the period
     highest_balance = Column(Numeric(20, 8), nullable=True)
     lowest_balance = Column(Numeric(20, 8), nullable=True)
