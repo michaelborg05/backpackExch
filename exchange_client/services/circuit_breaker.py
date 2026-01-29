@@ -34,7 +34,7 @@ class CircuitBreakerService:
     def __init__(self):
         self.logger = log_manager.get_logger("CircuitBreaker")
         self._snapshot_update_counter = 0
-        self._snapshot_update_interval = 1  # Update snapshots every 10 cycles (~5 min if 30s cycle)
+        self._snapshot_update_interval = 10  # Update snapshots every 10 cycles (~5 min if 30s cycle)
     
     def check_circuit_breakers(
         self, 
