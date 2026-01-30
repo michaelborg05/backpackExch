@@ -13,11 +13,11 @@ profiles:
     max_position_size: 25
     default_order_size_pct: 25
 
-  # 🎯 SIGNAL GENERATION SETTINGS (NEW)
+    # 🎯 SIGNAL GENERATION SETTINGS (NEW)
     enable_signal_generation: true    # Enable automated signal generation
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 300      # Wait 5min between signals for same symbol
-    min_signal_confidence: 75.0       # Only trade signals >= 75% confidence
+    min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
     min_volume_ratio: 1.25             # Require 25% above average volume
     
     use_trend_filter: true
@@ -25,31 +25,28 @@ profiles:
     trend_indicators:
       - type: "ema_alignment"
         params: {fast: 20, slow: 50}
-        weight: 1  # Optional: give more weight to certain indicators
       - type: "rsi_threshold"
         params: 
           period: 14
           min_value: 50          # Traditional threshold
           use_momentum: true     # Enable momentum detection
           early_threshold: 40    # Catch early momentum (RSI > 40 + increasing)
-        weight: 1
       - type: "price_vs_vwap"
         params: {}
-        weight: 1
     min_indicators_required: 2  # Need 2/3 indicators bullish
     
     # ATR filter (volatility)
     use_atr_filter: false
-    atr_timeframe: "15m"
-    atr_threshold: 1.05
-    atr_filter_mode: "require_high"
+    #atr_timeframe: "15m"
+    #atr_threshold: 1.05
+    #atr_filter_mode: "require_high"
     # Trend-based exit (intelligent)
+    
+    # Time-based invalidation and max position backstop (last resort)
     use_trend_invalidation_exit: true
     min_position_age_for_trend_check: 4  # hours
-
-    # Time-based backstop (last resort)
     max_position_hours: 18  # Force exit if stuck
-
+    
   15m_MB:
     enabled: true
     api_key_env: BP_API_KEY_15M

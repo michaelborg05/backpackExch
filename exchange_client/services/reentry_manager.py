@@ -23,8 +23,8 @@ class ReEntryManager:
         # Cooldown periods by timeframe (in seconds)
         self._cooldown_periods = {
             "1": 300,      # 1m → 5 min cooldown
-            "5": 600,      # 5m → 10 min cooldown  
-            "15": 1800,     # 15m → 30 min cooldown
+            "5": 600,      # 5m → 10 min cooldown
+            "15": 900,     # 15m → 15 min cooldown
             "60": 3600,    # 1h → 60 min cooldown
         }
     
@@ -32,8 +32,8 @@ class ReEntryManager:
         self,
         symbol: str,
         profile_name: str,
-        timeframe: str,
-        current_trend: TrendData  # Your TrendData from trend_cache
+        timeframe: str,     #Uses Trading timeframe
+        current_trend: TrendData  # Your TrendData from trend_cache - Trading timeframe
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if re-entry is allowed based on recent DB exits
@@ -84,10 +84,14 @@ class ReEntryManager:
             
             # After stop loss, allow but log it (signal generator should be more cautious)
             elif close_reason == "STOP_LOSS":
-                self.logger.info(
-                    f"Re-entry after SL on {symbol} - ensure signal quality is high"
+                reset_ok, reset_reason = self._check_momentum_reset(
+                    recent_exit,
+                    current_trend
                 )
-                return True, f"Cooldown passed after SL"
+                if not reset_ok:
+                    return False, f"Re-entry after Stop loss exit @ {recent_exit.closed_at.strftime('%H:%M')}: {reset_reason}"
+                else:
+                    return True, f"Momentum reset OK after {close_reason}"
             
             # Other close reasons (MANUAL, INVALID, etc.)
             else:
@@ -126,75 +130,110 @@ class ReEntryManager:
             .order_by(Position.closed_at.desc())
             .first()
         )
-    
+
     def _check_momentum_reset(
         self,
         recent_exit: Position,
-        current_trend: TrendData
+        current_trend: TrendData,
     ) -> Tuple[bool, str]:
         """
-        Check if momentum has reset enough to allow re-entry
+        Check momentum reset using TRADING timeframe
         
-        After a profitable exit, we want to ensure:
-        1. RSI has pulled back (not overbought)
-        2. RSI is in a healthy range for re-entry
-        3. Price hasn't crashed below key levels
-        
-        Args:
-            recent_exit: The Position that was closed
-            current_trend: Current market trend data
-            
-        Returns:
-            (reset_ok, reason) tuple
+        Why trading timeframe?
+        - Re-entry is a tactical decision (entry timing)
+        - Need responsive signals, not lagging trend
+        - current_trend is already from trading TF
         """
         checks = []
-        all_pass = True
+        score = 0
         
-        # 1. RSI not overbought (must be below 65)
-        if current_trend.rsi > 65:
-            checks.append(f"RSI still high ({current_trend.rsi:.1f})")
-            all_pass = False
+        rsi = current_trend.rsi
+        
+        # Get momentum from THE SAME TIMEFRAME as current_trend
+        from cache.trend_cache import get_trend_cache
+        cache = get_trend_cache()
+        
+        # Extract symbol from current_trend (it's already properly formatted)
+        symbol = current_trend.symbol
+        
+        # Use the TRADING timeframe passed in (e.g., "15")
+        rsi_momentum, rsi_direction = cache._get_rsi_momentum(
+            symbol,
+            current_trend.timeframe  
+        )
+        
+        # 1. RSI not overbought (0-30 points)
+        if rsi < 60:
+            score += 30
+            checks.append(f"RSI cooled ({rsi:.1f})")
+        elif rsi < 65:
+            score += 15
+            checks.append(f"RSI moderate ({rsi:.1f})")
         else:
-            checks.append(f"RSI cooled ({current_trend.rsi:.1f})")
+            score += 0
+            checks.append(f"RSI still high ({rsi:.1f})")
         
-        # 2. RSI in "buy zone" (45-60 is ideal for re-entry)
-        if 45 <= current_trend.rsi <= 60:
-            checks.append("RSI in buy zone")
-        elif 40 <= current_trend.rsi < 45:
-            checks.append("RSI slightly low")
-            # Don't fail, just note it
+        # 2. RSI in healthy range WITH momentum check (0-40 points)
+        if 45 <= rsi <= 58:
+            if rsi_direction == "increasing" or rsi_direction == "flat":
+                score += 40
+                checks.append(f"RSI optimal + {rsi_direction}")
+            else:
+                score += 25  # In range but weakening
+                checks.append(f"RSI OK but {rsi_direction}")
+        
+        elif 40 <= rsi < 45:
+            if rsi_direction == "increasing":
+                score += 35  # Building momentum from low base
+                checks.append(f"RSI building ({rsi:.1f}, {rsi_direction})")
+            else:
+                score += 15
+                checks.append(f"RSI slightly low + {rsi_direction}")
+        
+        elif 58 < rsi < 65:
+            if rsi_direction == "decreasing":
+                score += 30  # Pulling back from high - good!
+                checks.append(f"RSI cooling from high ({rsi:.1f}, {rsi_direction})")
+            else:
+                score += 10  # Still elevated and not cooling
+                checks.append(f"RSI elevated + {rsi_direction}")
+        
         else:
-            checks.append(f"RSI not optimal ({current_trend.rsi:.1f})")
-            all_pass = False
+            score += 0
+            checks.append(f"RSI extreme ({rsi:.1f})")
         
-        # 3. Price must be near or above EMA20 (support level)
-        # Allow 0.3% below EMA20 (small wiggle room)
+        # 3. Price vs EMA20 (0-20 points)
         if current_trend.price >= current_trend.ema20 * 0.997:
+            score += 20
             checks.append("Price @ EMA20+")
+        elif current_trend.price >= current_trend.ema20 * 0.99:
+            score += 10
+            checks.append("Price near EMA20")
         else:
             price_vs_ema = ((current_trend.price - current_trend.ema20) / current_trend.ema20) * 100
+            score += 0
             checks.append(f"Price below EMA20 ({price_vs_ema:.2f}%)")
-            all_pass = False
         
-        # 4. Optional: Check we're not re-entering at a worse price
-        # (This prevents "catching a falling knife")
+        # 4. Price vs exit price (0-10 points)
         exit_price = float(recent_exit.exit_price)
-        current_price = float(current_trend.price)
-        
-        # If current price is >2% below our exit, be cautious
         if exit_price and exit_price > 0:
-            price_change_pct = ((current_price - exit_price) / exit_price) * 100
-        else:
-            price_change_pct = 0
-        if price_change_pct < -2.0:
-            checks.append(f"Price dropped {abs(price_change_pct):.1f}% since exit")
-            all_pass = False
-        elif price_change_pct < 0:
-            checks.append(f"Price down {abs(price_change_pct):.1f}%")
-            # Note it but don't fail
+            price_change_pct = ((current_trend.price - exit_price) / exit_price) * 100
+            
+            if -1.0 <= price_change_pct <= 0.5:  # Slight pullback is ideal
+                score += 10
+                checks.append(f"Price reset OK ({price_change_pct:+.1f}%)")
+            elif price_change_pct < -2.0:
+                score += 0
+                checks.append(f"Price dropped {abs(price_change_pct):.1f}%")
+            else:
+                score += 5
+                checks.append(f"Price {price_change_pct:+.1f}%")
         
-        reason = ", ".join(checks)
-        return all_pass, reason
+        # Need 70/100 points to allow re-entry
+        reset_ok = score >= 70
+        reason = f"Score: {score}/100 - {', '.join(checks)}"
+        
+        return reset_ok, reason
     
     def get_recent_exits_summary(
         self,

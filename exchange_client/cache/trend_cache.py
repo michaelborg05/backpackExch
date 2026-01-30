@@ -141,6 +141,62 @@ class TrendCache:
                 f"✨ TREND CHANGED: {new_trend.symbol} ({new_trend.timeframe}) - "
                 f"{', '.join(changes)}"
             )
+
+    def _evaluate_rsi_with_momentum(self, trend, params, symbol, timeframe):
+        """
+        Evaluate RSI with momentum awareness using tiered system
+        
+        Tiers:
+        - STRONG BULLISH: RSI > min_value (traditional)
+        - MODERATE BULLISH: RSI > early_threshold AND increasing momentum
+        - EMERGING BULLISH: RSI < early_threshold BUT rapid momentum surge (>2 points/change)
+        - WEAK BEARISH: RSI > min_value BUT decreasing momentum (warning sign)
+        - BEARISH: All other cases
+        """
+        rsi = trend.rsi
+        min_rsi = params.get("min_value", 50)
+        use_momentum = params.get("use_momentum", True)
+        early_threshold = params.get("early_threshold", 40)
+        
+        if not use_momentum:
+            # Simple threshold check
+            is_bullish = rsi > min_rsi
+            msg = f"RSI: {'✓' if is_bullish else '✗'} ({rsi:.1f} vs {min_rsi})"
+            return is_bullish, msg
+        
+        # Get momentum
+        rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
+        
+        if rsi_momentum is None:
+            # No momentum data yet - fall back to threshold
+            is_bullish = rsi > min_rsi
+            msg = f"RSI: {'✓' if is_bullish else '✗'} ({rsi:.1f}, no momentum)"
+            return is_bullish, msg
+        
+        # TIER 1: STRONG BULLISH (traditional threshold + momentum not bearish)
+        if rsi > min_rsi and rsi_momentum > -1.0:  # Above threshold, not declining sharply
+            msg = f"RSI: ✓ STRONG ({rsi:.1f}, {rsi_direction} {rsi_momentum:+.1f})"
+            return True, msg
+        
+        # TIER 2: MODERATE BULLISH (early threshold + increasing)
+        if rsi > early_threshold and rsi_direction == "increasing":
+            msg = f"RSI: ✓ MODERATE ({rsi:.1f}, {rsi_direction} {rsi_momentum:+.1f})"
+            return True, msg
+        
+        # TIER 3: EMERGING BULLISH (oversold but surging)
+        # Catch early moves: RSI < early_threshold but strong momentum
+        if rsi_momentum > 2.0:  # Rapid surge (>2 points per change)
+            msg = f"RSI: ✓ EMERGING ({rsi:.1f}, surging {rsi_momentum:+.1f})"
+            return True, msg
+        
+        # WARNING: Above threshold but weakening
+        if rsi > min_rsi and rsi_momentum < -1.0:
+            msg = f"RSI: ✗ WEAKENING ({rsi:.1f}, fading {rsi_momentum:+.1f})"
+            return False, msg
+        
+        # BEARISH: All other cases
+        msg = f"RSI: ✗ ({rsi:.1f}, {rsi_direction or 'flat'} {rsi_momentum:+.1f})"
+        return False, msg
     
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
         """Get cached trend data if still valid"""

@@ -237,58 +237,103 @@ class SignalGenerator:
     
     def _check_entry_conditions(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """
-        Check if trading timeframe shows good entry opportunity
+        Check entry conditions with momentum awareness
         
-        Entry conditions:
-        - Price near or above VWAP (institutional support)
-        - EMA alignment (fast > slow or fast approaching slow)
-        - RSI in sweet spot (40-70) - not oversold, not overbought
+        Scoring system (0-100 points):
+        - Price vs VWAP: 0-30 points
+        - EMA alignment: 0-30 points  
+        - RSI position: 0-20 points
+        - RSI momentum: 0-20 points (NEW)
         """
         trend = self.trend_cache.get(symbol, timeframe)
         
         if trend is None:
-            return {"is_valid": False}, f"No trend data for {timeframe}"
+            return {"is_valid": False, "score": 0}, f"No trend data"
         
+        score = 0
         checks = []
-        is_valid = True
         
-        # 1. Price vs VWAP
-        price_vs_vwap = trend.price > trend.vwap * 0.998  # Allow 0.2% below VWAP
-        if price_vs_vwap:
-            checks.append("price @ VWAP")
+        # 1. Price vs VWAP (0-30 points)
+        if trend.price > trend.vwap * 1.002:  # 0.2% above
+            score += 30
+            checks.append("VWAP++ (above)")
+        elif trend.price > trend.vwap * 0.998:  # Near VWAP
+            score += 20
+            checks.append("VWAP+ (near)")
         else:
-            checks.append("price below VWAP")
-            is_valid = False
+            score += 0
+            checks.append("VWAP- (below)")
         
-        # 2. EMA alignment or approaching
+        # 2. EMA alignment (0-30 points)
         ema_diff_pct = ((trend.ema20 - trend.ema50) / trend.ema50) * 100
-        if ema_diff_pct > 0:
-            checks.append(f"EMA+ {ema_diff_pct:.1f}%")
-        elif ema_diff_pct > -0.5:  # Fast EMA within 0.5% of slow
-            checks.append(f"EMA converging")
-        else:
-            checks.append(f"EMA bearish")
-            is_valid = False
         
-        # 3. RSI in valid range (not extreme)
+        if ema_diff_pct > 0.5:  # Strong bullish alignment
+            score += 30
+            checks.append(f"EMA++ ({ema_diff_pct:.1f}%)")
+        elif ema_diff_pct > 0:  # Mild bullish
+            score += 20
+            checks.append(f"EMA+ ({ema_diff_pct:.1f}%)")
+        elif ema_diff_pct > -0.5:  # Converging
+            score += 10
+            checks.append(f"EMA~ (converging)")
+        else:  # Bearish
+            score += 0
+            checks.append(f"EMA- (bearish)")
+        
+        # 3. RSI position (0-20 points)
         rsi = trend.rsi
-        if 40 <= rsi <= 70:
-            checks.append(f"RSI {rsi:.0f}")
-        elif 35 <= rsi < 40:
-            checks.append(f"RSI {rsi:.0f} (early)")
-        else:
-            checks.append(f"RSI {rsi:.0f} (extreme)")
-            is_valid = False
         
-        reason = ", ".join(checks)
+        if 45 <= rsi <= 60:  # Sweet spot
+            score += 20
+            checks.append(f"RSI++ ({rsi:.0f})")
+        elif 40 <= rsi < 45 or 60 < rsi <= 65:  # Acceptable
+            score += 15
+            checks.append(f"RSI+ ({rsi:.0f})")
+        elif 35 <= rsi < 40 or 65 < rsi <= 70:  # Edge cases
+            score += 10
+            checks.append(f"RSI~ ({rsi:.0f})")
+        else:  # Too extreme
+            score += 0
+            checks.append(f"RSI- ({rsi:.0f})")
+        
+        # 4. RSI momentum (0-20 points) - NEW!
+        rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(symbol, timeframe)
+        
+        if rsi_momentum is not None:
+            if rsi_direction == "increasing" and rsi_momentum > 1.0:  # Strong increase
+                score += 20
+                checks.append(f"MOM++ (+{rsi_momentum:.1f})")
+            elif rsi_direction == "increasing":  # Mild increase
+                score += 15
+                checks.append(f"MOM+ (+{rsi_momentum:.1f})")
+            elif rsi_direction == "flat":  # Stable
+                score += 10
+                checks.append(f"MOM~ ({rsi_momentum:+.1f})")
+            elif rsi_direction == "decreasing" and rsi_momentum > -1.0:  # Mild decrease
+                score += 5
+                checks.append(f"MOM- ({rsi_momentum:.1f})")
+            else:  # Sharp decrease
+                score += 0
+                checks.append(f"MOM-- ({rsi_momentum:.1f})")
+        else:
+            score += 10  # Neutral if no momentum data
+            checks.append("MOM? (no data)")
+        
+        # Require minimum 60/100 points to be valid
+        is_valid = score >= 60
+        reason = f"Score: {score}/100 ({', '.join(checks)})"
         
         return {
             "is_valid": is_valid,
-            "price_vs_vwap": price_vs_vwap,
+            "score": score,
+            "checks": checks,
+            "price_vs_vwap": trend.price > trend.vwap,
             "ema_diff_pct": float(ema_diff_pct),
-            "rsi": float(rsi)
+            "rsi": float(rsi),
+            "rsi_momentum": float(rsi_momentum) if rsi_momentum else None,
+            "rsi_direction": rsi_direction
         }, reason
-    
+
     def _check_volume(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Check volume confirmation"""
         trend = self.trend_cache.get(symbol, timeframe)
