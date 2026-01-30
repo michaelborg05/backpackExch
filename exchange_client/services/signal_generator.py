@@ -10,6 +10,7 @@ from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
 from api_builders.trading_builder import TradingService
+from cache.regime_filter import get_regime_filter, MarketRegime
 
 class SignalGenerator:
     """
@@ -29,7 +30,8 @@ class SignalGenerator:
         self.trend_cache = get_trend_cache()
         self.atr_cache = get_atr_cache()
         self.price_cache = get_price_cache()
-        
+        self.regime_filter = get_regime_filter()
+
         # Signal generation settings from profile
         self.trading_timeframe = getattr(profile, 'signal_timeframe', '15')
         self.trend_timeframe = getattr(profile, 'trend_timeframe', '60')  # Higher TF for trend
@@ -80,9 +82,24 @@ class SignalGenerator:
             
             return None
 
+        if self.profile.use_market_regime_filter:
 
+            #1. Add Regime check first - If market is not worth trading, exit early
+            can_trade, regime_reason = self.regime_filter.can_trade(
+                symbol=symbol,
+                profile_name=self.profile.name,
+                primary_timeframe=self.trend_timeframe,  # Uses your 60m timeframe
+                confirm_timeframe=self.trading_timeframe  # Uses your 15m timeframe
+            )
+            
+            if not can_trade:
+                # Log at debug level to avoid spam (most rejections will be UNCERTAIN regime)
+                self.logger.debug(
+                    f"{symbol}: Market regime check failed - {regime_reason}"
+                )
+                return None
 
-        # 0. Before any signal checks, check reentry conditions to make sure we did not just exit a position
+        # 2. Before any signal checks, check reentry conditions to make sure we did not just exit a position
         from services.reentry_manager import get_reentry_manager
     
         reentry_mgr = get_reentry_manager()
@@ -112,7 +129,7 @@ class SignalGenerator:
         confidence_score = 0.0
         max_confidence = 100.0
         
-        # 1. CHECK HIGHER TIMEFRAME TREND (30 points)
+        # 3. CHECK HIGHER TIMEFRAME TREND (30 points)
         trend_check, trend_reason = self._check_trend(symbol, self.trend_timeframe)
         indicators['trend'] = trend_check
         
@@ -123,7 +140,7 @@ class SignalGenerator:
         reasons.append(f"✅ Trend: {trend_reason}")
         confidence_score += 30.0
         
-        # 2. CHECK TRADING TIMEFRAME ENTRY (25 points)
+        # 4. CHECK TRADING TIMEFRAME ENTRY (25 points)
         entry_check, entry_reason = self._check_entry_conditions(symbol, self.trading_timeframe)
         indicators['entry'] = entry_check
         
@@ -134,7 +151,7 @@ class SignalGenerator:
         reasons.append(f"✅ Entry: {entry_reason}")
         confidence_score += 25.0
         
-        # 3. VOLUME CONFIRMATION (20 points)
+        # 5. VOLUME CONFIRMATION (20 points)
         volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
         indicators['volume'] = volume_check
         
@@ -146,7 +163,7 @@ class SignalGenerator:
             reasons.append(f"⚠️ Volume: {volume_reason}")
             confidence_score += 5.0  # Small penalty
         
-        # 4. ATR/VOLATILITY CHECK (15 points)
+        # 6. ATR/VOLATILITY CHECK (15 points)
         if self.profile.use_atr_filter:
             atr_check, atr_reason = self._check_atr(symbol)
             indicators['atr'] = atr_check
@@ -160,7 +177,7 @@ class SignalGenerator:
         else:
             confidence_score += 15.0  # Give full points if not using ATR filter
         
-        # 5. NOT OVERBOUGHT (10 points)
+        # 7. NOT OVERBOUGHT (10 points)
         overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
         indicators['overbought'] = overbought_check
         
@@ -191,13 +208,19 @@ class SignalGenerator:
             strength = SignalStrength.MODERATE
         else:
             strength = SignalStrength.WEAK
-        
+
+        regime, regime_reason = self.regime_filter.get_regime(
+            symbol=symbol,
+            primary_timeframe=self.trend_timeframe,
+            confirm_timeframe=self.trading_timeframe       
+        )
+
         signal = TradingSignal(
             symbol=symbol,
             action="BUY",
             strength=strength,
             confidence=confidence_pct,
-            reasons=reasons,
+            reasons=reasons + [f"Market: {regime_reason}"],  # Add regime to reasons
             indicators=indicators,
             timestamp=time.time(),
             timeframe=self.trading_timeframe

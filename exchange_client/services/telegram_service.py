@@ -19,6 +19,8 @@ from utils.logging import log_manager
 from utils.constants import MessagePriority
 from cache.portfolio_cache import get_portfolio_cache
 from services.profile_manager import get_profile_manager
+from db.utils import get_db_session
+from db.crud import get_active_symbols
 
 
 class TelegramService:
@@ -306,10 +308,12 @@ class TelegramService:
                         from cache.trend_cache import get_trend_cache
                         from cache.atr_cache import get_atr_cache
                         from services.circuit_breaker import get_circuit_breaker
-
-                        trend_cache = get_trend_cache()
-                        circuit_breaker = get_circuit_breaker() 
+                        from cache.regime_filter import get_regime_filter
                         
+                        trend_cache = get_trend_cache()
+                        circuit_breaker = get_circuit_breaker()
+                        regime_filter = get_regime_filter()
+
                         if not self.profile_manager:
                             self.logger.warning("Profile manager not initialized")
                             msg_text = "Profile manager not initialized"
@@ -373,12 +377,45 @@ class TelegramService:
                                     status_emoji = "🟢" if is_bullish else "🔴"
                                     msg += f"{status_emoji} {symbol} ({timeframe}): {reason} \n\n"
 
-                            
                             await bot.send_message(
                                 chat_id=chat_id,
                                 text=msg,
                                 parse_mode="HTML"
                             )
+
+                            with get_db_session() as db:
+                                db_tickers = get_active_symbols(db)
+                            if db_tickers:
+                                regime_summary = regime_filter.get_regime_summary(db_tickers)
+                                msg = f"📊 Regime Summary\n"
+                                msg = f"🌐 *Market Regime Report*\n"
+                                msg += f"✅ Trending: {regime_summary['trending']} | "
+                                msg += f"⚠️ Uncertain: {regime_summary['uncertain']} | "
+                                msg += f"🚫 High Risk: {regime_summary['high_risk']}\n"
+                                msg += "─" * 15 + "\n"
+                                
+                                details = regime_summary.get('details', {})
+                                if details.get('trending'):
+                                    msg += "\n🟢 *TRADE READY (Trending)*\n"
+                                    for item in details['trending']:
+                                        msg += f"• {item['symbol']}\n"
+
+                                # Show High Risk (Protection)
+                                if details.get('high_risk'):
+                                    msg += "\n🚫 *HALTED (High Risk)*\n"
+                                    for item in details['high_risk']:
+                                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
+                                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
+
+                                # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
+                                if details.get('uncertain'):
+                                    msg += f"\n🟡 UNCERTAIN: {', '.join([i['symbol'] for i in details['uncertain']])}\n"
+                                    
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=msg,
+                                    parse_mode="HTML"
+                                )
                     
                     except Exception as e:
                         # Delete processing message and show error

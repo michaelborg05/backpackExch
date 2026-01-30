@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from db.models import Trade, Position
 from models.trade import OrderResponse
 from models.trading_profile import TradingProfile
-from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot
+from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
 
 def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None) -> Trade:
     """Save a trade to the database"""
@@ -687,3 +687,71 @@ def get_recently_expired_circuit_breaker(
         CircuitBreakerEvent.reset_at <= now,  # But already expired
         CircuitBreakerEvent.reset_at >= now - grace_period  # Within grace period
     ).order_by(CircuitBreakerEvent.reset_at.desc()).first()
+
+# Add to db/crud.py
+
+def get_symbol_config(db: Session, profile_name: str, symbol: str) -> Optional[SymbolConfig]:
+    """Get symbol-specific configuration"""
+    return db.query(SymbolConfig).filter(
+        SymbolConfig.profile_name == profile_name,
+        SymbolConfig.symbol == symbol,
+        SymbolConfig.enabled == True
+    ).first()
+
+
+def upsert_symbol_config(
+    db: Session,
+    profile_name: str,
+    symbol: str,
+    order_size_usdc: float,  # Required
+    max_position_size_pct: Optional[float] = None,
+    enabled: bool = True
+) -> SymbolConfig:
+    """Create or update symbol configuration"""
+    config = get_symbol_config(db, profile_name, symbol)
+
+    if config:
+        # Update existing
+        config.order_size_usdc = Decimal(str(order_size_usdc))
+        if max_position_size_pct is not None:
+            config.max_position_size_pct = Decimal(str(max_position_size_pct))
+        config.enabled = enabled
+        config.updated_at = datetime.utcnow()
+    else:
+        # Create new
+        config = SymbolConfig(
+            profile_name=profile_name,
+            symbol=symbol,
+            order_size_usdc=Decimal(str(order_size_usdc)),
+            max_position_size_pct=Decimal(str(max_position_size_pct)) if max_position_size_pct else None,
+            enabled=enabled
+        )
+        db.add(config)
+
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def get_all_symbol_configs(db: Session, profile_name: str) -> List[SymbolConfig]:
+    """Get all symbol configs for a profile"""
+    return db.query(SymbolConfig).filter(
+        SymbolConfig.profile_name == profile_name,
+        SymbolConfig.enabled == True
+    ).all()
+
+
+def delete_symbol_config(db: Session, profile_name: str, symbol: str) -> bool:
+    """Delete (disable) a symbol configuration"""
+    config = get_symbol_config(db, profile_name, symbol)
+    if config:
+        config.enabled = False
+        db.commit()
+        return True
+    return False
+
+def get_active_symbols(db: Session) -> List[str]:
+    """Get list of active symbols to monitor"""
+    symbols = db.query(SymbolConfig.symbol).filter(SymbolConfig.enabled == True).distinct().all()
+    return [s.symbol for s in symbols]
+

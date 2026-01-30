@@ -13,6 +13,8 @@ profiles:
     max_position_size: 25
     default_order_size_pct: 25
 
+    use_market_regime_filter: true
+
     # 🎯 SIGNAL GENERATION SETTINGS (NEW)
     enable_signal_generation: true    # Enable automated signal generation
     signal_timeframe: "15"           # Timeframe for entry signals
@@ -59,6 +61,9 @@ profiles:
     max_risk_pct: 0.25
     max_position_size: 10
     default_order_size_pct: 20
+
+    use_market_regime_filter: true
+
     # Trend filter settings
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
@@ -94,6 +99,9 @@ profiles:
     max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
+
+    use_market_regime_filter: true
+
     # Trend filter settings - more conservative (all must pass)
     use_trend_filter: false
     trend_timeframe: "240"  # Check 240 (4H) trend for 1H trades
@@ -126,6 +134,9 @@ profiles:
     max_position_size: 10
     max_risk_pct: 1.0
     default_order_size_pct: 20
+
+    use_market_regime_filter: false
+
     use_trend_filter: true
     trend_timeframe: "60" 
     trend_indicators:

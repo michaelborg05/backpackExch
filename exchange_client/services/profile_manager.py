@@ -104,6 +104,9 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         min_signal_confidence       = cfg.get("min_signal_confidence", 75)
         min_volume_ratio            = cfg.get("min_volume_ratio", 1.5)
 
+        # Market Regime filter
+        use_market_regime_filter    = cfg.get("use_market_regime_filter", False)
+
         # Load ATR filter configuration
         use_atr_filter = cfg.get("use_atr_filter", False)
         atr_timeframe = cfg.get("atr_timeframe", "1m")
@@ -150,6 +153,7 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             use_trend_invalidation_exit = use_trend_invalidation_exit,
             min_position_age_for_trend_check = min_position_age_for_trend_check,
             max_position_hours          = max_position_hours,
+            use_market_regime_filter=use_market_regime_filter,
         )
 
 

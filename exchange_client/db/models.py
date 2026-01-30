@@ -169,3 +169,34 @@ class DailyBalanceSnapshot(Base):
         # Prevent duplicate snapshots for same profile/date
         CheckConstraint('snapshot_date IS NOT NULL', name='valid_snapshot_date'),
     )
+
+class SymbolConfig(Base):
+    """Symbol-specific trading configuration per profile"""
+    __tablename__ = "symbol_configs"
+
+    id = Column(Integer, primary_key=True)
+    profile_name = Column(String, nullable=False, index=True)
+    symbol = Column(String, nullable=False, index=True)
+
+    # Position sizing
+    order_size_usdc = Column(Numeric(20, 2), nullable=True)  # Fixed dollar amount per order
+
+    # Position limits (as % of total portfolio value)
+    max_position_size_pct = Column(Numeric(5, 2), nullable=True)  # Max position as % of portfolio (0-100)
+
+    # Control flags
+    enabled = Column(Boolean, default=True)
+
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # Ensure unique symbol per profile
+        Index('ix_symbol_configs_profile_symbol', 'profile_name', 'symbol', unique=True),
+        # Check that order size is specified
+        CheckConstraint(
+            'order_size_usdc IS NOT NULL',
+            name='check_order_size_specified'
+        ),
+    )

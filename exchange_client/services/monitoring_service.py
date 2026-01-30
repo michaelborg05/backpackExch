@@ -28,7 +28,8 @@ from db.crud import (
     get_open_positions,
     update_position_trailing_stop,
     close_invalid_position,
-    update_high_low
+    update_high_low,
+    get_active_symbols
 )
 
 class MonitoringService:
@@ -43,7 +44,12 @@ class MonitoringService:
         """
         self.config = Config()
         self.logger = log_manager.get_logger("MonitoringService")
-        self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
+        #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
+        with get_db_session() as db:
+                db_tickers = get_active_symbols(db)
+                # Fallback to a hardcoded list ONLY if the DB is empty
+                self.tickers = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
+
         self.is_running = False
         self.thread = None
         self.call_count = 0

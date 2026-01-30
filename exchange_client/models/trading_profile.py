@@ -20,6 +20,9 @@ class TradingProfile(BaseModel):
     default_order_size_pct: Decimal = Field(Decimal("5"), description="Default order size as % of portfolio")
     max_position_size: Optional[Decimal] = None
  
+    # Market Regime Filter
+    use_market_regime_filter: bool = False  
+    
     # NEW: Trend Filter Configuration
     use_trend_filter: bool = False
     trend_timeframe: str = "1h"  # Which timeframe to check trend on

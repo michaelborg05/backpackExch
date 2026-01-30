@@ -16,6 +16,7 @@ from cache.atr_cache import get_atr_cache
 from cache.market_info_cache import get_market_info_cache
 from cache.portfolio_cache import get_portfolio_cache
 from cache.balance_cache import get_balance_cache
+from cache.regime_filter import get_regime_filter, MarketRegime
 from services.monitoring_service import get_monitoring_service
 from services.telegram_service import TelegramService, set_telegram, get_telegram
 from services.circuit_breaker import get_circuit_breaker
@@ -475,8 +476,6 @@ async def tradingview_webhook(
         )
         
         # Get caches for pre-validation
-        balance_cache = get_balance_cache()
-        market_info_cache = get_market_info_cache()
         trend_cache = get_trend_cache()
         atr_cache = get_atr_cache()
         circuit_breaker = get_circuit_breaker() 
@@ -510,6 +509,33 @@ async def tradingview_webhook(
                 # Create trading service for this profile
                 profile = profile_manager.get(profile_name)
                 trading = TradingService(profile)
+                trading_timeframe = getattr(profile, 'signal_timeframe', '15')
+                trend_timeframe = getattr(profile, 'trend_timeframe', '60')  # Higher TF for trend
+
+                if profile.use_market_regime_filter:
+                    regime_filter = get_regime_filter()
+                    #1. Add Regime check first - If market is not worth trading, exit early
+                    can_trade, regime_reason = regime_filter.can_trade(
+                        symbol=alert.symbol,
+                        profile_name=profile.name,
+                    primary_timeframe=trend_timeframe,  # Uses your 60m timeframe
+                    confirm_timeframe=trading_timeframe  # Uses your 15m timeframe
+                    )
+                
+                    if not can_trade:
+                        # Log at debug level to avoid spam (most rejections will be UNCERTAIN regime)
+                        apiserver_logger.debug(
+                            f"{alert.symbol}: Market regime check failed - {regime_reason}"
+                        )
+                        results.append({
+                            "profile": profile_name,
+                            "success": False,
+                            "error": regime_reason,
+                            "error_type": "regime_error"
+                        })
+                        errors.append(f"[{profile_name}] {regime_reason}")
+                        continue
+                    
 
                 # Pre-validate balance for orders
                 # Only rejects if balance is 0 or below minimum/step size
@@ -699,6 +725,7 @@ async def tradingview_webhook(
             no_balance      = sum(1 for r in results if r.get("error_type") == "insufficient_balance")
             atr_filtered    = sum(1 for r in results  if r.get("error_type") == "atr_filter")
             circuit_blocked = sum(1 for r in results  if r.get("error_type") == "circuit_breaker")
+            regime_blocked  = sum(1 for r in results  if r.get("error_type") == "regime_error")
 
             action_icon = "📈" if alert.action.lower() == "buy" else "🏁"
             if success_count == total_count:
@@ -735,7 +762,7 @@ async def tradingview_webhook(
                         summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
 
             # Only send if at least one profile succeeded OR if failures aren't just balance/trend issues
-            if (no_balance + trend_filtered + atr_filtered + circuit_blocked) < total_count:
+            if (no_balance + trend_filtered + atr_filtered + circuit_blocked + regime_blocked) < total_count:
             #if success_count > 0 or (trend_filtered > 0 and trend_filtered != total_count):
                 await telegram.send_message(summary)
             else:

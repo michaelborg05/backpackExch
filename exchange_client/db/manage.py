@@ -182,6 +182,122 @@ def migrate_circuit_breaker():
     finally:
         db.close()
 
+def setup_symbol_configs():
+    """
+    Initialize symbol_configs table and optionally create default configs
+    Run this after creating tables to set up initial symbol configurations
+    """
+    db = SessionLocal()
+
+    try:
+        from db.crud import upsert_symbol_config
+        from services.profile_manager import load_profiles, set_profile_manager
+
+        # Load profiles
+        profile_manager = load_profiles()
+        set_profile_manager(profile_manager)
+
+        print("\n🔧 Setting up symbol configurations...")
+        print("=" * 60)
+
+        # Example default configurations
+        # Adjust these based on your needs
+        default_configs = {
+            "SOL_USDC": {
+                "order_size_usdc": 150.0,
+                "max_position_size_pct": 40.0  # 15% of portfolio
+            },
+            "ETH_USDC": {
+                "order_size_usdc": 150.0,
+                "max_position_size_pct": 40.0  # 20% of portfolio
+            },
+            "HYPE_USDC": {
+                "order_size_usdc": 100.0,
+                "max_position_size_pct": 25.0  # 10% of portfolio
+            },
+            "SUI_USDC": {
+                "order_size_usdc": 100.0,
+                "max_position_size_pct": 25.0  # 15% of portfolio
+            }
+        }
+
+        # Ask if user wants to create default configs
+        create_defaults = input("\nCreate default symbol configurations? (yes/no): ").lower() == "yes"
+
+        if create_defaults:
+            for profile in profile_manager._profiles.values():
+                print(f"\n📋 Setting up configs for profile: {profile.name}")
+
+                for symbol, config in default_configs.items():
+                    try:
+                        upsert_symbol_config(
+                            db,
+                            profile_name=profile.name,
+                            symbol=symbol,
+                            order_size_usdc=config["order_size_usdc"],
+                            max_position_size_pct=config.get("max_position_size_pct")
+                        )
+
+                        print(f"  ✓ {symbol}: ${config['order_size_usdc']}, max {config.get('max_position_size_pct', 'N/A')}% of portfolio")
+
+                    except Exception as e:
+                        print(f"  ✗ Failed to create config for {symbol}: {e}")
+
+        # Interactive config creation
+        create_custom = input("\nCreate custom symbol configurations? (yes/no): ").lower() == "yes"
+
+        if create_custom:
+            while True:
+                print("\n" + "=" * 60)
+                profile_name = input("Profile name (or 'done' to finish): ").strip()
+
+                if profile_name.lower() == 'done':
+                    break
+
+                if not profile_manager.has_profile(profile_name):
+                    print(f"❌ Profile '{profile_name}' not found")
+                    continue
+
+                symbol = input("Symbol (e.g., SOL_USDC): ").strip().upper()
+
+                order_size_usdc = float(input("Order size in USDC: "))
+                max_position_pct = float(input("Max position size as % of portfolio (e.g., 15.0 for 15%): "))
+
+                try:
+                    upsert_symbol_config(
+                        db,
+                        profile_name=profile_name,
+                        symbol=symbol,
+                        order_size_usdc=order_size_usdc,
+                        max_position_size_pct=max_position_pct
+                    )
+
+                    print(f"✅ Created config: {symbol} - ${order_size_usdc}, max {max_position_pct}% of portfolio")
+
+                except Exception as e:
+                    print(f"❌ Failed to create config: {e}")
+
+        print("\n" + "=" * 60)
+        print("✅ Symbol config setup complete!")
+
+        # Show summary
+        from db.crud import get_all_symbol_configs
+
+        print("\n📊 Configuration Summary:")
+        for profile in profile_manager._profiles.values():
+            configs = get_all_symbol_configs(db, profile.name)
+            if configs:
+                print(f"\n{profile.name}:")
+                for config in configs:
+                    print(f"  • {config.symbol}: ${config.order_size_usdc}, max {config.max_position_size_pct if config.max_position_size_pct else 'N/A'}% of portfolio")
+
+    except Exception as e:
+        print(f"❌ Error setting up symbol configs: {e}")
+        import traceback
+        traceback.print_exc()
+
+    finally:
+        db.close()
 
 # Update the commands dict:
 commands = {
@@ -189,32 +305,25 @@ commands = {
     "drop": drop_tables,
     "reset": reset_tables,
     "migrate-profiles": migrate_yaml_profiles,
-    "migrate-circuit-breaker": migrate_circuit_breaker,  # Add this
     "load-dummy": load_dummy_data,
-    "migrate_circuit_breaker": migrate_circuit_breaker
-}
+    "migrate_circuit_breaker": migrate_circuit_breaker,  
+    "setup-symbols": setup_symbol_configs,  
+    }
 
 if __name__ == "__main__":
-    commands = {
-        "create": create_tables,
-        "drop": drop_tables,
-        "reset": reset_tables,
-        "migrate-profiles": migrate_yaml_profiles,
-        "load-dummy": load_dummy_data,
-        "setup_circuit": migrate_circuit_breaker
-    }
     #command = "migrate_circuit_breaker"
-    command= "setup_circuit"
-
-    # if (len(sys.argv) < 2 or sys.argv[1] not in commands) and command is None:
-    #     print("Usage: python manage.py [create|drop|reset]")
-    #     print("  create - Create database tables")
-    #     print("  drop   - Drop all tables (destructive)")
-    #     print("  reset  - Drop and recreate tables (destructive)")
-    #     print("  migrate-profiles - Load profiles from YAML into database")
-    #     print("  load-dummy - Load dummy data into database")
-    #     print("  migrate_circuit_breaker -migrate_circuit_breaker")
-    #     sys.exit(1)
+    #command= "setup_circuit"
+    command = None
+    if (len(sys.argv) < 2 or sys.argv[1] not in commands) and command is None:
+         print("Usage: python manage.py [create|drop|reset]")
+         print("  create - Create database tables")
+         print("  drop   - Drop all tables (destructive)")
+         print("  reset  - Drop and recreate tables (destructive)")
+         print("  migrate-profiles - Load profiles from YAML into database")
+         print("  load-dummy - Load dummy data into database")
+         print("  migrate-circuit-breaker - Migrate circuit breaker configurations")
+         print("  setup-symbols - Set up symbol-specific configurations")
+         sys.exit(1)
     
-    # command = sys.argv[1]
+    command = sys.argv[1]
     commands[command]()
