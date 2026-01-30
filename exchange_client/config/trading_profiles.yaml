@@ -24,7 +24,7 @@ profiles:
     # 🎯 SIGNAL GENERATION SETTINGS (NEW)
     enable_signal_generation: true    # Enable automated signal generation
     signal_timeframe: "15"           # Timeframe for entry signals
-    signal_cooldown_seconds: 300      # Wait 5min between signals for same symbol
+    signal_cooldown_seconds: 600      # Wait 10min between signals for same symbol
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
     min_volume_ratio: 1.25             # Require 25% above average volume
     
@@ -65,9 +65,14 @@ profiles:
     trailing_stop_pct: 0.7
     arm_trailing_stop_pct: 0.6
     use_trailing_stop: true
-    max_risk_pct: 0.25
-    max_position_size: 10
-    default_order_size_pct: 20
+
+    #position sizing
+    default_order_size_usdc: 100.0      # Buy $100 per order
+    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    
+    # Risk management
+    max_open_positions: 3               # Max 5 concurrent positions
+    max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
     use_market_regime_filter: true
 
@@ -103,9 +108,14 @@ profiles:
     trailing_stop_pct: 2.0
     arm_trailing_stop_pct: 1
     use_trailing_stop: true
-    max_position_size: 10
-    max_risk_pct: 1.0
-    default_order_size_pct: 20
+
+    #position sizing
+    default_order_size_usdc: 100.0      # Buy $100 per order
+    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    
+    # Risk management
+    max_open_positions: 3               # Max 5 concurrent positions
+    max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
     use_market_regime_filter: true
 
@@ -138,9 +148,14 @@ profiles:
     trailing_stop_pct: 0.4
     arm_trailing_stop_pct: 0.3
     use_trailing_stop: true
-    max_position_size: 10
-    max_risk_pct: 1.0
-    default_order_size_pct: 20
+
+    #position sizing
+    default_order_size_usdc: 100.0      # Buy $100 per order
+    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    
+    # Risk management
+    max_open_positions: 3               # Max 5 concurrent positions
+    max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
     use_market_regime_filter: false
 
@@ -175,9 +190,15 @@ profiles:
     trailing_stop_pct: 0.4
     arm_trailing_stop_pct: 0.4
     use_trailing_stop: true
-    max_position_size: 10
-    max_risk_pct: 1.0
-    default_order_size_pct: 20
+
+    #position sizing
+    default_order_size_usdc: 60.0      # Buy $60 per order
+    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    
+    # Risk management
+    max_open_positions: 3               # Max 5 concurrent positions
+    max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
+
     use_trend_filter: true
     trend_timeframe: "60" 
     trend_indicators:
