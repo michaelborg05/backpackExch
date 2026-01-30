@@ -1,93 +1,109 @@
+# cache/trend_cache.py - Smart dual-tracking version
+
 from typing import Dict, Optional, Tuple
 import time
 from utils.logging import log_manager
 from models.webhook import TrendData
 
+
 class TrendCache:
-    """Cache for trend data received from TradingView"""
+    """
+    Smart cache with dual tracking:
+    1. Always refreshes cache (for volume, VWAP, price)
+    2. Only tracks RSI history when indicators actually change
+    """
     
-    def __init__(self, max_age: int = 1200):  # 20m max age
+    def __init__(self, max_age: int = 1200):
         self.logger = log_manager.get_logger("TrendCache")
         self.max_age = max_age
+        
+        # Main cache (always updated - keeps fresh timestamps)
         self._cache: Dict[str, TrendData] = {}
-        # Store RSI history for momentum calculation
-        self._rsi_history: Dict[str, list] = {}  # key: symbol_timeframe, value: [(timestamp, rsi), ...]
-    
+        
+        # RSI history (only updated when RSI actually changes)
+        self._rsi_history: Dict[str, list] = {}
+        
+        # Track statistics
+        self._stats = {
+            'total_updates': 0,
+            'indicator_changes': 0,
+            'refresh_only': 0
+        }
     
     def update(self, trend_data: TrendData):
-        """Update trend data for a symbol/timeframe"""
+        """
+        Update trend data with smart handling
+        
+        Always updates cache (to refresh timestamp, price, volume, VWAP)
+        Only updates RSI history when indicators actually changed
+        
+        Args:
+            trend_data: New trend data with optional indicators_changed flag
+        """
         key = f"{trend_data.symbol}_{trend_data.timeframe}"
         
-        # Check if this is actually NEW data (indicators changed)
-        old_trend = self._cache.get(key)
-        is_new_data = self._is_significant_change(old_trend, trend_data)
+        # Check if Pine script told us indicators changed
+        indicators_changed = getattr(trend_data, 'indicators_changed', None)
         
-        # Always update cache (to refresh timestamp and current price)
+        # If Pine didn't tell us, check ourselves (fallback)
+        if indicators_changed is None:
+            old_trend = self._cache.get(key)
+            indicators_changed = self._is_significant_change(old_trend, trend_data)
+        
+        # Update statistics
+        self._stats['total_updates'] += 1
+        if indicators_changed:
+            self._stats['indicator_changes'] += 1
+        else:
+            self._stats['refresh_only'] += 1
+        
+        # ALWAYS update cache (refreshes timestamp and dynamic data)
         trend_data.timestamp = time.time()
+        old_trend = self._cache.get(key)
         self._cache[key] = trend_data
         
-        # Update RSI history ONLY if data actually changed
-        if is_new_data:
+        # Only update RSI history when indicators actually changed
+        if indicators_changed:
             if key not in self._rsi_history:
                 self._rsi_history[key] = []
             
-            # Add current RSI to history
+            # Add to RSI history
             self._rsi_history[key].append((trend_data.timestamp, trend_data.rsi))
             
-            # Keep only last 5 entries (enough for momentum calculation)
+            # Keep last 5 significant changes
             if len(self._rsi_history[key]) > 5:
                 self._rsi_history[key] = self._rsi_history[key][-5:]
             
-            # Log significant changes
+            # Log the change
             if old_trend:
                 self._log_trend_change(trend_data, old_trend)
             else:
                 self._log_new_trend(trend_data)
         else:
-            # Just refreshing - log at debug level
+            # Just a refresh - log at debug level
             self.logger.debug(
-                f"Refreshed: {trend_data.symbol} ({trend_data.timeframe}) - "
-                f"RSI: {trend_data.rsi:.1f}, Price: ${trend_data.price:.2f}"
+                f"Refresh: {trend_data.symbol} ({trend_data.timeframe}) - "
+                f"Price: ${trend_data.price:.2f}, "
+                f"VWAP: ${trend_data.vwap:.2f}, "
+                f"Vol: {trend_data.volume_ratio:.2f}x" if trend_data.volume_ratio else "Vol: N/A"
             )
     
     def _is_significant_change(self, old_trend: Optional[TrendData], new_trend: TrendData) -> bool:
         """
-        Check if new trend data represents a significant change
-        (i.e., indicators changed, not just timestamp/price refresh)
-        
-        Args:
-            old_trend: Previous trend data (can be None)
-            new_trend: New trend data
-            
-        Returns:
-            True if this is new/changed data, False if just a refresh
+        Check if indicators changed significantly
+        (Fallback if Pine script doesn't provide indicators_changed flag)
         """
         if old_trend is None:
-            return True  # First time seeing this symbol/timeframe
+            return True
         
-        # Define thresholds for "significant" changes
-        # These represent real indicator movements vs noise/rounding
-        EMA_THRESHOLD = 0.0001      # 0.01% change in EMA
-        RSI_THRESHOLD = 0.1         # 0.1 point change in RSI
-        #VWAP_THRESHOLD = 0.0001     # 0.01% change in VWAP
-        #VOLUME_THRESHOLD = 0.01     # 1% change in volume
+        EMA_THRESHOLD = 0.0001
+        RSI_THRESHOLD = 0.1
         
-        # Check if any indicator changed significantly
         ema20_changed = abs(new_trend.ema20 - old_trend.ema20) > EMA_THRESHOLD
         ema50_changed = abs(new_trend.ema50 - old_trend.ema50) > EMA_THRESHOLD
         rsi_changed = abs(new_trend.rsi - old_trend.rsi) > RSI_THRESHOLD
-        #vwap_changed = abs(new_trend.vwap - old_trend.vwap) > VWAP_THRESHOLD
         
-        # Volume can be None, handle safely
-#
-#        volume_changed = False
-#        if new_trend.volume is not None and old_trend.volume is not None:
-#            if old_trend.volume > 0:
-#                volume_pct_change = abs(new_trend.volume - old_trend.volume) / old_trend.volume
-#                volume_changed = volume_pct_change > VOLUME_THRESHOLD
-      
-        # Return True if ANY indicator changed
-        return (ema20_changed or ema50_changed or rsi_changed )
+        return (ema20_changed or ema50_changed or rsi_changed)
     
     def _log_new_trend(self, trend_data: TrendData):
         """Log when we first start tracking a symbol/timeframe"""
@@ -149,6 +165,9 @@ class TrendCache:
         """
         Calculate RSI momentum (rate of change)
         
+        IMPORTANT: This only uses RSI values when they ACTUALLY changed,
+        so you get meaningful momentum (not artificial flatness from duplicates)
+        
         Returns:
             (momentum_value, direction_description)
             - momentum_value: positive = increasing, negative = decreasing
@@ -161,10 +180,10 @@ class TrendCache:
         
         history = self._rsi_history[key]
         
-        # Compare current RSI to previous 2-3 readings
+        # Compare current RSI to previous readings
         current_rsi = history[-1][1]
         
-        # Calculate average of previous 2 RSI values
+        # Calculate average of previous 2 RSI values (actual changes only)
         if len(history) >= 3:
             prev_avg = (history[-2][1] + history[-3][1]) / 2
         else:
@@ -227,13 +246,13 @@ class TrendCache:
                 results.append((is_bullish, msg))
                 
             elif indicator_type == "rsi_threshold":
-                # Get RSI momentum
+                # Get RSI momentum (from actual changes only)
                 rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
                 
                 # Enhanced RSI logic with momentum
                 min_rsi = params.get("min_value", 50)
                 use_momentum = params.get("use_momentum", True)
-                early_threshold = params.get("early_threshold", 40)  # Default 40 for early entries
+                early_threshold = params.get("early_threshold", 40)
                 
                 if use_momentum and rsi_momentum is not None:
                     # Bullish conditions:
@@ -246,19 +265,19 @@ class TrendCache:
                     
                     # Build descriptive message
                     if trend.rsi > min_rsi:
-                        msg = f"RSI: ✓ ({trend.rsi:.1f} > {min_rsi}) - direction {rsi_direction} momentum {rsi_momentum:+.1f}"
+                        msg = f"RSI: ✓ ({trend.rsi:.1f} > {min_rsi}) - {rsi_direction} momentum {rsi_momentum:+.1f}"
                     elif trend.rsi > early_threshold and rsi_direction == "increasing":
                         msg = f"RSI: ✓ ({trend.rsi:.1f} {rsi_direction}, momentum: {rsi_momentum:+.1f})"
                     else:
                         msg = f"RSI: ✗ ({trend.rsi:.1f}, {rsi_direction or 'no momentum'})"
                 else:
-                    # Fallback to traditional RSI > threshold
                     is_bullish = trend.rsi > min_rsi
                     msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} vs {min_rsi})"
                 
                 results.append((is_bullish, msg))
                 
             elif indicator_type == "price_vs_vwap":
+                # Uses latest price and VWAP (refreshed every update)
                 is_bullish = trend.price > trend.vwap
                 msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({trend.price:.2f} vs {trend.vwap:.2f})"
                 results.append((is_bullish, msg))
@@ -276,14 +295,24 @@ class TrendCache:
             return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
     
     def get_cache_info(self) -> dict:
-        """Get cache status"""
+        """Get cache status with statistics"""
+        total = self._stats['total_updates']
+        significant = self._stats['indicator_changes']
+        refresh = self._stats['refresh_only']
+        
         return {
             "symbols_cached": len(self._cache),
+            "total_updates": total,
+            "indicator_changes": significant,
+            "refresh_only": refresh,
+            "efficiency_pct": (refresh / total * 100) if total > 0 else 0,
             "entries": [
                 {
                     "key": key,
                     "age_seconds": time.time() - (data.timestamp or 0),
-                    "is_bullish": data.is_bullish()
+                    "rsi": data.rsi,
+                    "price": data.price,
+                    "vwap": data.vwap
                 }
                 for key, data in self._cache.items()
             ]
@@ -292,6 +321,7 @@ class TrendCache:
 
 # Global instance
 _trend_cache = None
+
 
 def get_trend_cache() -> TrendCache:
     """Get or create global trend cache"""

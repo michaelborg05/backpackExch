@@ -106,6 +106,10 @@ class TrendData(BaseModel):
     volume: Optional[float] = None
     volume_sma: Optional[float] = None  # 20-period average
     volume_ratio: Optional[float] = None  # current / average
+    indicators_changed: Optional[bool] = Field(False)
+    ema20_changed: Optional[bool] = Field(False)
+    ema50_changed: Optional[bool] = Field(False)
+    rsi_changed: Optional[bool] = Field(False)
 
     def is_bullish(self, min_rsi: float = 50) -> bool:
         """Quick check if trend is bullish"""
