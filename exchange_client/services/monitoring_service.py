@@ -21,7 +21,7 @@ from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager
 from services.signal_generator import get_signal_generator
-
+from utils.position_calculator import get_position_size_calculator
 
 from db.utils import get_db_session
 from db.crud import (
@@ -55,6 +55,7 @@ class MonitoringService:
         self.call_count = 0
         self.balance_cache = get_balance_cache()  # Get cache instance
         self.price_cache = get_price_cache()    # Get price cache instance
+        self.position_calculator = get_position_size_calculator()
 
         self.market_info_cache = get_market_info_cache()
         self._markets_initialized = False
@@ -807,18 +808,18 @@ class MonitoringService:
         for signal in signals:
             try:
                 # Check if we already have an open position for this symbol
-                with get_db_session() as db:
-                    existing_position = get_open_position_for_symbol(
-                        db, 
-                        profile.name, 
-                        signal.symbol
-                    )
+                # with get_db_session() as db:
+                #     existing_position = get_open_position_for_symbol(
+                #         db, 
+                #         profile.name, 
+                #         signal.symbol
+                #     )
                     
-                    if existing_position:
-                        self.logger.info(
-                            f"[{profile.name}] Already have open position for {signal.symbol}, skipping"
-                        )
-                        continue
+                #     if existing_position:
+                #         self.logger.info(
+                #             f"[{profile.name}] Already have open position for {signal.symbol}, skipping"
+                #         )
+                #         continue
                 
                 # Check cooldown (don't signal same symbol too frequently)
                 cooldown_key = f"{profile.name}_{signal.symbol}"
@@ -875,20 +876,27 @@ class MonitoringService:
         trading = TradingService(profile)
         
         try:
-            match signal.symbol:
-                case "SOL_USDC":
-                    qty = "1.5"
-                case "ETH_USDC":
-                    qty = "0.05"
-                case "HYPE_USDC":
-                    qty = "4"
-                case "SUI_USDC":
-                    qty = "60"
 
+            quantity, size_reason = self.position_calculator.calculate_buy_quantity(
+                symbol=signal.symbol,
+                profile=profile,
+                quote_asset="USDC"
+            )
+            
+            if quantity is None:
+                self.logger.warning(
+                    f"[{profile.name}] Cannot calculate position size: {size_reason}"
+                )
+                return
+
+            self.logger.info(
+                f"[{profile.name}] Calculated position size: {quantity:.6f} - {size_reason}"
+            )
+                                                
             # Execute market buy
             result = trading.order_buy(
                 symbol=signal.symbol,
-                quantity=qty,  # Use profile's default order size
+                quantity=quantity,  # Use profile's default order size
                 source=f"SIGNAL_{signal.strength.name}",
                 profile_name=profile.name,
                 reason_summary=signal.reasons

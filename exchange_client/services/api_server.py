@@ -8,6 +8,7 @@ from models.webhook import TradingViewAlert, WebhookResponse
 from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from models.webhook import TrendUpdateAlert, TrendData
+from models.symbol import SymbolConfigRequest
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService, process_tradingview_alert
@@ -427,7 +428,7 @@ async def tradingview_webhook(
     request: Request
 ):
     """
-    Receive and process TradingView webhook alerts
+    Receive and process TradingView webhook alerts with intelligent position sizing
     
     Supports multiple profiles in single alert:
     {
@@ -436,6 +437,11 @@ async def tradingview_webhook(
         "profile": "default,MB15m,aggressive",
         "secret": "your_webhook_secret"
     }
+    Position sizing priority:
+    1. Explicit quantity in alert (if provided)
+    2. Symbol-specific config from database
+    3. Profile defaults
+    4. Balance constraints
     """
     apiserver_logger.debug("Received TradingView webhook")
     
@@ -475,10 +481,14 @@ async def tradingview_webhook(
             f"for profiles: {', '.join(alert.profiles)}"
         )
         
-        # Get caches for pre-validation
+        # Get caches and services
         trend_cache = get_trend_cache()
         atr_cache = get_atr_cache()
         circuit_breaker = get_circuit_breaker() 
+        
+        # Import position size calculator
+        from utils.position_calculator import get_position_size_calculator
+        position_calculator = get_position_size_calculator()
 
         # Process alert for each profile
         results = []
@@ -512,6 +522,7 @@ async def tradingview_webhook(
                 trading_timeframe = getattr(profile, 'signal_timeframe', '15')
                 trend_timeframe = getattr(profile, 'trend_timeframe', '60')  # Higher TF for trend
 
+                #2. Market Regime filter
                 if profile.use_market_regime_filter:
                     regime_filter = get_regime_filter()
                     #1. Add Regime check first - If market is not worth trading, exit early
@@ -537,7 +548,7 @@ async def tradingview_webhook(
                         continue
                     
 
-                # Pre-validate balance for orders
+                # 3. Pre-validate balance for orders
                 # Only rejects if balance is 0 or below minimum/step size
                 is_valid, balance_error = trading.validate_balance_for_trade(
                     sale_action=alert.action, 
@@ -562,84 +573,114 @@ async def tradingview_webhook(
                 
                 # Balance check passed, proceed with trade
                 reasons = []
-
-                # If buy order and use_atr_filter true, check volatility
-                if alert.action.lower() == "buy" and profile.use_atr_filter:  # New profile setting
-                    apiserver_logger.debug(
-                        f"[{profile_name}] Checking ATR filter: "
-                        f"timeframe={profile.atr_timeframe}, "
-                        f"threshold={profile.atr_threshold}"
-                    )
-                    
-                    is_volatile, reason = atr_cache.is_volatile(
-                        symbol=alert.symbol,
-                        timeframe=profile.atr_timeframe,
-                        threshold=profile.atr_threshold
-                    )
-                    
-                    if profile.atr_filter_mode == "require_high" and not is_volatile:
-                        apiserver_logger.info(
-                            f"[{profile_name}] ⊘ Skipping BUY - ATR too low: {reason}"
+                
+                # 4. BUY ORDER SPECIFIC CHECKS
+                if alert.action.lower() == "buy":
+                    # 5. Check ATR filter if enabled
+                    if profile.use_atr_filter:
+                        apiserver_logger.debug(
+                            f"[{profile_name}] Checking ATR filter: "
+                            f"timeframe={profile.atr_timeframe}, "
+                            f"threshold={profile.atr_threshold}"
                         )
-                        results.append({
-                            "profile": profile_name,
-                            "success": False,
-                            "error": f"ATR filter: {reason}",
-                            "error_type": "atr_filter"
-                        })
-                        errors.append(f"[{profile_name}] ATR filter blocked trade")
-                        continue
-                    
-                    elif profile.atr_filter_mode == "require_low" and is_volatile:
-                        apiserver_logger.info(
-                            f"[{profile_name}] ⊘ Skipping BUY - ATR too high: {reason}"
+                        
+                        is_volatile, reason = atr_cache.is_volatile(
+                            symbol=alert.symbol,
+                            timeframe=profile.atr_timeframe,
+                            threshold=profile.atr_threshold
                         )
-                        results.append({
-                            "profile": profile_name,
-                            "success": False,
-                            "error": f"ATR filter: {reason}",
-                            "error_type": "atr_filter"
-                        })
-                        errors.append(f"[{profile_name}] ATR filter blocked trade")
-                        continue
+                        
+                        if profile.atr_filter_mode == "require_high" and not is_volatile:
+                            apiserver_logger.info(
+                                f"[{profile_name}] ⊘ Skipping BUY - ATR too low: {reason}"
+                            )
+                            results.append({
+                                "profile": profile_name,
+                                "success": False,
+                                "error": f"ATR filter: {reason}",
+                                "error_type": "atr_filter"
+                            })
+                            errors.append(f"[{profile_name}] ATR filter blocked trade")
+                            continue
+                        
+                        elif profile.atr_filter_mode == "require_low" and is_volatile:
+                            apiserver_logger.info(
+                                f"[{profile_name}] ⊘ Skipping BUY - ATR too high: {reason}"
+                            )
+                            results.append({
+                                "profile": profile_name,
+                                "success": False,
+                                "error": f"ATR filter: {reason}",
+                                "error_type": "atr_filter"
+                            })
+                            errors.append(f"[{profile_name}] ATR filter blocked trade")
+                            continue
+                        
+                        else:
+                            reasons.append(f"ATR filter: {reason}")
+                            apiserver_logger.info(
+                                f"[{profile_name}] ✓ ATR check passed: {reason}"
+                            )
                     
-                    else:
-                        reasons.append(f"ATR filter: {reason}")
-                        apiserver_logger.info(
-                            f"[{profile_name}] ✓ ATR check passed: {reason}"
+                    # 6. Check trend filter if enabled
+                    if profile.use_trend_filter:
+                        apiserver_logger.debug(
+                            f"[{profile_name}] Checking trend filter: {profile.get_trend_config_summary()}"
                         )
-
-                if alert.action.lower() == "buy" and profile.use_trend_filter:
-                    apiserver_logger.debug(
-                        f"[{profile_name}] Checking trend filter: {profile.get_trend_config_summary()}"
-                    )
+                        
+                        is_bullish, reason = trend_cache.is_bullish(
+                            symbol=alert.symbol,
+                            timeframe=profile.trend_timeframe,
+                            indicators_config=profile.trend_indicators,
+                            min_indicators_required=profile.min_indicators_required
+                        )
+                        
+                        if not is_bullish:
+                            apiserver_logger.info(
+                                f"[{profile_name}] ⊘ Skipping BUY - Trend filter: {reason}"
+                            )
+                            results.append({
+                                "profile": profile_name,
+                                "success": False,
+                                "error": f"Trend not bullish: {reason}",
+                                "error_type": "trend_filter"
+                            })
+                            errors.append(f"[{profile_name}] Trend filter blocked trade")
+                            continue
+                        else:
+                            reasons.append(f"Trend filter: {reason}")
+                            apiserver_logger.info(
+                                f"[{profile_name}] ✓ Trend check passed: {reason}"
+                            )
                     
-                    is_bullish, reason = trend_cache.is_bullish(
-                        symbol=alert.symbol,
-                        timeframe=profile.trend_timeframe,
-                        indicators_config=profile.trend_indicators,
-                        min_indicators_required=profile.min_indicators_required
-                    )
-                    
-                    if not is_bullish:
-                        apiserver_logger.info(
-                            f"[{profile_name}] ⊘ Skipping BUY - Trend filter: {reason}"
+                    # 7. CALCULATE POSITION SIZE (if not explicitly provided)
+                    if not alert.quantity or alert.quantity.upper() == "AUTO":
+                        quantity, size_reason = position_calculator.calculate_buy_quantity(
+                            symbol=alert.symbol,
+                            profile=profile,
+                            quote_asset="USDC"
                         )
-                        results.append({
-                            "profile": profile_name,
-                            "success": False,
-                            "error": f"Trend not bullish: {reason}",
-                            "error_type": "trend_filter"
-                        })
-                        errors.append(f"[{profile_name}] Trend filter blocked trade")
-                        continue  # Skip this profile
-                    else:
-                        reasons.append(f"Trend filter: {reason}")
+                        
+                        if quantity is None:
+                            apiserver_logger.warning(
+                                f"[{profile_name}] Cannot calculate position size: {size_reason}"
+                            )
+                            results.append({
+                                "profile": profile_name,
+                                "success": False,
+                                "error": size_reason,
+                                "error_type": "position_sizing"
+                            })
+                            errors.append(f"[{profile_name}] {size_reason}")
+                            continue
+                        
+                        # Update alert with calculated quantity
+                        alert.quantity = str(quantity)
                         apiserver_logger.info(
-                            f"[{profile_name}] ✓ Trend check passed: {reason}"
+                            f"[{profile_name}] Calculated position size: {quantity:.6f} - {size_reason}"
                         )
-                  
-                # Override profile settings if provided in alert
+                                                        
+                # . OVERRIDE PROFILE SETTINGS IF PROVIDED IN ALERT
                 if alert.take_profit:
                     apiserver_logger.info(
                         f"[{profile_name}] Overriding take profit: "
@@ -660,7 +701,7 @@ async def tradingview_webhook(
                         f"{profile.stop_loss_pct}% → {alert.stop_loss}%"
                     )
                     profile.stop_loss_pct = Decimal(alert.stop_loss)
-               
+
                 # Process the alert
                 result = await process_tradingview_alert(
                     trading, 
@@ -726,6 +767,7 @@ async def tradingview_webhook(
             atr_filtered    = sum(1 for r in results  if r.get("error_type") == "atr_filter")
             circuit_blocked = sum(1 for r in results  if r.get("error_type") == "circuit_breaker")
             regime_blocked  = sum(1 for r in results  if r.get("error_type") == "regime_error")
+            sizing_failed   = sum(1 for r in results  if r.get("error_type") == "position_sizing")
 
             action_icon = "📈" if alert.action.lower() == "buy" else "🏁"
             if success_count == total_count:
@@ -749,7 +791,7 @@ async def tradingview_webhook(
                     if result.get('profit') is not None:
                         profit = float(result.get('profit', '0.0'))
                         icon = "🎯" if profit >= 0 else "🛑"
-                        summary += f"✓ {profile_name}: {icon} ${profit:2f}\n"
+                        summary += f"✓ {profile_name}: {icon} ${profit:.2f}\n"
                     else:
                         summary += f"✓ {profile_name}: Price: ${result.get('executed_price', 'N/A')}\n"
                 else:
@@ -758,6 +800,8 @@ async def tradingview_webhook(
                         summary += f"⊘ {profile_name}: No balance\n"
                     elif error_type == 'trend_filter':
                         summary += f"⊘ {profile_name}: Trend bearish\n"
+                    elif error_type == 'position_sizing':
+                        summary += f"⊘ {profile_name}: Position limit\n"
                     else:
                         summary += f"✗ {profile_name}: {result.get('error', 'Failed')}\n"
 
@@ -766,7 +810,7 @@ async def tradingview_webhook(
             #if success_count > 0 or (trend_filtered > 0 and trend_filtered != total_count):
                 await telegram.send_message(summary)
             else:
-                apiserver_logger.error(f"Telegram alert: All profiles failed to execute\n {summary}")
+                apiserver_logger.debug(f"Telegram alert: All profiles filtered\n {summary}")
 
 
         # Build response message
@@ -788,7 +832,8 @@ async def tradingview_webhook(
                 "profiles_attempted": alert.profiles,
                 "successful_count": len(successful_profiles),
                 "failed_count": len(errors),
-                "trend_filtered_count": trend_filtered if 'trend_filtered' in locals() else 0
+                "trend_filtered_count": trend_filtered if 'trend_filtered' in locals() else 0,
+                "sizing_failed_count": sizing_failed if 'sizing_failed' in locals() else 0
             }
         )
         
@@ -1175,3 +1220,203 @@ async def test_signal_execution(
                 "message": f"Execution failed: {str(e)}",
                 "signal": signal.to_dict()
             }
+        
+
+
+@app.post("/config/symbol/{profile_name}/{symbol}", dependencies=[Depends(require_admin_permission)])
+async def set_symbol_config(
+    profile_name: str,
+    symbol: str,
+    config: SymbolConfigRequest
+):
+    """
+    Set symbol-specific trading configuration
+    
+    Example:
+    POST /config/symbol/default/SOL_USDC
+    {
+        "order_size_usdc": 150.0,
+        "max_position_size_pct": 15.0
+    }
+    """
+    from db.utils import get_db_session
+    from db.crud import upsert_symbol_config
+    
+    # Validate profile exists
+    profile_manager = get_profile_manager()
+    if not profile_manager.has_profile(profile_name):
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    try:
+        with get_db_session() as db:
+            symbol_config = upsert_symbol_config(
+                db,
+                profile_name=profile_name,
+                symbol=symbol,
+                order_size_usdc=config.order_size_usdc,
+                max_position_size_pct=config.max_position_size_pct,
+                enabled=config.enabled
+            )
+            
+            return {
+                "success": True,
+                "message": f"Symbol config updated for {symbol}",
+                "config": {
+                    "profile": profile_name,
+                    "symbol": symbol,
+                    "order_size_usdc": str(symbol_config.order_size_usdc),
+                    "max_position_size_pct": str(symbol_config.max_position_size_pct) if symbol_config.max_position_size_pct else None,
+                    "enabled": symbol_config.enabled
+                }
+            }
+    
+    except Exception as e:
+        apiserver_logger.error(f"Error setting symbol config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/symbol/{profile_name}/{symbol}", dependencies=[Depends(require_read_permission)])
+async def get_symbol_config_endpoint(profile_name: str, symbol: str):
+    """Get symbol-specific configuration"""
+    from db.utils import get_db_session
+    from db.crud import get_symbol_config
+    
+    try:
+        with get_db_session() as db:
+            config = get_symbol_config(db, profile_name, symbol)
+            
+            if not config:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No config found for {symbol} in profile {profile_name}"
+                )
+            
+            return {
+                "profile": profile_name,
+                "symbol": symbol,
+                "order_size_usdc": str(config.order_size_usdc),
+                "max_position_size_pct": str(config.max_position_size_pct) if config.max_position_size_pct else None,
+                "enabled": config.enabled,
+                "created_at": config.created_at.isoformat(),
+                "updated_at": config.updated_at.isoformat()
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error getting symbol config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/symbols/{profile_name}", dependencies=[Depends(require_read_permission)])
+async def get_all_symbol_configs(profile_name: str):
+    """Get all symbol configurations for a profile"""
+    from db.utils import get_db_session
+    from db.crud import get_all_symbol_configs
+    
+    # Validate profile exists
+    profile_manager = get_profile_manager()
+    if not profile_manager.has_profile(profile_name):
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    try:
+        with get_db_session() as db:
+            configs = get_all_symbol_configs(db, profile_name)
+            
+            return {
+                "profile": profile_name,
+                "configs": [
+                    {
+                        "symbol": c.symbol,
+                        "order_size_usdc": str(c.order_size_usdc),
+                        "max_position_size_pct": str(c.max_position_size_pct) if c.max_position_size_pct else None,
+                        "enabled": c.enabled,
+                        "updated_at": c.updated_at.isoformat()
+                    }
+                    for c in configs
+                ]
+            }
+    
+    except Exception as e:
+        apiserver_logger.error(f"Error getting symbol configs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/config/symbol/{profile_name}/{symbol}", dependencies=[Depends(require_admin_permission)])
+async def delete_symbol_config_endpoint(profile_name: str, symbol: str):
+    """Delete (disable) symbol-specific configuration"""
+    from db.utils import get_db_session
+    from db.crud import delete_symbol_config
+    
+    try:
+        with get_db_session() as db:
+            success = delete_symbol_config(db, profile_name, symbol)
+            
+            if not success:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No config found for {symbol} in profile {profile_name}"
+                )
+            
+            return {
+                "success": True,
+                "message": f"Symbol config deleted for {symbol}"
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error deleting symbol config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/config/symbol/{profile_name}/{symbol}/test", dependencies=[Depends(require_read_permission)])
+async def test_position_sizing(profile_name: str, symbol: str):
+    """
+    Test position sizing calculation without executing trade
+    Useful for debugging and configuration
+    """
+    from utils.position_calculator import get_position_size_calculator
+    from cache.price_cache import get_price_cache
+    
+    # Validate profile exists
+    profile_manager = get_profile_manager()
+    profile = profile_manager.get(profile_name)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    
+    try:
+        calculator = get_position_size_calculator()
+        quantity, reason = calculator.calculate_buy_quantity(
+            symbol=symbol,
+            profile=profile,
+            quote_asset="USDC"
+        )
+        
+        # Get current price for value calculation
+        price_cache = get_price_cache()
+        price = price_cache.get_price(symbol)
+        
+        if quantity and price:
+            value = float(quantity) * float(price)
+            return {
+                "success": True,
+                "symbol": symbol,
+                "profile": profile_name,
+                "calculated_quantity": str(quantity),
+                "current_price": str(price),
+                "order_value_usdc": round(value, 2),
+                "reason": reason
+            }
+        else:
+            return {
+                "success": False,
+                "symbol": symbol,
+                "profile": profile_name,
+                "error": reason,
+                "current_price": str(price) if price else "N/A"
+            }
+    
+    except Exception as e:
+        apiserver_logger.error(f"Error testing position sizing: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

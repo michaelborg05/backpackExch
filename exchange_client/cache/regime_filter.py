@@ -165,22 +165,31 @@ class RegimeFilter:
         
         # 3. Check for rapid EMA crossover on lower timeframe (whipsaw)
         if confirm_trend is not None:
-            # Only flag if we have a STRONG trend on 60m being contradicted by 15m
-            # This avoids flagging normal trend formations (15m leads 60m)
-            primary_bullish = primary_trend.ema20 > primary_trend.ema50
-            confirm_bullish = confirm_trend.ema20 > confirm_trend.ema50
-            
-            # Calculate the strength of both trends
+            # Calculate the strength AND direction of both trends
+            # Positive = bullish (EMA20 > EMA50), Negative = bearish (EMA20 < EMA50)
             primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
             confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
             
-            # Only flag as whipsaw if:
-            # 1. 60m has a STRONG trend (>0.5% separation)
-            # 2. 15m is crossed the opposite way
-            # 3. 15m cross is also strong (>0.5%)
-            if primary_bullish != confirm_bullish:
-                if abs(primary_diff_pct) > 0.5 and abs(confirm_diff_pct) > 0.5:
-                    return True, f"Trend reversal in progress (60m {primary_diff_pct:.2f}% vs 15m {confirm_diff_pct:.2f}%)"
+            # Only flag as dangerous whipsaw if:
+            # 1. 60m has a VERY STRONG trend in one direction (>1.0% or <-1.0%)
+            # 2. 15m has reversed to the opposite direction with strength (opposite sign, >0.8% magnitude)
+            # 
+            # Examples:
+            # ✅ GOOD (15m leading): 60m=-0.97%, 15m=+1.60% → both moving toward bullish
+            # ✅ GOOD (15m leading): 60m=+0.5%, 15m=+1.5% → both bullish, 15m stronger
+            # 🚫 BAD (whipsaw): 60m=+1.5%, 15m=-1.0% → strong bullish reversing to bearish
+            # 🚫 BAD (whipsaw): 60m=-1.5%, 15m=+1.0% → strong bearish reversing to bullish
+            
+            # Check if 60m has strong established trend
+            if primary_diff_pct > 1.0:  # Strong bullish on 60m
+                # Flag if 15m is strongly bearish (reversing)
+                if confirm_diff_pct < -0.8:
+                    return True, f"Dangerous whipsaw - strong bullish 60m reversing (60m +{primary_diff_pct:.2f}% vs 15m {confirm_diff_pct:.2f}%)"
+            
+            elif primary_diff_pct < -1.0:  # Strong bearish on 60m
+                # Flag if 15m is strongly bullish (reversing)
+                if confirm_diff_pct > 0.8:
+                    return True, f"Dangerous whipsaw - strong bearish 60m reversing (60m {primary_diff_pct:.2f}% vs 15m +{confirm_diff_pct:.2f}%)"
         
         return False, None
     

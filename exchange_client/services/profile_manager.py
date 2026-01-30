@@ -124,8 +124,14 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             name=name,
             api_key=api_key,
             secret=secret,
-            max_risk_pct=float(cfg.get("max_risk_pct", 1.0)),
-            default_order_size_pct=float(cfg.get("default_order_size_pct", 10)),
+        
+            # Position sizing
+            default_order_size_usdc=float(cfg.get("default_order_size_usdc", 100)), # Default order size in USDC (fixed amount)
+            max_position_size_pct=float(cfg.get("max_position_size_pct", 10)),      # Max position as % of portfolio (e.g., 10% = 10.0)
+
+            # Risk management
+            max_open_positions=int(cfg.get("max_open_positions", 5)),               # Max concurrent positions
+            max_portfolio_exposure_pct=float(cfg.get("max_portfolio_exposure_pct", 80)),    # Max % of portfolio in positions
             take_profit_pct=float(cfg.get("take_profit_pct", 0)),
             stop_loss_pct=float(cfg.get("stop_loss_pct", 0)),
             trailing_stop_pct=float(cfg.get("trailing_stop_pct", 0)),
@@ -154,6 +160,7 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             min_position_age_for_trend_check = min_position_age_for_trend_check,
             max_position_hours          = max_position_hours,
             use_market_regime_filter=use_market_regime_filter,
+
         )
 
 

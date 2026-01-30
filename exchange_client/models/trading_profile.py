@@ -46,6 +46,14 @@ class TradingProfile(BaseModel):
     min_position_age_for_trend_check: Optional[int] = 2  # hours
     max_position_hours: Optional[int] = 18  # Force exit if stuck
 
+    # Position sizing
+    default_order_size_usdc: float = 100.0      # Default order size in USDC (fixed amount)
+    max_position_size_pct: float = 10.0         # Max position as % of portfolio (e.g., 10% = 10.0)
+    
+    # Risk management
+    max_open_positions: int = 5                  # Max concurrent positions
+    max_portfolio_exposure_pct: float = 80.0     # Max % of portfolio in positions
+
     class Config:
         json_encoders = {
             Decimal: lambda v: float(v)
