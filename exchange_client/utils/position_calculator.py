@@ -160,13 +160,12 @@ class PositionCalculator:
                 order_size_usdc = available * Decimal("0.999")  # 0.1% buffer
                 reason += f" (limited by available balance ${available:.2f})"
             
+            from db.crud import get_open_positions_for_symbol
+
             # Check max open positions
-            open_positions = get_open_positions(db, profile.name)
-            if len(open_positions) >= profile.max_open_positions:
-                # Check if we already have this symbol open
-                has_position = any(p.symbol == symbol for p in open_positions)
-                if not has_position:
-                    return None, f"Max open positions reached ({len(open_positions)}/{profile.max_open_positions})"
+            open_positions = get_open_positions_for_symbol(db, profile.name, symbol)
+            if open_positions and len(open_positions) >= profile.max_open_positions:
+                return None, f"Max open positions reached for symbol {symbol} ({len(open_positions)}/{profile.max_open_positions})"
 
             if order_size_usdc < 5:
                 return None, f"USDC amount too low: {order_size_usdc})"

@@ -71,7 +71,7 @@ profiles:
     max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
     
     # Risk management
-    max_open_positions: 3               # Max 5 concurrent positions
+    max_open_positions: 3               # Max 5 concurrent positions PER symbol
     max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
     use_market_regime_filter: false
