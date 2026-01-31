@@ -200,13 +200,13 @@ class PositionCalculator:
         current_price: Decimal
     ) -> Decimal:
         """Calculate current value of existing positions for this symbol"""
-        from db.crud import get_open_position_for_symbol
-        
-        position = get_open_position_for_symbol(db, profile_name, symbol)
-        if not position:
+        from db.crud import get_open_positions_for_symbol
+
+        positions = get_open_positions_for_symbol(db, profile_name, symbol)
+        if not positions:
             return Decimal("0")
-        
-        return Decimal(str(position.remaining_quantity)) * current_price
+
+        return sum(Decimal(str(p.remaining_quantity)) * current_price for p in positions)
 
 
 # Global instance

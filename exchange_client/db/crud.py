@@ -317,7 +317,7 @@ def get_open_positions_for_symbol(
             Position.status == 'OPEN',
             Position.remaining_quantity > 0
         )
-        .order_by(Position.opened_at.asc())
+        .order_by(Position.created_at.asc())
         .all()
     )
 

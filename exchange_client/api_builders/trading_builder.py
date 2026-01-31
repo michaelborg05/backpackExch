@@ -25,7 +25,7 @@ from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
 from db.session import SessionLocal
-from db.crud import close_positions_fifo, save_trade, open_position, close_position, get_open_position_for_symbol
+from db.crud import close_positions_fifo, save_trade, open_position, close_position
 from utils.position_calculator import PositionCalculator
 
 class TradingService:

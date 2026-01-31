@@ -789,7 +789,6 @@ class MonitoringService:
         """Process trading signals for a specific profile"""
         
         from services.signal_generator import get_signal_generator
-        from db.crud import get_open_position_for_symbol
         
         signal_gen = get_signal_generator(profile)
         
@@ -807,19 +806,6 @@ class MonitoringService:
         # Process each signal
         for signal in signals:
             try:
-                # Check if we already have an open position for this symbol
-                # with get_db_session() as db:
-                #     existing_position = get_open_position_for_symbol(
-                #         db, 
-                #         profile.name, 
-                #         signal.symbol
-                #     )
-                    
-                #     if existing_position:
-                #         self.logger.info(
-                #             f"[{profile.name}] Already have open position for {signal.symbol}, skipping"
-                #         )
-                #         continue
                 
                 # Check cooldown (don't signal same symbol too frequently)
                 cooldown_key = f"{profile.name}_{signal.symbol}"
