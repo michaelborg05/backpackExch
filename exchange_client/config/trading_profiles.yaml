@@ -74,7 +74,7 @@ profiles:
     max_open_positions: 3               # Max 5 concurrent positions PER symbol
     max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
-    use_market_regime_filter: false
+    use_market_regime_filter: true
 
     # Trend filter settings
     use_trend_filter: true
@@ -140,7 +140,7 @@ profiles:
     atr_filter_mode: "require_low"
 
   1m_MB:
-    enabled: true
+    enabled: false
     api_key_env: BP_API_KEY_1M
     secret_env: BP_SECRET_1M
     take_profit_pct: 0.6
