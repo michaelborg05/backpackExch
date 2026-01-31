@@ -1,0 +1,294 @@
+//@version=6
+indicator("Multi-Timeframe Trend Monitor - Smart Updates", overlay=false)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+ema_fast = input.int(20, "Fast EMA")
+ema_slow = input.int(50, "Slow EMA")
+rsi_period = input.int(14, "RSI Period")
+webhook_secret = input.string("YOUR_SECRET_HERE", "Webhook Secret")
+
+// Thresholds for "significant change"
+ema_threshold = input.float(0.0001, "EMA Change Threshold (%)")
+rsi_threshold = input.float(0.1, "RSI Change Threshold")
+
+// ============================================================================
+// HELPER FUNCTION - Calculate trend data for a timeframe
+// ============================================================================
+
+get_trend_data(tf) =>
+	// Fetch 15m data using request.security
+	// CRITICAL: lookahead=off ensures we only get CLOSED candle data
+    htf_close = request.security(syminfo.tickerid, tf, close[1], lookahead=barmerge.lookahead_off)
+    htf_high = request.security(syminfo.tickerid, tf, high[1], lookahead=barmerge.lookahead_off)
+    htf_low = request.security(syminfo.tickerid, tf, low[1], lookahead=barmerge.lookahead_off)
+    htf_volume = request.security(syminfo.tickerid, tf, volume[1], lookahead=barmerge.lookahead_off)
+    
+	// Calculate indicators on 15m timeframe using CLOSED candles
+    htf_ema20 = request.security(syminfo.tickerid, tf, ta.ema(close, ema_fast)[1], lookahead=barmerge.lookahead_off)
+    htf_ema50 = request.security(syminfo.tickerid, tf, ta.ema(close, ema_slow)[1], lookahead=barmerge.lookahead_off)
+    htf_rsi = request.security(syminfo.tickerid, tf, ta.rsi(close, rsi_period)[1], lookahead=barmerge.lookahead_off)
+	// VWAP calculation - use current bar for VWAP (it's a cumulative indicator)
+    htf_vwap = request.security(syminfo.tickerid, tf, ta.vwap, lookahead=barmerge.lookahead_off)
+	// Volume SMA using closed candles
+    htf_volume_sma = request.security(syminfo.tickerid, tf, ta.sma(volume, 20)[1], lookahead=barmerge.lookahead_off)
+    
+	// Volume ratio
+    volume_ratio = htf_volume_sma != 0 ? htf_volume / htf_volume_sma : na
+    
+    [htf_ema20, htf_ema50, htf_rsi, htf_vwap, htf_volume, htf_volume_sma, volume_ratio, htf_close]
+
+// ============================================================================
+// CALCULATE DATA FOR ALL TIMEFRAMES
+// ============================================================================
+
+[ema20_15m, ema50_15m, rsi_15m, vwap_15m, vol_15m, vol_sma_15m, vol_ratio_15m,htf_close_15m] = get_trend_data("15")
+[ema20_60m, ema50_60m, rsi_60m, vwap_60m, vol_60m, vol_sma_60m, vol_ratio_60m,htf_close_60m] = get_trend_data("60")
+[ema20_240m, ema50_240m, rsi_240m, vwap_240m, vol_240m, vol_sma_240m, vol_ratio_240m,htf_close_240m] = get_trend_data("240")
+
+live_price = close
+
+// ============================================================================
+// CHANGE DETECTION - Track what changed for each timeframe
+// ============================================================================
+
+// 15m timeframe
+var float prev_ema20_15m = na
+var float prev_ema50_15m = na
+var float prev_rsi_15m = na
+
+// 60m timeframe
+var float prev_ema20_60m = na
+var float prev_ema50_60m = na
+var float prev_rsi_60m = na
+
+// 240m timeframe
+var float prev_ema20_240m = na
+var float prev_ema50_240m = na
+var float prev_rsi_240m = na
+
+// Check if this is first run
+bool is_first_bar = na(prev_ema20_15m)
+
+// 15m changes
+bool ema20_changed_15m = is_first_bar or math.abs(ema20_15m - prev_ema20_15m) > ema_threshold
+bool ema50_changed_15m = is_first_bar or math.abs(ema50_15m - prev_ema50_15m) > ema_threshold
+bool rsi_changed_15m = is_first_bar or math.abs(rsi_15m - prev_rsi_15m) > rsi_threshold
+bool indicators_changed_15m = ema20_changed_15m or ema50_changed_15m or rsi_changed_15m
+
+// 60m changes
+bool ema20_changed_60m = is_first_bar or math.abs(ema20_60m - prev_ema20_60m) > ema_threshold
+bool ema50_changed_60m = is_first_bar or math.abs(ema50_60m - prev_ema50_60m) > ema_threshold
+bool rsi_changed_60m = is_first_bar or math.abs(rsi_60m - prev_rsi_60m) > rsi_threshold
+bool indicators_changed_60m = ema20_changed_60m or ema50_changed_60m or rsi_changed_60m
+
+// 240m changes
+bool ema20_changed_240m = is_first_bar or math.abs(ema20_240m - prev_ema20_240m) > ema_threshold
+bool ema50_changed_240m = is_first_bar or math.abs(ema50_240m - prev_ema50_240m) > ema_threshold
+bool rsi_changed_240m = is_first_bar or math.abs(rsi_240m - prev_rsi_240m) > rsi_threshold
+bool indicators_changed_240m = ema20_changed_240m or ema50_changed_240m or rsi_changed_240m
+
+// Any timeframe changed
+bool any_indicators_changed = indicators_changed_15m or indicators_changed_60m or indicators_changed_240m
+
+// ============================================================================
+// ALERT CONDITION - Update counters
+// ============================================================================
+
+// We ALWAYS send updates (to keep cache fresh and provide volume/price data)
+// But we tell Python WHICH data is new vs refreshed
+
+var int update_count = 0
+var int significant_count = 0
+
+if barstate.isconfirmed
+    update_count := update_count + 1
+    if any_indicators_changed
+        significant_count := significant_count + 1
+        
+        // Update 15m stored values
+        if indicators_changed_15m
+            prev_ema20_15m := ema20_15m
+            prev_ema50_15m := ema50_15m
+            prev_rsi_15m := rsi_15m
+        
+        // Update 60m stored values
+        if indicators_changed_60m
+            prev_ema20_60m := ema20_60m
+            prev_ema50_60m := ema50_60m
+            prev_rsi_60m := rsi_60m
+        
+        // Update 240m stored values
+        if indicators_changed_240m
+            prev_ema20_240m := ema20_240m
+            prev_ema50_240m := ema50_240m
+            prev_rsi_240m := rsi_240m
+
+// ============================================================================
+// HELPER FUNCTION - Build JSON for a single timeframe
+// ============================================================================
+
+build_trend_json(symb, prc, tf, ema20, ema50, rsi, vwap, vol, vol_sma, vol_ratio, ema20_chg, ema50_chg, rsi_chg, ind_chg) =>
+      '    {\n' + 
+      '      "symbol": "' + symb + '_USDC",\n' + 
+      '      "price": ' + str.tostring(prc, '#.######') + ',\n' +
+      '      "timeframe": "' + tf + '",\n' + 
+      '      "ema20": ' + str.tostring(ema20, '#.######') + ',\n' + 
+      '      "ema50": ' + str.tostring(ema50, '#.######') + ',\n' + 
+      '      "rsi": ' + str.tostring(rsi, '#.##') + ',\n' + 
+      '      "vwap": ' + str.tostring(vwap, '#.######') + ',\n' + 
+      '      "volume": ' + str.tostring(vol, '#.####') + ',\n' +
+      '      "volume_sma": ' + str.tostring(vol_sma, '#.####') + ',\n' +
+      '      "volume_ratio": ' + (na(vol_ratio) ? "null" : str.tostring(vol_ratio, '#.###')) + ',\n' +
+      '      "indicators_changed": ' + (ind_chg ? "true" : "false") + ',\n' +
+      '      "change_details": {\n' +
+      '        "ema20_changed": ' + (ema20_chg ? "true" : "false") + ',\n' +
+      '        "ema50_changed": ' + (ema50_chg ? "true" : "false") + ',\n' +
+      '        "rsi_changed": ' + (rsi_chg ? "true" : "false") + '\n' +
+      '      }\n' +
+      '    }'
+
+
+// ============================================================================
+// ALERT MESSAGE - ALWAYS send, with all timeframes
+// ============================================================================
+
+if barstate.isconfirmed
+    // Parse symbol (remove USDT/USDC/USD suffix)
+    baseSymbol = syminfo.ticker
+    baseSymbol := str.replace(baseSymbol, "USDT", "")
+    baseSymbol := str.replace(baseSymbol, "USDC", "")
+    baseSymbol := str.replace(baseSymbol, "USD", "")
+
+    // Build JSON for each timeframe
+    trend_15m = build_trend_json(baseSymbol,live_price,"15", ema20_15m, ema50_15m, rsi_15m, vwap_15m, vol_15m, vol_sma_15m, vol_ratio_15m, 
+                                 ema20_changed_15m, ema50_changed_15m, rsi_changed_15m, indicators_changed_15m)
+    
+    trend_60m = build_trend_json(baseSymbol,live_price,"60", ema20_60m, ema50_60m, rsi_60m, vwap_60m, vol_60m, vol_sma_60m, vol_ratio_60m,
+                                 ema20_changed_60m, ema50_changed_60m, rsi_changed_60m, indicators_changed_60m)
+    
+    trend_240m = build_trend_json(baseSymbol,live_price,"240", ema20_240m, ema50_240m, rsi_240m, vwap_240m, vol_240m, vol_sma_240m, vol_ratio_240m,
+                                  ema20_changed_240m, ema50_changed_240m, rsi_changed_240m, indicators_changed_240m)
+
+    // Combine into final JSON
+    json_msg = '{\n' + 
+         '  "action": "trend_update",\n' + 
+         '  "secret": "' + webhook_secret + '",\n' + 
+         '  "trends": [\n' + 
+         trend_15m + ',\n' +
+         trend_60m + ',\n' +
+         trend_240m + '\n' +
+         '  ]\n' + 
+         '}'
+    
+    // Always send (to keep cache fresh)
+    alert(json_msg, alert.freq_once_per_bar)
+
+
+bullish_count_15m = (ema20_15m > ema50_15m ? 1 : 0) + (rsi_15m > 50 ? 1 : 0) + (htf_close_15m > vwap_15m ? 1: 0)
+trend_bullish_15m = bullish_count_15m >= 2
+bullish_count_60m = (ema20_60m > ema50_60m ? 1 : 0) + (rsi_60m > 50 ? 1 : 0) + (htf_close_60m > vwap_60m ? 1: 0)
+trend_bullish_60m = bullish_count_60m >= 2
+
+// ============================================================================
+// PLOTS - Show all timeframes
+// ============================================================================
+plot(ema20_15m, "15m EMA20", color=color.new(color.green, 0), linewidth=2)
+plot(ema50_15m, "15m EMA50", color=color.new(color.red, 0), linewidth=2)
+
+plot(ema20_60m, "60m EMA20", color=color.new(color.green, 50), linewidth=1)
+plot(ema50_60m, "60m EMA50", color=color.new(color.red, 50), linewidth=1)
+
+plot(rsi_15m, "15m RSI", color=color.blue, linewidth=1)
+plot(rsi_60m, "60m RSI", color=color.rgb(33, 37, 243), linewidth=1)
+
+plot(trend_bullish_15m ? 1 : 0, "Trend", color=trend_bullish_15m ? color.green : color.red, linewidth=3, style=plot.style_histogram)
+
+col15 = trend_bullish_15m ? color.new(color.green, 85) : color.new(color.red, 85)
+col60 = trend_bullish_60m  ? color.new(color.green, 85) : color.new(color.red, 85)
+
+TOP    = high + (high - low) * 50
+BOTTOM = low  - (high - low) * 50
+MID    = (TOP + BOTTOM) / 2.0
+
+// Persistent boxes
+var box topBox = na
+var box botBox = na
+
+// delete previous boxes so we don’t leak objects
+//box.delete(topBox)
+//box.delete(botBox)
+
+// top half background
+topBox := box.new(
+    left   = bar_index,
+    right  = bar_index + 1,
+    top    = TOP,
+    bottom = MID,
+    bgcolor = col15,
+    border_color = na
+)
+
+// bottom half background
+botBox := box.new(
+    left   = bar_index,
+    right  = bar_index + 1,
+    top    = MID,
+    bottom = BOTTOM,
+    bgcolor = col60,
+    border_color = na
+)
+
+//hline(0.5, "Threshold", color=color.gray, linestyle=hline.style_dashed)
+//hline(50, "RSI 50", color=color.gray, linestyle=hline.style_dotted)
+
+//bgcolor(trend_bullish_15m ? color.new(color.green, 90) : color.new(color.red, 90))
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+var table info = na
+if barstate.islast
+    if na(info)
+        info := table.new(position.top_right, 2, 15, bgcolor=color.new(color.black, 20), border_width=1)
+    
+    table.cell(info, 0, 0, "Monitoring:", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 0, "Multi-TF Trend", text_color=color.white, text_size=size.small)
+    
+    table.cell(info, 0, 1, "Timeframes:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, "15m, 60m, 240m", text_color=color.gray, text_size=size.tiny)
+    
+    // 15m Trend
+    table.cell(info, 0, 2, "15m Trend:", text_color=color.white)
+    table.cell(info, 1, 2, trend_bullish_15m ? "BULLISH ✓" : "BEARISH ✗", 
+               text_color=trend_bullish_15m ? color.lime : color.red, text_size=size.normal)
+    
+    // 60m Trend
+    table.cell(info, 0, 3, "60m Trend:", text_color=color.white)
+
+    table.cell(info, 1, 3, trend_bullish_60m ? "BULLISH ✓" : "BEARISH ✗", 
+               text_color=trend_bullish_60m ? color.lime : color.red, text_size=size.normal)
+    
+    // 240m Trend
+    table.cell(info, 0, 4, "240m Trend:", text_color=color.white)
+    bullish_count_240m = (ema20_240m > ema50_240m ? 1 : 0) + (rsi_240m > 50 ? 1 : 0)
+    trend_bullish_240m = bullish_count_240m >= 1
+    table.cell(info, 1, 4, trend_bullish_240m ? "BULLISH ✓" : "BEARISH ✗", 
+               text_color=trend_bullish_240m ? color.lime : color.red, text_size=size.normal)
+    
+    
+    table.cell(info, 0, 10, "15m RSI:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 10, str.tostring(rsi_15m, '#.#'), 
+               text_color=rsi_changed_15m ? color.yellow : color.white, text_size=size.tiny)
+    
+    table.cell(info, 0, 11, "60m RSI:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 11, str.tostring(rsi_60m, '#.#'), 
+               text_color=rsi_changed_60m ? color.yellow : color.white, text_size=size.tiny)
+    
+    table.cell(info, 0, 12, "240m RSI:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 12, str.tostring(rsi_240m, '#.#'), 
+               text_color=rsi_changed_240m ? color.yellow : color.white, text_size=size.tiny)
+    
+    
+
