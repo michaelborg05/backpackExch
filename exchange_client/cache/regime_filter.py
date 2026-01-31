@@ -1,16 +1,18 @@
 # cache/regime_filter.py
 """
-Market Regime Filter - Broad market condition classifier
+Market Regime Filter - Risk-based market condition classifier
 
-This filter sits ABOVE your existing trend logic and prevents trading in truly
-adverse market conditions. It's designed to be permissive (not block good trades)
-but protective (avoid terrible market environments).
+PHILOSOPHY:
+This filter is NOT about confirming trends (your trend_cache does that).
+This filter answers: "Is the market environment SAFE for trend trading?"
 
-Philosophy:
-- Uses 60m data as primary regime indicator (broader context)
-- Uses 15m data as confirmation (current conditions)
-- Three regimes: TRENDING (trade), UNCERTAIN (wait), HIGH_RISK (stop)
-- Focused on what actually caused your losses: choppy/distribution days
+Focus areas:
+1. CHOP DETECTION - Avoid whipsaw environments
+2. VOLUME QUALITY - Ensure conviction behind moves  
+3. VOLATILITY SPIKES - Detect when risk has expanded
+4. MOMENTUM QUALITY - Catch exhaustion/distribution
+
+PERMISSIVE BY DEFAULT: Only blocks genuinely dangerous conditions
 """
 
 from typing import Optional, Tuple, Dict
@@ -22,21 +24,18 @@ from cache.atr_cache import get_atr_cache
 
 
 class MarketRegime(Enum):
-    """Market regime classification"""
-    TRENDING = "trending"           # ✅ Safe to trade momentum/trend strategies
-    UNCERTAIN = "uncertain"         # ⚠️ Wait - no clear direction
-    HIGH_RISK = "high_risk"        # 🚫 Don't trade - dangerous conditions
+    """Market regime classification based on RISK, not trend"""
+    SAFE = "safe"               # ✅ Safe to trade - trust your trend signals
+    CHOPPY = "choppy"           # ⚠️ Whipsaw risk - wait for clarity
+    HIGH_RISK = "high_risk"     # 🚫 Dangerous - don't trade
 
 
 class RegimeFilter:
     """
-    Determines current market regime to prevent trading in bad conditions
+    Risk-based regime filter focused on WHAT YOUR TREND LOGIC DOESN'T SEE
     
-    Uses dual-timeframe analysis:
-    - 60m (primary): Overall market structure and momentum
-    - 15m (confirm): Current execution environment
-    
-    Designed to be PERMISSIVE - only blocks truly bad conditions
+    Your trend_cache answers: "Is there a bullish setup?" (2/3 indicators)
+    This filter answers: "Is the market safe enough to act on that setup?"
     """
     
     def __init__(self):
@@ -44,18 +43,31 @@ class RegimeFilter:
         self.trend_cache = get_trend_cache()
         self.atr_cache = get_atr_cache()
         
-        # Regime detection settings (tuned to be permissive)
-        self.ema_trending_threshold = 0.20  # 0.2% separation = trending (was 0.3% - too strict)
-        self.rsi_neutral_range = (38, 65)   # Outside this = directional (was 40-60)
-        self.rsi_extreme_low = 30           # Below this = panic/distribution
-        self.rsi_extreme_high = 78          # Above this = euphoria (was 75)
-        self.atr_spike_threshold = 1.8      # ATR > 1.8x average = volatility spike (was 1.5x)
+        # ------------------------------------------------------------------
+        # RISK DETECTION THRESHOLDS (permissive - only catch real danger)
+        # ------------------------------------------------------------------
         
-        # Cache regime results (avoid recalculating same data)
+        # 1. CHOP DETECTION
+        self.chop_ema_range_pct = 0.3       # EMAs within 0.3% = choppy
+        self.chop_rsi_neutral = (45, 55)    # RSI stuck here = no momentum
+        
+        # 2. EXTREME CONDITIONS  
+        self.rsi_panic = 30                 # Panic selling
+        self.rsi_euphoria = 78              # Euphoric buying
+        self.atr_spike = 1.8                # Volatility explosion
+        
+        # 3. VOLUME QUALITY
+        self.min_volume_ratio = 0.3         # Below 0.3x = dead market
+        self.distribution_volume = 1.5      # High volume + down = distribution
+        
+        # 4. WHIPSAW DETECTION
+        self.whipsaw_reversal_threshold = 1.0   # Strong trend reversing
+        
+        # Cache results
         self._regime_cache: Dict[str, Tuple[MarketRegime, str, float]] = {}
-        self._cache_ttl = 60  # Cache regime for 60 seconds
+        self._cache_ttl = 60
         
-        self.logger.info("RegimeFilter initialized with permissive thresholds")
+        self.logger.info("RegimeFilter initialized - RISK-FOCUSED MODE")
     
     def get_regime(
         self, 
@@ -64,40 +76,27 @@ class RegimeFilter:
         confirm_timeframe: str = "15"
     ) -> Tuple[MarketRegime, str]:
         """
-        Determine current market regime for a symbol
-        
-        Args:
-            symbol: Trading symbol (e.g., "SOL_USDC")
-            primary_timeframe: Higher timeframe for regime (default: 60m)
-            confirm_timeframe: Lower timeframe for confirmation (default: 15m)
+        Determine if market environment is SAFE for trading
         
         Returns:
-            (regime, reason) tuple
-            - regime: MarketRegime enum value
-            - reason: Human-readable explanation
+            (regime, reason) where regime is SAFE, CHOPPY, or HIGH_RISK
         """
-        # Check cache first
         cache_key = f"{symbol}_{primary_timeframe}_{confirm_timeframe}"
         if cache_key in self._regime_cache:
             regime, reason, timestamp = self._regime_cache[cache_key]
             if time.time() - timestamp < self._cache_ttl:
                 return regime, reason
         
-        # Get trend data for both timeframes
         primary_trend = self.trend_cache.get(symbol, primary_timeframe)
         confirm_trend = self.trend_cache.get(symbol, confirm_timeframe)
         
         if primary_trend is None:
-            return MarketRegime.UNCERTAIN, f"Regime Uncertain: No {primary_timeframe}m data available"
+            return MarketRegime.CHOPPY, f"No {primary_timeframe}m data - cannot assess risk"
         
-        # STEP 1: Check for HIGH RISK conditions (these override everything)
+        # PRIORITY 1: Check for HIGH RISK (blocks everything)
         high_risk, risk_reason = self._check_high_risk(
-            symbol, 
-            primary_trend, 
-            confirm_trend,
-            primary_timeframe
+            symbol, primary_trend, confirm_trend, primary_timeframe
         )
-        
         if high_risk:
             regime = MarketRegime.HIGH_RISK
             reason = f"🚫 {risk_reason}"
@@ -105,28 +104,21 @@ class RegimeFilter:
             self.logger.warning(f"{symbol}: {reason}")
             return regime, reason
         
-        # STEP 2: Check for TRENDING conditions
-        is_trending, trend_reason = self._check_trending(
-            symbol,
-            primary_trend,
-            confirm_trend,
-            primary_timeframe,
-            confirm_timeframe
+        # PRIORITY 2: Check for CHOPPY conditions (wait for better setup)
+        is_choppy, chop_reason = self._check_choppy(
+            symbol, primary_trend, confirm_trend, primary_timeframe, confirm_timeframe
         )
-        
-        if is_trending:
-            regime = MarketRegime.TRENDING
-            reason = f"✅ {trend_reason}"
+        if is_choppy:
+            regime = MarketRegime.CHOPPY
+            reason = f"⚠️ {chop_reason}"
             self._regime_cache[cache_key] = (regime, reason, time.time())
-            self.logger.debug(f"{symbol}: {reason}")
+            self.logger.info(f"{symbol}: {reason}")
             return regime, reason
         
-        # STEP 3: Default to UNCERTAIN (not trending, not high-risk)
-        regime = MarketRegime.UNCERTAIN
-        reason = f"⚠️ No clear trend - {trend_reason}"
+        # DEFAULT: SAFE - trust your trend signals
+        regime = MarketRegime.SAFE
+        reason = "✅ Market conditions safe - trust trend signals"
         self._regime_cache[cache_key] = (regime, reason, time.time())
-        self.logger.debug(f"{symbol}: {reason}")
-        
         return regime, reason
     
     def _check_high_risk(
@@ -137,63 +129,58 @@ class RegimeFilter:
         primary_timeframe: str
     ) -> Tuple[bool, Optional[str]]:
         """
-        Check for HIGH RISK conditions that should block ALL trading
+        Detect HIGH RISK conditions that invalidate ALL setups
         
-        High risk indicators:
-        1. RSI in extreme ranges (panic selling or euphoric buying)
-        2. Volatility spike (ATR expansion)
-        3. Rapid trend reversals (whipsawing)
-        
-        Returns:
-            (is_high_risk, reason)
+        These are conditions where even a "perfect" 3/3 bullish trend should be avoided
         """
-        # 1. Check for RSI extremes on primary timeframe
         rsi = primary_trend.rsi
         
-        if rsi < self.rsi_extreme_low:
-            return True, f"RSI {rsi:.0f} - panic/distribution zone (60m)"
+        # 1. PANIC ZONE - Institutional dumping
+        if rsi < self.rsi_panic:
+            return True, f"Panic zone - RSI {rsi:.0f} indicates distribution"
         
-        if rsi > self.rsi_extreme_high:
-            return True, f"RSI {rsi:.0f} - euphoric/exhaustion zone (60m)"
+        # 2. EUPHORIA ZONE - Retail FOMO topping
+        if rsi > self.rsi_euphoria:
+            return True, f"Euphoria zone - RSI {rsi:.0f} indicates exhaustion"
         
-        # 2. Check for volatility spike (if ATR data available)
+        # 3. VOLATILITY SPIKE - Risk expanded beyond normal
         atr_data = self.atr_cache.get(symbol, primary_timeframe)
         if atr_data is not None:
             atr_ratio = atr_data.get_ratio()
-            if atr_ratio > self.atr_spike_threshold:
-                return True, f"ATR spike {atr_ratio:.2f}x - excessive volatility"
+            if atr_ratio > self.atr_spike:
+                return True, f"Volatility spike - ATR {atr_ratio:.2f}x normal (stops unreliable)"
         
-        # 3. Check for rapid EMA crossover on lower timeframe (whipsaw)
+        # 4. DANGEROUS WHIPSAW - Strong trend reversing sharply
+        # This is different from "15m leading" - this is established trend breaking
         if confirm_trend is not None:
-            # Calculate the strength AND direction of both trends
-            # Positive = bullish (EMA20 > EMA50), Negative = bearish (EMA20 < EMA50)
             primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
             confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
             
-            # Only flag as dangerous whipsaw if:
-            # 1. 60m has a VERY STRONG trend in one direction (>1.0% or <-1.0%)
-            # 2. 15m has reversed to the opposite direction with strength (opposite sign, >0.8% magnitude)
-            # 
-            # Examples:
-            # ✅ GOOD (15m leading): 60m=-0.97%, 15m=+1.60% → both moving toward bullish
-            # ✅ GOOD (15m leading): 60m=+0.5%, 15m=+1.5% → both bullish, 15m stronger
-            # 🚫 BAD (whipsaw): 60m=+1.5%, 15m=-1.0% → strong bullish reversing to bearish
-            # 🚫 BAD (whipsaw): 60m=-1.5%, 15m=+1.0% → strong bearish reversing to bullish
+            # Only flag if 60m has VERY strong established trend that's reversing
+            if primary_diff_pct > self.whipsaw_reversal_threshold:  # Strong bullish 60m
+                if confirm_diff_pct < -0.8:  # Strong bearish 15m (reversal)
+                    return True, f"Whipsaw reversal - strong uptrend breaking (60m +{primary_diff_pct:.2f}%, 15m {confirm_diff_pct:.2f}%)"
             
-            # Check if 60m has strong established trend
-            if primary_diff_pct > 1.0:  # Strong bullish on 60m
-                # Flag if 15m is strongly bearish (reversing)
-                if confirm_diff_pct < -0.8:
-                    return True, f"Dangerous whipsaw - strong bullish 60m reversing (60m +{primary_diff_pct:.2f}% vs 15m {confirm_diff_pct:.2f}%)"
-            
-            elif primary_diff_pct < -1.0:  # Strong bearish on 60m
-                # Flag if 15m is strongly bullish (reversing)
-                if confirm_diff_pct > 0.8:
-                    return True, f"Dangerous whipsaw - strong bearish 60m reversing (60m {primary_diff_pct:.2f}% vs 15m +{confirm_diff_pct:.2f}%)"
+            elif primary_diff_pct < -self.whipsaw_reversal_threshold:  # Strong bearish 60m
+                if confirm_diff_pct > 0.8:  # Strong bullish 15m (reversal)
+                    return True, f"Whipsaw reversal - strong downtrend breaking (60m {primary_diff_pct:.2f}%, 15m +{confirm_diff_pct:.2f}%)"
+        
+        # 5. DISTRIBUTION PATTERN - High volume selling
+        # (Only flag if we have volume data AND it's extreme)
+        if primary_trend.volume_ratio is not None:
+            if primary_trend.volume_ratio > self.distribution_volume:
+                # High volume - check if it's selling pressure
+                if primary_trend.price < primary_trend.vwap:  # Below VWAP
+                    # Get RSI momentum to confirm distribution
+                    rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
+                        symbol, primary_timeframe
+                    )
+                    if rsi_direction == "decreasing":
+                        return True, f"Distribution pattern - high volume ({primary_trend.volume_ratio:.1f}x) selling below VWAP"
         
         return False, None
     
-    def _check_trending(
+    def _check_choppy(
         self,
         symbol: str,
         primary_trend,
@@ -202,87 +189,57 @@ class RegimeFilter:
         confirm_timeframe: str
     ) -> Tuple[bool, str]:
         """
-        Check if market is in TRENDING regime
+        Detect CHOPPY conditions where trends are unreliable
         
-        Trending conditions (need 2 of 3):
-        1. EMA separation on 60m (momentum exists)
-        2. RSI shows direction (not stuck in neutral zone)
-        3. Price structure aligned on both timeframes
-        
-        This is PERMISSIVE - designed to catch trending conditions early
-        
-        Returns:
-            (is_trending, reason)
+        This is NOT about "is there a trend?" (trend_cache handles that)
+        This is about "is the market structure clean enough to trade?"
         """
-        conditions_met = []
-        conditions_failed = []
+        issues = []
         
-        # CONDITION 1: EMA separation on primary timeframe
-        ema_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+        # 1. EMA COMPRESSION - Tight range indicates indecision
+        ema_diff_pct = abs(((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100)
+        if ema_diff_pct < self.chop_ema_range_pct:
+            issues.append(f"60m EMAs compressed ({ema_diff_pct:.2f}% - no clear direction)")
         
-        if ema_diff_pct > self.ema_trending_threshold:
-            conditions_met.append(f"60m EMA+{ema_diff_pct:.2f}%")
-        else:
-            conditions_failed.append(f"60m EMA only {ema_diff_pct:.2f}%")
-        
-        # CONDITION 2: RSI shows directional bias (not neutral)
-        rsi = primary_trend.rsi
-        rsi_low, rsi_high = self.rsi_neutral_range
-        
-        if rsi > rsi_high:
-            # Get RSI momentum if available
+        # 2. RSI STUCK IN NEUTRAL - No momentum
+        rsi_low, rsi_high = self.chop_rsi_neutral
+        if rsi_low < primary_trend.rsi < rsi_high:
+            # Check if RSI has been stuck here (no momentum building)
             rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
-                symbol, 
-                primary_timeframe
+                symbol, primary_timeframe
             )
-            
-            if rsi_direction == "increasing":
-                conditions_met.append(f"60m RSI {rsi:.0f} rising")
-            else:
-                conditions_met.append(f"60m RSI {rsi:.0f} bullish")
-        elif rsi < rsi_low:
-            conditions_failed.append(f"60m RSI {rsi:.0f} weak")
-        else:
-            # In neutral zone - check momentum to see if we're building
-            rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
-                symbol, 
-                primary_timeframe
-            )
-            
-            if rsi_direction == "increasing" and rsi > 45:
-                conditions_met.append(f"60m RSI {rsi:.0f} building momentum")
-            else:
-                conditions_failed.append(f"60m RSI {rsi:.0f} neutral")
+            # Only flag if RSI is truly flat/weak
+            if rsi_momentum is not None and abs(rsi_momentum) < 1.0:
+                issues.append(f"60m RSI stuck neutral ({primary_trend.rsi:.0f}, momentum {rsi_momentum:+.1f})")
         
-        # CONDITION 3: Price structure alignment
-        # Both timeframes should be above VWAP (institutional support)
-        primary_above_vwap = primary_trend.price > primary_trend.vwap
+        # 3. DEAD VOLUME - No conviction
+        if primary_trend.volume_ratio is not None:
+            if primary_trend.volume_ratio < self.min_volume_ratio:
+                issues.append(f"Dead volume ({primary_trend.volume_ratio:.2f}x - no conviction)")
         
+        # 4. BOTH TIMEFRAMES CONFLICTED
+        # This is different from "15m leading" - this is both TFs showing different structure
         if confirm_trend is not None:
-            confirm_above_vwap = confirm_trend.price > confirm_trend.vwap
+            # Check if 60m and 15m are showing opposite EMA alignments
+            # BUT both are weak (not a strong lead)
+            primary_bullish = primary_trend.ema20 > primary_trend.ema50
+            confirm_bullish = confirm_trend.ema20 > confirm_trend.ema50
             
-            if primary_above_vwap and confirm_above_vwap:
-                conditions_met.append("Price > VWAP both TFs")
-            elif primary_above_vwap:
-                conditions_met.append("60m Price > VWAP")
-            else:
-                conditions_failed.append("Price below VWAP")
-        else:
-            # No confirm data - just check primary
-            if primary_above_vwap:
-                conditions_met.append("60m Price > VWAP")
-            else:
-                conditions_failed.append("60m Price below VWAP")
+            if primary_bullish != confirm_bullish:
+                # Calculate strength of disagreement
+                primary_strength = abs(((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100)
+                confirm_strength = abs(((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100)
+                
+                # Only flag if BOTH are weak (true chop)
+                # Don't flag if 15m is strongly leading (that's a good early trend)
+                if primary_strength < 0.5 and confirm_strength < 0.5:
+                    issues.append(f"Timeframe conflict - both weak (60m {primary_strength:.2f}%, 15m {confirm_strength:.2f}%)")
         
-        # Evaluate: need 2 of 3 conditions
-        if len(conditions_met) >= 2:
-            reason = f"{len(conditions_met)}/3: {', '.join(conditions_met)}"
-            return True, reason
-        else:
-            # Explain why we're not trending
-            all_conditions = conditions_met + conditions_failed
-            reason = f"Only {len(conditions_met)}/3: {', '.join(all_conditions)}"
-            return False, reason
+        # Evaluate: flag as choppy if we found 2+ issues
+        if len(issues) >= 2:
+            return True, f"Choppy conditions ({len(issues)} issues): {'; '.join(issues)}"
+        
+        return False, ""
     
     def can_trade(
         self,
@@ -292,62 +249,49 @@ class RegimeFilter:
         confirm_timeframe: str = "15"
     ) -> Tuple[bool, str]:
         """
-        Simple yes/no check if trading is allowed
+        Simple yes/no: Is the market SAFE enough to trade?
         
-        Args:
-            symbol: Trading symbol
-            profile_name: Trading profile name (for logging)
-            primary_timeframe: Higher timeframe for regime
-            confirm_timeframe: Lower timeframe for confirmation
+        This should be checked BEFORE your trend logic
         
-        Returns:
-            (can_trade, reason) tuple
+        Flow:
+        1. Regime filter: Is market safe? → If no, skip this symbol entirely
+        2. Trend logic: Is there a bullish setup? → If yes, enter
         """
         regime, reason = self.get_regime(symbol, primary_timeframe, confirm_timeframe)
         
-        if regime == MarketRegime.TRENDING:
+        if regime == MarketRegime.SAFE:
+            # Market is safe - now use your trend logic to find entries
             return True, reason
+        
         elif regime == MarketRegime.HIGH_RISK:
-            self.logger.warning(
-                f"[{profile_name}] {symbol}: Trading BLOCKED - {reason}"
-            )
+            # Dangerous conditions - block all trading
+            self.logger.warning(f"[{profile_name}] {symbol}: BLOCKED - {reason}")
             return False, reason
-        else:  # UNCERTAIN
-            self.logger.info(
-                f"[{profile_name}] {symbol}: Trading PAUSED - {reason}"
-            )
+        
+        else:  # CHOPPY
+            # Wait for cleaner setup - not worth the risk
+            self.logger.info(f"[{profile_name}] {symbol}: WAIT - {reason}")
             return False, reason
     
     def get_regime_summary(self, symbols: list) -> dict:
-        """
-        Get regime classification for multiple symbols
-        
-        Args:
-            symbols: List of symbols to check
-        
-        Returns:
-            Dictionary with regime counts and details
-        """
+        """Get regime classification for multiple symbols"""
         regimes = {
-            MarketRegime.TRENDING: [],
-            MarketRegime.UNCERTAIN: [],
+            MarketRegime.SAFE: [],
+            MarketRegime.CHOPPY: [],
             MarketRegime.HIGH_RISK: []
         }
         
         for symbol in symbols:
             regime, reason = self.get_regime(symbol)
-            regimes[regime].append({
-                "symbol": symbol,
-                "reason": reason
-            })
+            regimes[regime].append({"symbol": symbol, "reason": reason})
         
         return {
-            "trending": len(regimes[MarketRegime.TRENDING]),
-            "uncertain": len(regimes[MarketRegime.UNCERTAIN]),
+            "safe": len(regimes[MarketRegime.SAFE]),
+            "choppy": len(regimes[MarketRegime.CHOPPY]),
             "high_risk": len(regimes[MarketRegime.HIGH_RISK]),
             "details": {
-                "trending": regimes[MarketRegime.TRENDING],
-                "uncertain": regimes[MarketRegime.UNCERTAIN],
+                "safe": regimes[MarketRegime.SAFE],
+                "choppy": regimes[MarketRegime.CHOPPY],
                 "high_risk": regimes[MarketRegime.HIGH_RISK]
             }
         }

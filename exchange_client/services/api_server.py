@@ -17,7 +17,7 @@ from cache.atr_cache import get_atr_cache
 from cache.market_info_cache import get_market_info_cache
 from cache.portfolio_cache import get_portfolio_cache
 from cache.balance_cache import get_balance_cache
-from cache.regime_filter import get_regime_filter, MarketRegime
+from cache.regime_filter import get_regime_filter
 from services.monitoring_service import get_monitoring_service
 from services.telegram_service import TelegramService, set_telegram, get_telegram
 from services.circuit_breaker import get_circuit_breaker

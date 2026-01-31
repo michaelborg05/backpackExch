@@ -74,7 +74,7 @@ profiles:
     max_open_positions: 3               # Max 5 concurrent positions
     max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
-    use_market_regime_filter: true
+    use_market_regime_filter: false
 
     # Trend filter settings
     use_trend_filter: true

@@ -389,15 +389,15 @@ class TelegramService:
                                 regime_summary = regime_filter.get_regime_summary(db_tickers)
                                 msg = f"📊 Regime Summary\n"
                                 msg = f"🌐 *Market Regime Report*\n"
-                                msg += f"✅ Trending: {regime_summary['trending']} | "
-                                msg += f"⚠️ Uncertain: {regime_summary['uncertain']} | "
+                                msg += f"✅ Safe: {regime_summary['safe']} | "
+                                msg += f"⚠️ choppy: {regime_summary['choppy']} | "
                                 msg += f"🚫 High Risk: {regime_summary['high_risk']}\n"
                                 msg += "─" * 15 + "\n"
                                 
                                 details = regime_summary.get('details', {})
-                                if details.get('trending'):
-                                    msg += "\n🟢 *TRADE READY (Trending)*\n"
-                                    for item in details['trending']:
+                                if details.get('safe'):
+                                    msg += "\n🟢 *TRADE READY (safe)*\n"
+                                    for item in details['safe']:
                                         msg += f"• {item['symbol']}\n"
 
                                 # Show High Risk (Protection)
@@ -408,8 +408,8 @@ class TelegramService:
                                         msg += f"• {item['symbol']}: _{item['reason']}_\n"
 
                                 # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
-                                if details.get('uncertain'):
-                                    msg += f"\n🟡 UNCERTAIN: {', '.join([i['symbol'] for i in details['uncertain']])}\n"
+                                if details.get('choppy'):
+                                    msg += f"\n🟡 choppy: {', '.join([i['symbol'] for i in details['choppy']])}\n"
                                     
                                 await bot.send_message(
                                     chat_id=chat_id,

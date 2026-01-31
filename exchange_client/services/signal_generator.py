@@ -10,7 +10,7 @@ from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
 from api_builders.trading_builder import TradingService
-from cache.regime_filter import get_regime_filter, MarketRegime
+from cache.regime_filter import get_regime_filter
 
 class SignalGenerator:
     """
