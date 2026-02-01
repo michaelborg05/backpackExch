@@ -238,7 +238,7 @@ class SignalGenerator:
         )
 
         # Get current price
-        current_price = self.price_cache.get(symbol)
+        current_price = self.price_cache.get_price(symbol)
         
         # Create signal
         signal = TradingSignal(
