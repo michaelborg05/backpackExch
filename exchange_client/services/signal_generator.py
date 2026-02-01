@@ -251,7 +251,7 @@ class SignalGenerator:
             indicators=indicators,
             timestamp=time.time(),
             market_regime=regime.value,
-            reasons="\n".join(reasons),
+            reasons=reasons,
             regime_confidence=regime_reason
         )
 
