@@ -23,11 +23,17 @@ class TradingProfile(BaseModel):
     # Market Regime Filter
     use_market_regime_filter: bool = False  
     
-    # NEW: Trend Filter Configuration
+    # NEW: Trend Filter Configuration (Higher Timeframe)
     use_trend_filter: bool = False
     trend_timeframe: str = "1h"  # Which timeframe to check trend on
     trend_indicators: Optional[List[Dict[str, Any]]] = None  # List of indicator configs
     min_indicators_required: int = Field(default=2, ge=1)  # Minimum that must be bullish
+    
+    # NEW: Entry Filter Configuration (Execution Timeframe)
+    use_entry_filter: bool = False
+    entry_timeframe: str = "15m"  # Which timeframe to check entry on
+    entry_indicators: Optional[List[Dict[str, Any]]] = None  # List of entry indicator configs
+    min_entry_indicators_required: int = Field(default=2, ge=1)  # Minimum entry indicators required
 
     # ATR Filters
     use_atr_filter: bool = False
@@ -72,6 +78,21 @@ class TradingProfile(BaseModel):
             f"Trend filter: ENABLED on {self.trend_timeframe} - "
             f"Require {self.min_indicators_required}/{len(self.trend_indicators)} "
             f"({', '.join(indicator_names)})"
+        )
+    
+    def get_entry_config_summary(self) -> str:
+        """Get human-readable summary of entry filter config"""
+        if not self.use_entry_filter:
+            return "Entry filter: DISABLED"
+        
+        if not self.entry_indicators:
+            return f"Entry filter: ENABLED on {self.entry_timeframe} (no indicators configured)"
+        
+        indicator_names = [ind.get("type", "unknown") for ind in self.entry_indicators]
+        return (
+            f"Entry filter: ENABLED on {self.entry_timeframe} - "
+            f"Require {self.min_entry_indicators_required}/{len(self.entry_indicators)} "
+            f"({', '.join(indicator_names)})"
         )    
 
     def get_atr_config_summary(self) -> str:
@@ -102,7 +123,7 @@ class TradingProfile(BaseModel):
         if alert.action.lower() != "buy":
             return True, None
         
-        # Check trend filter
+        # Check trend filter (higher timeframe)
         if self.use_trend_filter:
             is_bullish, reason = trend_cache.is_bullish(
                 symbol=alert.symbol,
@@ -112,7 +133,19 @@ class TradingProfile(BaseModel):
             )
             
             if not is_bullish:
-                return False, f"Trend filter: {reason}"
+                return False, f"Trend filter ({self.trend_timeframe}): {reason}"
+        
+        # Check entry filter (execution timeframe) - NEW
+        if self.use_entry_filter:
+            is_bullish, reason = trend_cache.is_bullish(
+                symbol=alert.symbol,
+                timeframe=self.entry_timeframe,
+                indicators_config=self.entry_indicators,
+                min_indicators_required=self.min_entry_indicators_required
+            )
+            
+            if not is_bullish:
+                return False, f"Entry filter ({self.entry_timeframe}): {reason}"
         
         # Check ATR filter
         if self.use_atr_filter:
@@ -134,4 +167,4 @@ class TradingProfile(BaseModel):
                 if atr_data and atr_data.get_ratio() > self.atr_max_threshold:
                     return False, f"ATR exceeds maximum: {atr_data.get_ratio():.2f} > {self.atr_max_threshold}"
         
-        return True, None    
+        return True, None

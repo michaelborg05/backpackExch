@@ -66,6 +66,12 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         trend_indicators = cfg.get("trend_indicators", None)
         min_indicators_required = cfg.get("min_indicators_required", 2)
         
+        # Load entry filter configuration (NEW)
+        use_entry_filter = cfg.get("use_entry_filter", False)
+        entry_timeframe = cfg.get("entry_timeframe", "15m")
+        entry_indicators = cfg.get("entry_indicators", None)
+        min_entry_indicators_required = cfg.get("min_entry_indicators_required", 2)
+        
         # Validate trend indicators if trend filter is enabled
         if use_trend_filter and trend_indicators:
             # Ensure trend_indicators is a list
@@ -96,6 +102,37 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
                             f"exceeds available indicators ({len(trend_indicators)}), adjusting to {len(trend_indicators)}"
                         )
                         min_indicators_required = len(trend_indicators)
+
+        # Validate entry indicators if entry filter is enabled (NEW)
+        if use_entry_filter and entry_indicators:
+            # Ensure entry_indicators is a list
+            if not isinstance(entry_indicators, list):
+                print(f"WARNING: Profile '{name}' has invalid entry_indicators format, disabling entry filter")
+                use_entry_filter = False
+                entry_indicators = None
+            else:
+                # Validate each indicator config
+                valid_indicators = []
+                for indicator in entry_indicators:
+                    if isinstance(indicator, dict) and "type" in indicator:
+                        valid_indicators.append(indicator)
+                    else:
+                        print(f"WARNING: Profile '{name}' has invalid entry indicator config: {indicator}")
+                
+                if len(valid_indicators) == 0:
+                    print(f"WARNING: Profile '{name}' has no valid entry indicators, disabling entry filter")
+                    use_entry_filter = False
+                    entry_indicators = None
+                else:
+                    entry_indicators = valid_indicators
+                    
+                    # Adjust min_entry_indicators_required if it exceeds available indicators
+                    if min_entry_indicators_required > len(entry_indicators):
+                        print(
+                            f"WARNING: Profile '{name}' min_entry_indicators_required ({min_entry_indicators_required}) "
+                            f"exceeds available indicators ({len(entry_indicators)}), adjusting to {len(entry_indicators)}"
+                        )
+                        min_entry_indicators_required = len(entry_indicators)
 
 
         enable_signal_generation    = cfg.get("enable_signal_generation",False)
@@ -143,6 +180,11 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             trend_timeframe=trend_timeframe,
             trend_indicators=trend_indicators,
             min_indicators_required=min_indicators_required,
+            # NEW: Entry filter fields
+            use_entry_filter=use_entry_filter,
+            entry_timeframe=entry_timeframe,
+            entry_indicators=entry_indicators,
+            min_entry_indicators_required=min_entry_indicators_required,
             # ATR filter fields (NEW)
             use_atr_filter=use_atr_filter,
             atr_timeframe=atr_timeframe,
@@ -172,6 +214,13 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             filter_info.append(
                 f"Trend: {trend_timeframe} "
                 f"({min_indicators_required}/{len(trend_indicators)} required: {', '.join(indicator_types)})"
+            )
+        
+        if use_entry_filter:
+            indicator_types = [ind.get("type") for ind in (entry_indicators or [])]
+            filter_info.append(
+                f"Entry: {entry_timeframe} "
+                f"({min_entry_indicators_required}/{len(entry_indicators)} required: {', '.join(indicator_types)})"
             )
 
         if use_atr_filter:

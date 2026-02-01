@@ -17,7 +17,8 @@ You could update your TrendData or SignalGenerator to store the local_high and l
       return False, "Too close to local peak/resistance"
 
  # fix SL/TP override. Its changing the profile for all future alerts
-
+# Mean reversion profile for extreme RSI ranges
+# rsi momentum function is never called. Find out why?
 
 No need
  # split into separate modules so i can migrate to Azure

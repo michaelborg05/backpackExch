@@ -1,4 +1,4 @@
-# services/signal_generator.py
+# services/signal_generator.py - Fully configurable via YAML
 from typing import Optional, List, Dict, Tuple
 from decimal import Decimal
 from enum import Enum
@@ -14,14 +14,13 @@ from cache.regime_filter import get_regime_filter
 
 class SignalGenerator:
     """
-    Generates trading signals based on multiple indicators
+    Generates trading signals based on fully configurable indicators from YAML
     
     Philosophy:
     - Multiple timeframe analysis (trend on higher TF, entry on lower TF)
-    - Volume confirmation (no volume = no conviction)
-    - Volatility awareness (ATR filter)
-    - Momentum detection (RSI direction)
-    - Risk management (don't buy overbought)
+    - All validation logic configured via profile YAML
+    - Support for new indicators: price_vs_ema, ema_slope, rsi_range, etc.
+    - Separate trend_indicators and entry_indicators for multi-TF strategy
     """
     
     def __init__(self, profile: TradingProfile):
@@ -36,38 +35,49 @@ class SignalGenerator:
         self.trading_timeframe = getattr(profile, 'signal_timeframe', '15')
         self.trend_timeframe = getattr(profile, 'trend_timeframe', '60')  # Higher TF for trend
         
-        # Thresholds
-        self.min_volume_ratio = getattr(profile, 'min_volume_ratio', 1.5)  # Volume must be 50% above average
-        self.min_confidence = getattr(profile, 'min_signal_confidence', 70.0)  # Don't trade below 70%
+        # NEW: Entry filter settings (for multi-TF validation)
+        self.use_entry_filter = getattr(profile, 'use_entry_filter', False)
+        self.entry_timeframe = getattr(profile, 'entry_timeframe', self.trading_timeframe)
         
-        self.logger.info(
+        # Thresholds
+        self.min_volume_ratio = getattr(profile, 'min_volume_ratio', 1.5)
+        self.min_confidence = getattr(profile, 'min_signal_confidence', 70.0)
+        
+        log_msg = (
             f"Initialized SignalGenerator: "
             f"trading_tf={self.trading_timeframe}, "
-            f"trend_tf={self.trend_timeframe}, "
-            f"min_volume_ratio={self.min_volume_ratio}, "
-            f"min_confidence={self.min_confidence}%"
+            f"trend_tf={self.trend_timeframe}"
         )
+        
+        if self.use_entry_filter:
+            log_msg += f", entry_filter=ON (entry_tf={self.entry_timeframe})"
+        
+        log_msg += f", min_volume={self.min_volume_ratio}x, min_confidence={self.min_confidence}%"
+        
+        self.logger.info(log_msg)
     
     def generate_signal(self, symbol: str) -> Optional[TradingSignal]:
         """
         Generate trading signal for a symbol
         
-        Signal Logic:
-        1. ✅ Higher timeframe trend is bullish (required)
-        2. ✅ Trading timeframe shows entry opportunity
-        3. ✅ Volume confirms the move
-        4. ✅ Volatility is appropriate (ATR check)
-        5. ✅ Not overbought (RSI < 70)
-        6. ✅ Momentum is positive (RSI increasing)
+        Signal Logic (all configurable via YAML):
+        1. ✅ Balance check
+        2. ✅ Regime filter (optional)
+        3. ✅ Re-entry check
+        4. ✅ Trend filter (higher TF) - uses trend_indicators from YAML
+        5. ✅ Entry filter (execution TF) - uses entry_indicators from YAML (NEW)
+        6. ✅ Volume confirmation
+        7. ✅ ATR check (optional)
+        8. ✅ Not overbought
         
         Returns:
             TradingSignal or None if no signal
         """
         
-                # Create trading service
+        # Create trading service
         trading = TradingService(self.profile)
 
-        #Check if balance is available to buy before proceeding with signal checks
+        # 1. Check if balance is available
         is_valid, balance_error = trading.validate_balance_for_trade(
             sale_action="BUY", 
             symbol=symbol,
@@ -79,27 +89,24 @@ class SignalGenerator:
             self.logger.warning(
                 f"[{self.profile.name}] Skipping trade: {balance_error}"
             )
-            
             return None
 
+        # 2. Regime filter check (optional)
         if self.profile.use_market_regime_filter:
-
-            #1. Add Regime check first - If market is not worth trading, exit early
             can_trade, regime_reason = self.regime_filter.can_trade(
                 symbol=symbol,
                 profile_name=self.profile.name,
-                primary_timeframe=self.trend_timeframe,  # Uses your 60m timeframe
-                confirm_timeframe=self.trading_timeframe  # Uses your 15m timeframe
+                primary_timeframe=self.trend_timeframe,
+                confirm_timeframe=self.trading_timeframe
             )
             
             if not can_trade:
-                # Log at debug level to avoid spam (most rejections will be UNCERTAIN regime)
                 self.logger.debug(
                     f"{symbol}: Market regime check failed - {regime_reason}"
                 )
                 return None
 
-        # 2. Before any signal checks, check reentry conditions to make sure we did not just exit a position
+        # 3. Re-entry check
         from services.reentry_manager import get_reentry_manager
     
         reentry_mgr = get_reentry_manager()
@@ -129,29 +136,45 @@ class SignalGenerator:
         confidence_score = 0.0
         max_confidence = 100.0
         
-        # 3. CHECK HIGHER TIMEFRAME TREND (30 points)
+        # 4. TREND FILTER (Higher Timeframe - e.g., 4h for 1h trading)
+        # Uses trend_indicators from YAML
         trend_check, trend_reason = self._check_trend(symbol, self.trend_timeframe)
         indicators['trend'] = trend_check
         
         if not trend_check['is_bullish']:
-            self.logger.debug(f"{symbol}: No signal - {trend_reason}")
+            self.logger.debug(f"{symbol}: Trend check failed - {trend_reason}")
             return None  # HARD STOP - trend must be bullish
         
-        reasons.append(f"✅ Trend: {trend_reason}")
+        reasons.append(f"✅ Trend ({self.trend_timeframe}m): {trend_reason}")
         confidence_score += 30.0
         
-        # 4. CHECK TRADING TIMEFRAME ENTRY (25 points)
+        # 5. ENTRY FILTER (Execution Timeframe - e.g., 1h)
+        # Uses entry_indicators from YAML (NEW)
+        if self.use_entry_filter:
+            entry_check, entry_reason = self._check_entry_filter(symbol, self.entry_timeframe)
+            indicators['entry_filter'] = entry_check
+            
+            if not entry_check['is_bullish']:
+                self.logger.debug(f"{symbol}: Entry filter failed - {entry_reason}")
+                return None  # HARD STOP
+            
+            reasons.append(f"✅ Entry ({self.entry_timeframe}m): {entry_reason}")
+            confidence_score += 20.0
+            max_confidence += 20.0  # Adjust max since we added a check
+        
+        # 6. ENTRY CONDITIONS (Trading Timeframe)
+        # This is the scoring-based check (60/100 points required)
         entry_check, entry_reason = self._check_entry_conditions(symbol, self.trading_timeframe)
         indicators['entry'] = entry_check
         
         if not entry_check['is_valid']:
-            self.logger.debug(f"{symbol}: No signal - {entry_reason}")
+            self.logger.debug(f"{symbol}: Entry conditions failed - {entry_reason}")
             return None
         
         reasons.append(f"✅ Entry: {entry_reason}")
         confidence_score += 25.0
         
-        # 5. VOLUME CONFIRMATION (20 points)
+        # 7. VOLUME CONFIRMATION
         volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
         indicators['volume'] = volume_check
         
@@ -159,31 +182,30 @@ class SignalGenerator:
             reasons.append(f"✅ Volume: {volume_reason}")
             confidence_score += 20.0
         else:
-            # Volume not available or weak - reduce confidence
             reasons.append(f"⚠️ Volume: {volume_reason}")
-            confidence_score += 5.0  # Small penalty
+            confidence_score += 5.0
         
-        # 6. ATR/VOLATILITY CHECK (15 points)
+        # 8. ATR/VOLATILITY CHECK (optional)
         if self.profile.use_atr_filter:
             atr_check, atr_reason = self._check_atr(symbol)
             indicators['atr'] = atr_check
             
             if not atr_check['is_valid']:
-                self.logger.debug(f"{symbol}: No signal - {atr_reason}")
+                self.logger.debug(f"{symbol}: ATR check failed - {atr_reason}")
                 return None
             
             reasons.append(f"✅ ATR: {atr_reason}")
             confidence_score += 15.0
         else:
-            confidence_score += 15.0  # Give full points if not using ATR filter
+            confidence_score += 15.0
         
-        # 7. NOT OVERBOUGHT (10 points)
+        # 9. NOT OVERBOUGHT
         overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
         indicators['overbought'] = overbought_check
         
         if not overbought_check['is_valid']:
             reasons.append(f"⚠️ RSI: {ob_reason}")
-            confidence_score += 3.0  # Partial credit
+            confidence_score += 3.0
         else:
             reasons.append(f"✅ RSI: {ob_reason}")
             confidence_score += 10.0
@@ -215,58 +237,90 @@ class SignalGenerator:
             confirm_timeframe=self.trading_timeframe       
         )
 
+        # Get current price
+        current_price = self.price_cache.get(symbol)
+        
+        # Create signal
         signal = TradingSignal(
             symbol=symbol,
-            action="BUY",
+            direction="BUY",
             strength=strength,
             confidence=confidence_pct,
-            reasons=reasons + [f"Market: {regime_reason}"],  # Add regime to reasons
+            entry_price=float(current_price) if current_price else None,
+            timeframe=self.trading_timeframe,
+            trend_timeframe=self.trend_timeframe,
             indicators=indicators,
+            reason="\n".join(reasons),
             timestamp=time.time(),
-            timeframe=self.trading_timeframe
+            market_regime=regime.value,
+            regime_confidence=regime_reason
         )
         
         self.logger.info(
-            f"🎯 SIGNAL GENERATED: {symbol} - "
-            f"{strength.name} ({confidence_pct:.1f}%) - "
-            f"{', '.join(reasons)}"
+            f"🎯 SIGNAL GENERATED: {symbol} | "
+            f"Strength: {strength.value} | "
+            f"Confidence: {confidence_pct:.1f}% | "
+            f"Price: ${current_price:.2f if current_price and current_price >= 1 else current_price:.5f}"
         )
         
         return signal
     
     def _check_trend(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
-        """Check if higher timeframe trend is bullish"""
-        trend = self.trend_cache.get(symbol, timeframe)
+        """
+        Check if higher timeframe trend is bullish
         
-        if trend is None:
-            return {"is_bullish": False}, f"No trend data for {timeframe}"
+        Uses trend_indicators from profile YAML
+        This validates the TREND AUTHORITY timeframe (e.g., 4h for 1h trading)
+        """
+        # Get indicator config from profile
+        indicators_config = getattr(self.profile, 'trend_indicators', None)
+        min_required = getattr(self.profile, 'min_indicators_required', 2)
         
-        # Use profile's trend filter logic
         is_bullish, reason = self.trend_cache.is_bullish(
             symbol=symbol,
             timeframe=timeframe,
-            indicators_config=self.profile.trend_indicators,
-            min_indicators_required=self.profile.min_indicators_required
+            indicators_config=indicators_config,
+            min_indicators_required=min_required
         )
         
-        return {
-            "is_bullish": is_bullish,
-            "ema20": float(trend.ema20),
-            "ema50": float(trend.ema50),
-            "rsi": float(trend.rsi),
-            "vwap": float(trend.vwap),
-            "price": float(trend.price)
-        }, reason
+        return {"is_bullish": is_bullish}, reason
+    
+    def _check_entry_filter(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
+        """
+        NEW: Check entry filter (execution timeframe validation)
+        
+        Uses entry_indicators from profile YAML
+        This validates the EXECUTION timeframe (e.g., 1h for 1h trading)
+        
+        This is separate from _check_entry_conditions which does scoring.
+        This is a hard pass/fail based on configured indicators.
+        """
+        # Get entry indicator config from profile
+        indicators_config = getattr(self.profile, 'entry_indicators', None)
+        min_required = getattr(self.profile, 'min_entry_indicators_required', 2)
+        
+        if indicators_config is None:
+            # No entry filter configured - pass
+            return {"is_bullish": True}, "No entry filter configured"
+        
+        is_bullish, reason = self.trend_cache.is_bullish(
+            symbol=symbol,
+            timeframe=timeframe,
+            indicators_config=indicators_config,
+            min_indicators_required=min_required
+        )
+        
+        return {"is_bullish": is_bullish}, reason
     
     def _check_entry_conditions(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """
-        Check entry conditions with momentum awareness
+        Check entry conditions on trading timeframe
         
-        Scoring system (0-100 points):
+        Scoring (max 100 points):
         - Price vs VWAP: 0-30 points
         - EMA alignment: 0-30 points  
         - RSI position: 0-20 points
-        - RSI momentum: 0-20 points (NEW)
+        - RSI momentum: 0-20 points
         """
         trend = self.trend_cache.get(symbol, timeframe)
         
@@ -319,7 +373,7 @@ class SignalGenerator:
             score += 0
             checks.append(f"RSI- ({rsi:.0f})")
         
-        # 4. RSI momentum (0-20 points) - NEW!
+        # 4. RSI momentum (0-20 points)
         rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(symbol, timeframe)
         
         if rsi_momentum is not None:

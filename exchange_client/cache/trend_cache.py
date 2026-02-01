@@ -1,6 +1,6 @@
-# cache/trend_cache.py - Smart dual-tracking version
+# cache/trend_cache.py - Enhanced with configurable multi-timeframe validation
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 import time
 from utils.logging import log_manager
 from models.webhook import TrendData
@@ -8,9 +8,10 @@ from models.webhook import TrendData
 
 class TrendCache:
     """
-    Smart cache with dual tracking:
+    Smart cache with dual tracking + configurable multi-timeframe validation
     1. Always refreshes cache (for volume, VWAP, price)
-    2. Only tracks RSI history when indicators actually change
+    2. Only tracks RSI/EMA history when indicators actually change
+    3. Multi-timeframe validation fully configurable via profile YAML
     """
     
     def __init__(self, max_age: int = 1200):
@@ -22,6 +23,9 @@ class TrendCache:
         
         # RSI history (only updated when RSI actually changes)
         self._rsi_history: Dict[str, list] = {}
+        
+        # EMA history for slope calculation (only updated when EMAs change)
+        self._ema_history: Dict[str, list] = {}
         
         # Track statistics
         self._stats = {
@@ -35,7 +39,7 @@ class TrendCache:
         Update trend data with smart handling
         
         Always updates cache (to refresh timestamp, price, volume, VWAP)
-        Only updates RSI history when indicators actually changed
+        Only updates RSI/EMA history when indicators actually changed
         
         Args:
             trend_data: New trend data with optional indicators_changed flag
@@ -62,17 +66,31 @@ class TrendCache:
         old_trend = self._cache.get(key)
         self._cache[key] = trend_data
         
-        # Only update RSI history when indicators actually changed
+        # Only update histories when indicators actually changed
         if indicators_changed:
+            # Update RSI history
             if key not in self._rsi_history:
                 self._rsi_history[key] = []
             
-            # Add to RSI history
             self._rsi_history[key].append((trend_data.timestamp, trend_data.rsi))
             
             # Keep last 5 significant changes
             if len(self._rsi_history[key]) > 5:
                 self._rsi_history[key] = self._rsi_history[key][-5:]
+            
+            # Update EMA history for slope calculation
+            if key not in self._ema_history:
+                self._ema_history[key] = []
+            
+            self._ema_history[key].append({
+                'timestamp': trend_data.timestamp,
+                'ema20': trend_data.ema20,
+                'ema50': trend_data.ema50
+            })
+            
+            # Keep last 3 significant changes for slope (need 2-3 points)
+            if len(self._ema_history[key]) > 3:
+                self._ema_history[key] = self._ema_history[key][-3:]
             
             # Log the change
             if old_trend:
@@ -141,6 +159,31 @@ class TrendCache:
                 f"✨ TREND CHANGED: {new_trend.symbol} ({new_trend.timeframe}) - "
                 f"{', '.join(changes)}"
             )
+    
+    def _get_ema_slope(self, symbol: str, timeframe: str, ema_type: str = 'ema20') -> Tuple[Optional[float], Optional[str]]:
+        """
+        Calculate EMA slope (rate of change)
+        
+        Returns:
+            (slope_value, direction_description)
+            - slope_value: positive = rising, negative = falling (percentage change)
+            - direction: "rising", "falling", or "flat"
+        """
+        key = f"{symbol}_{timeframe}"
+        
+        if key not in self._ema_history or len(self._ema_history[key]) < 2:
+            return None, None
+        
+        history = self._ema_history[key]
+        
+        # Get current and previous EMA values
+        current = history[-1][ema_type]
+        previous = history[-2][ema_type]
+        
+        # Calculate percentage change for better interpretation
+        slope_pct = ((current - previous) / previous) * 100 if previous > 0 else 0
+        
+        return slope_pct, slope_pct  # Return as both value and for direction check
 
     def _evaluate_rsi_with_momentum(self, trend, params, symbol, timeframe):
         """
@@ -268,6 +311,16 @@ class TrendCache:
         """
         Check if trend is bullish based on configurable indicators
         
+        Supports all indicator types from profile YAML:
+        - ema_alignment: EMA20 > EMA50
+        - rsi_threshold: RSI checks with momentum
+        - price_vs_vwap: Price > VWAP
+        - price_vs_ema: Price vs EMA (NEW)
+        - ema_slope: EMA slope direction (NEW)
+        - rsi_range: RSI range blocking (NEW)
+        - ema_gap: EMA convergence detection (NEW)
+        - price_ema50_range: Price oscillation around EMA50 (NEW)
+        
         Args:
             symbol: Trading symbol
             timeframe: Timeframe to check
@@ -295,6 +348,8 @@ class TrendCache:
         for indicator in indicators_config:
             indicator_type = indicator.get("type")
             params = indicator.get("params", {})
+            
+            # === EXISTING INDICATORS ===
             
             if indicator_type == "ema_alignment":
                 is_bullish = trend.ema20 > trend.ema50
@@ -336,6 +391,100 @@ class TrendCache:
                 # Uses latest price and VWAP (refreshed every update)
                 is_bullish = trend.price > trend.vwap
                 msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({trend.price:.2f} vs {trend.vwap:.2f})"
+                results.append((is_bullish, msg))
+            
+            # === NEW INDICATORS ===
+            
+            elif indicator_type == "price_vs_ema":
+                # Check if price is above a specific EMA
+                # params: {ema: 20|50, min_gap_pct: 0.0}
+                ema_type = params.get("ema", 20)
+                min_gap_pct = params.get("min_gap_pct", 0.0)
+                
+                ema_value = trend.ema20 if ema_type == 20 else trend.ema50
+                gap_pct = ((trend.price - ema_value) / ema_value) * 100
+                
+                is_bullish = gap_pct >= min_gap_pct
+                msg = f"Price vs EMA{ema_type}: {'✓' if is_bullish else '✗'} ({gap_pct:+.2f}% gap, need {min_gap_pct:+.2f}%)"
+                results.append((is_bullish, msg))
+            
+            elif indicator_type == "ema_slope":
+                # Check if EMA is rising/falling/flat
+                # params: {ema: 20|50, direction: "rising"|"not_falling", min_slope_pct: 0.01}
+                ema_type = params.get("ema", 20)
+                required_direction = params.get("direction", "rising")
+                min_slope_pct = params.get("min_slope_pct", 0.01)
+                
+                ema_name = f"ema{ema_type}"
+                slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name)
+                
+                if slope_pct is None:
+                    is_bullish = False
+                    msg = f"EMA{ema_type} slope: ✗ (no data)"
+                else:
+                    if required_direction == "rising":
+                        is_bullish = slope_pct > min_slope_pct
+                        direction = "rising" if slope_pct > min_slope_pct else "flat/falling"
+                    elif required_direction == "not_falling":
+                        is_bullish = slope_pct >= -min_slope_pct
+                        direction = "rising/flat" if is_bullish else "falling"
+                    else:
+                        is_bullish = abs(slope_pct) <= min_slope_pct
+                        direction = "flat"
+                    
+                    msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction}, {slope_pct:+.3f}%)"
+                
+                results.append((is_bullish, msg))
+            
+            elif indicator_type == "rsi_range":
+                # Block if RSI is in a specific range (indecision zone)
+                # params: {min: 48, max: 52, invert: false}
+                # If invert=false: BLOCKS when RSI is in range (default for indecision)
+                # If invert=true: BLOCKS when RSI is NOT in range
+                min_rsi = params.get("min", 30)
+                max_rsi = params.get("max", 70)
+                invert = params.get("invert", False)
+                
+                in_range = min_rsi <= trend.rsi <= max_rsi
+                
+                if invert:
+                    is_bullish = in_range
+                    msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'in' if in_range else 'outside'} {min_rsi}-{max_rsi})"
+                else:
+                    is_bullish = not in_range
+                    msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'outside' if is_bullish else 'in'} indecision {min_rsi}-{max_rsi})"
+                
+                results.append((is_bullish, msg))
+            
+            elif indicator_type == "ema_gap":
+                # Check gap between EMA20 and EMA50
+                # params: {min_gap_pct: 0.3, mode: "min"|"max"}
+                # mode="min": Require gap > min_gap_pct (trending)
+                # mode="max": Require gap < min_gap_pct (not overextended)
+                min_gap_pct = params.get("min_gap_pct", 0.3)
+                mode = params.get("mode", "min")
+                
+                gap_pct = abs((trend.ema20 - trend.ema50) / trend.ema50) * 100
+                
+                if mode == "min":
+                    is_bullish = gap_pct >= min_gap_pct
+                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap, need >{min_gap_pct}%)"
+                else:  # mode == "max"
+                    is_bullish = gap_pct <= min_gap_pct
+                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap, need <{min_gap_pct}%)"
+                
+                results.append((is_bullish, msg))
+            
+            elif indicator_type == "price_ema50_range":
+                # Check if price is oscillating around EMA50 (choppy)
+                # params: {max_gap_pct: 1.0}
+                # Blocks if price is within +/- max_gap_pct of EMA50
+                max_gap_pct = params.get("max_gap_pct", 1.0)
+                
+                gap_pct = abs((trend.price - trend.ema50) / trend.ema50) * 100
+                
+                is_bullish = gap_pct > max_gap_pct
+                msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50, need >{max_gap_pct}%)"
                 results.append((is_bullish, msg))
         
         # Count bullish indicators
