@@ -243,19 +243,18 @@ class SignalGenerator:
         # Create signal
         signal = TradingSignal(
             symbol=symbol,
-            direction="BUY",
+            action="BUY",
             strength=strength,
             confidence=confidence_pct,
-            entry_price=float(current_price) if current_price else None,
             timeframe=self.trading_timeframe,
             trend_timeframe=self.trend_timeframe,
             indicators=indicators,
-            reason="\n".join(reasons),
             timestamp=time.time(),
             market_regime=regime.value,
+            reasons="\n".join(reasons),
             regime_confidence=regime_reason
         )
-        
+
         self.logger.info(
             f"🎯 SIGNAL GENERATED: {symbol} | "
             f"Strength: {strength.value} | "

@@ -22,6 +22,9 @@ class TradingSignal:
     indicators: Dict[str, any]  # Raw indicator values
     timestamp: float
     timeframe: str
+    trend_timeframe: str
+    market_regime: str
+    regime_confidence: str
     
     def to_dict(self) -> dict:
         return {
@@ -32,5 +35,7 @@ class TradingSignal:
             "reasons": self.reasons,
             "indicators": self.indicators,
             "timestamp": self.timestamp,
-            "timeframe": self.timeframe
+            "timeframe": self.timeframe,
+            "trend_timeframe": self.trend_timeframe,
+            "market_regime": self.market_regime
         }
