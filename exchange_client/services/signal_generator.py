@@ -258,8 +258,8 @@ class SignalGenerator:
         self.logger.info(
             f"🎯 SIGNAL GENERATED: {symbol} | "
             f"Strength: {strength.value} | "
-            f"Confidence: {confidence_pct:.1f}% | "
-            f"Price: ${current_price:.2f if current_price and current_price >= 1 else current_price:.5f}"
+            f"Confidence: {confidence_pct:.1f}% "
+            
         )
         
         return signal
