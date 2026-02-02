@@ -55,10 +55,10 @@ profiles:
     enabled: true
     api_key_env: BP_API_KEY_15M
     secret_env: BP_SECRET_15M
-    take_profit_pct: 1.1
-    stop_loss_pct: 0.7
+    take_profit_pct: 1.2
+    stop_loss_pct: 1
     trailing_stop_pct: 0.7
-    arm_trailing_stop_pct: 0.6
+    arm_trailing_stop_pct: 0.7
     use_trailing_stop: true
 
     #position sizing
@@ -95,7 +95,7 @@ profiles:
     secret_env: BP_SECRET_1H
     
     take_profit_pct: 3.2
-    stop_loss_pct: 1.7
+    stop_loss_pct: 1.8
     trailing_stop_pct: 1.3
     arm_trailing_stop_pct: 0.8
     use_trailing_stop: true
