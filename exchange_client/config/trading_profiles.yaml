@@ -6,7 +6,7 @@ profiles:
 
     take_profit_pct: 1.2
     stop_loss_pct: 0.7
-    trailing_stop_pct: 0.5
+    trailing_stop_pct: 0.6
     arm_trailing_stop_pct: 0.7
     use_trailing_stop: true
 
@@ -31,7 +31,7 @@ profiles:
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
-      - type: "ema_alignment"
+      - type: "ema_cross"
         params: {fast: 20, slow: 50}
       - type: "rsi_threshold"
         params: 
@@ -75,7 +75,7 @@ profiles:
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
-      - type: "ema_alignment"
+      - type: "ema_cross"
         params: {fast: 20, slow: 50}
       - type: "rsi_threshold"
         params: 
@@ -129,7 +129,7 @@ profiles:
     
     trend_indicators:
       # 1. EMA20 must be above EMA50 on 4h
-      - type: "ema_alignment"
+      - type: "ema_cross"
         params: {fast: 20, slow: 50}
       # 2. Price must be above EMA50 on 4h
       - type: "price_vs_ema"
@@ -189,8 +189,8 @@ profiles:
           min_gap_pct: 0.0     # Must be at/above
       
       # 2. EMA20 >= EMA50 on 1h
-      - type: "ema_alignment"
-        params: {fast: 20, slow: 50}
+      - type: "ema_cross"
+        params: {fast: 20, slow: 50, use_slope=true}
       
       # 3. RSI >= 50 on 1h
       - type: "rsi_threshold"
@@ -231,7 +231,7 @@ profiles:
     trend_timeframe: "240"
     trend_indicators:
       # 1. EMA20 must be above EMA50 on 4h
-      - type: "ema_alignment"
+      - type: "ema_cross"
         params: {fast: 20, slow: 50}
       # 2. Price must be above EMA50 on 4h
       - type: "price_vs_ema"

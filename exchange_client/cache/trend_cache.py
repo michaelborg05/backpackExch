@@ -1,4 +1,4 @@
-# cache/trend_cache.py - Enhanced with configurable multi-timeframe validation
+# cache/trend_cache.py - Enhanced with database persistence for cache warmup
 
 from typing import Dict, Optional, Tuple, List
 import time
@@ -8,10 +8,11 @@ from models.webhook import TrendData
 
 class TrendCache:
     """
-    Smart cache with dual tracking + configurable multi-timeframe validation
+    Smart cache with dual tracking + configurable multi-timeframe validation + DB persistence
     1. Always refreshes cache (for volume, VWAP, price)
     2. Only tracks RSI/EMA history when indicators actually change
     3. Multi-timeframe validation fully configurable via profile YAML
+    4. Persists significant indicator changes to database for cache warmup after restarts
     """
     
     def __init__(self, max_age: int = 1200):
@@ -31,15 +32,18 @@ class TrendCache:
         self._stats = {
             'total_updates': 0,
             'indicator_changes': 0,
-            'refresh_only': 0
+            'refresh_only': 0,
+            'db_saves': 0,
+            'db_save_errors': 0
         }
     
-    def update(self, trend_data: TrendData):
+    def update(self, trend_data: TrendData, persist_to_db: bool = True):
         """
         Update trend data with smart handling
         
         Always updates cache (to refresh timestamp, price, volume, VWAP)
         Only updates RSI/EMA history when indicators actually changed
+        Optionally persists significant changes to database
         
         Args:
             trend_data: New trend data with optional indicators_changed flag
@@ -92,6 +96,10 @@ class TrendCache:
             if len(self._ema_history[key]) > 3:
                 self._ema_history[key] = self._ema_history[key][-3:]
             
+            # Persist to database if enabled
+            if persist_to_db:
+                self._save_to_database(trend_data)
+            
             # Log the change
             if old_trend:
                 self._log_trend_change(trend_data, old_trend)
@@ -105,6 +113,32 @@ class TrendCache:
                 f"VWAP: ${trend_data.vwap:.2f}, "
                 f"Vol: {trend_data.volume_ratio:.2f}x" if trend_data.volume_ratio else "Vol: N/A"
             )
+    
+    def _save_to_database(self, trend_data: TrendData):
+        """
+        Save trend snapshot to database for cache warmup after restarts.
+        Uses a separate session to avoid interfering with main application flow.
+        """
+        
+        from db.utils import get_db_session
+
+        with get_db_session() as db:
+            from db.crud_trend import save_trend_snapshot
+            
+            try:
+                save_trend_snapshot(db, trend_data, max_entries_per_symbol=5)
+                self._stats['db_saves'] += 1
+                
+                self.logger.debug(
+                    f"💾 Saved to DB: {trend_data.symbol} ({trend_data.timeframe})"
+                )
+            except Exception as e:
+                self._stats['db_save_errors'] += 1
+                self.logger.error(
+                    f"❌ Failed to save trend to database: {e}",
+                    exc_info=True
+                )
+                
     
     def _is_significant_change(self, old_trend: Optional[TrendData], new_trend: TrendData) -> bool:
         """
@@ -180,97 +214,30 @@ class TrendCache:
         current = history[-1][ema_type]
         previous = history[-2][ema_type]
         
-        # Calculate percentage change for better interpretation
-        slope_pct = ((current - previous) / previous) * 100 if previous > 0 else 0
+        # Calculate percentage change
+        slope_pct = ((current - previous) / previous) * 100
         
-        return slope_pct, slope_pct  # Return as both value and for direction check
+        # Determine direction
+        if slope_pct > 0.01:  # Rising threshold: 0.01%
+            direction = "rising"
+        elif slope_pct < -0.01:  # Falling threshold: -0.01%
+            direction = "falling"
+        else:
+            direction = "flat"
+        
+        return slope_pct, direction
 
-    def _evaluate_rsi_with_momentum(self, trend, params, symbol, timeframe):
-        """
-        Evaluate RSI with momentum awareness using tiered system
-        
-        Tiers:
-        - STRONG BULLISH: RSI > min_value (traditional)
-        - MODERATE BULLISH: RSI > early_threshold AND increasing momentum
-        - EMERGING BULLISH: RSI < early_threshold BUT rapid momentum surge (>2 points/change)
-        - WEAK BEARISH: RSI > min_value BUT decreasing momentum (warning sign)
-        - BEARISH: All other cases
-        """
-        rsi = trend.rsi
-        min_rsi = params.get("min_value", 50)
-        use_momentum = params.get("use_momentum", True)
-        early_threshold = params.get("early_threshold", 40)
-        
-        if not use_momentum:
-            # Simple threshold check
-            is_bullish = rsi > min_rsi
-            msg = f"RSI: {'✓' if is_bullish else '✗'} ({rsi:.1f} vs {min_rsi})"
-            return is_bullish, msg
-        
-        # Get momentum
-        rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
-        
-        if rsi_momentum is None:
-            # No momentum data yet - fall back to threshold
-            is_bullish = rsi > min_rsi
-            msg = f"RSI: {'✓' if is_bullish else '✗'} ({rsi:.1f}, no momentum)"
-            return is_bullish, msg
-        
-        # TIER 1: STRONG BULLISH (traditional threshold + momentum not bearish)
-        if rsi > min_rsi and rsi_momentum > -1.0:  # Above threshold, not declining sharply
-            msg = f"RSI: ✓ STRONG ({rsi:.1f}, {rsi_direction} {rsi_momentum:+.1f})"
-            return True, msg
-        
-        # TIER 2: MODERATE BULLISH (early threshold + increasing)
-        if rsi > early_threshold and rsi_direction == "increasing":
-            msg = f"RSI: ✓ MODERATE ({rsi:.1f}, {rsi_direction} {rsi_momentum:+.1f})"
-            return True, msg
-        
-        # TIER 3: EMERGING BULLISH (oversold but surging)
-        # Catch early moves: RSI < early_threshold but strong momentum
-        if rsi_momentum > 2.0:  # Rapid surge (>2 points per change)
-            msg = f"RSI: ✓ EMERGING ({rsi:.1f}, surging {rsi_momentum:+.1f})"
-            return True, msg
-        
-        # WARNING: Above threshold but weakening
-        if rsi > min_rsi and rsi_momentum < -1.0:
-            msg = f"RSI: ✗ WEAKENING ({rsi:.1f}, fading {rsi_momentum:+.1f})"
-            return False, msg
-        
-        # BEARISH: All other cases
-        msg = f"RSI: ✗ ({rsi:.1f}, {rsi_direction or 'flat'} {rsi_momentum:+.1f})"
-        return False, msg
     
-    def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
-        """Get cached trend data if still valid"""
-        key = f"{symbol}_{timeframe}"
-        
-        if key not in self._cache:
-            self.logger.debug(f"No trend data for {symbol} ({timeframe})")
-            return None
-        
-        trend = self._cache[key]
-        age = time.time() - (trend.timestamp or 0)
-        
-        if age > self.max_age:
-            self.logger.warning(
-                f"Trend data for {symbol} ({timeframe}) is stale ({age:.0f}s old)"
-            )
-            return None
-        
-        return trend
 
+    
     def _get_rsi_momentum(self, symbol: str, timeframe: str) -> Tuple[Optional[float], Optional[str]]:
         """
         Calculate RSI momentum (rate of change)
         
-        IMPORTANT: This only uses RSI values when they ACTUALLY changed,
-        so you get meaningful momentum (not artificial flatness from duplicates)
-        
         Returns:
             (momentum_value, direction_description)
-            - momentum_value: positive = increasing, negative = decreasing
-            - direction: "increasing", "decreasing", or "flat"
+            - momentum_value: absolute change in RSI
+            - direction: "increasing", "decreasing", or "stable"
         """
         key = f"{symbol}_{timeframe}"
         
@@ -279,81 +246,201 @@ class TrendCache:
         
         history = self._rsi_history[key]
         
-        # Compare current RSI to previous readings
+        # Get current and previous RSI values
         current_rsi = history[-1][1]
-        
-        # Calculate average of previous 2 RSI values (actual changes only)
-        if len(history) >= 3:
-            prev_avg = (history[-2][1] + history[-3][1]) / 2
-        else:
-            prev_avg = history[-2][1]
+        previous_rsi = history[-2][1]
         
         # Calculate momentum
-        momentum = current_rsi - prev_avg
+        momentum = current_rsi - previous_rsi
         
         # Determine direction
-        if momentum > 0.5:  # RSI increasing by more than 0.5 points
+        if momentum > 0.5:  # Increasing threshold
             direction = "increasing"
-        elif momentum < -0.5:  # RSI decreasing by more than 0.5 points
+        elif momentum < -0.5:  # Decreasing threshold
             direction = "decreasing"
         else:
-            direction = "flat"
+            direction = "stable"
         
         return momentum, direction
     
-    def is_bullish(
-        self, 
-        symbol: str, 
-        timeframe: str,
-        indicators_config: list = None,
-        min_indicators_required: int = 2
-    ) -> tuple[bool, Optional[str]]:
-        """
-        Check if trend is bullish based on configurable indicators
+    def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
+        """Get cached trend data if available and not stale"""
+        key = f"{symbol}_{timeframe}"
+        trend_data = self._cache.get(key)
         
-        Supports all indicator types from profile YAML:
-        - ema_alignment: EMA20 > EMA50
-        - rsi_threshold: RSI checks with momentum
-        - price_vs_vwap: Price > VWAP
-        - price_vs_ema: Price vs EMA (NEW)
-        - ema_slope: EMA slope direction (NEW)
-        - rsi_range: RSI range blocking (NEW)
-        - ema_gap: EMA convergence detection (NEW)
-        - price_ema50_range: Price oscillation around EMA50 (NEW)
+        if trend_data and hasattr(trend_data, 'timestamp'):
+            age = time.time() - trend_data.timestamp
+            if age <= self.max_age:
+                return trend_data
+            else:
+                self.logger.warning(f"Stale trend data for {key} (age: {age:.0f}s)")
+        
+        return None
+    
+    def is_bullish(
+        self,
+        symbol: str,
+        timeframe: str,
+        indicators_config: List[Dict] = None,
+        min_indicators_required: int = 2
+    ) -> Tuple[bool, str]:
+        """
+        ORIGINAL FUNCTION PRESERVED - Check if trend is bullish for a single timeframe
+        
+        This is the main function used by:
+        - position_manager.py (_check_trend_invalidation)
+        - signal_generator.py (should_trade)
+        - api_server.py (various endpoints)
         
         Args:
             symbol: Trading symbol
-            timeframe: Timeframe to check
-            indicators_config: List of indicator configs from profile
-            min_indicators_required: Minimum number that must be bullish
-        
+            timeframe: Single timeframe to check
+            indicators_config: List of indicator configs
+            min_indicators_required: Minimum bullish indicators needed
+            
         Returns:
-            (is_bullish, reason) tuple
+            (is_bullish, reason_string)
         """
         trend = self.get(symbol, timeframe)
         
         if trend is None:
-            return False, f"No trend data available for {symbol} ({timeframe})"
+            return False, f"No trend data for {symbol} {timeframe}"
         
         # Default to all 3 indicators if not specified
         if indicators_config is None:
             indicators_config = [
-                {"type": "ema_alignment", "params": {"fast": 20, "slow": 50}},
+                {"type": "ema_cross", "params": {"fast": 20, "slow": 50}},
                 {"type": "rsi_threshold", "params": {"period": 14, "min_value": 50}},
                 {"type": "price_vs_vwap", "params": {}}
             ]
+
+        return self._validate_timeframe_indicators(
+            symbol,
+            timeframe,
+            trend,
+            indicators_config,
+            min_indicators_required
+        )
+    
+    def validate_multi_timeframe_trend(
+        self,
+        symbol: str,
+        required_timeframes: List[Dict]
+    ) -> Tuple[bool, str]:
+        """
+        NEW FUNCTION - Validate trend across multiple timeframes
         
-        # Evaluate each configured indicator
+        This is an ADDITIONAL function, not a replacement for is_bullish()
+        Use this when you need to check multiple timeframes at once.
+        
+        Args:
+            symbol: The trading symbol
+            required_timeframes: List of dicts, each with:
+                {
+                    "timeframe": "1h",
+                    "min_indicators_required": 3,
+                    "indicators": [
+                        {"type": "ema_cross", "params": {...}},
+                        {"type": "rsi_threshold", "params": {...}},
+                        ...
+                    ]
+                }
+        
+        Returns:
+            (is_valid, reason_string)
+        """
+        if not required_timeframes:
+            return True, "No timeframe requirements"
+        
         results = []
-        for indicator in indicators_config:
-            indicator_type = indicator.get("type")
-            params = indicator.get("params", {})
+        
+        for tf_config in required_timeframes:
+            timeframe = tf_config["timeframe"]
+            min_indicators = tf_config.get("min_indicators_required", len(tf_config["indicators"]))
+            indicators = tf_config.get("indicators", [])
             
-            # === EXISTING INDICATORS ===
+            trend = self.get(symbol, timeframe)
             
+            if not trend:
+                results.append((False, f"{timeframe}: No data"))
+                continue
+            
+            # Validate indicators for this timeframe
+            is_valid, reason = self._validate_timeframe_indicators(
+                symbol,
+                timeframe,
+                trend,
+                indicators,
+                min_indicators
+            )
+            
+            results.append((is_valid, f"{timeframe}: {reason}"))
+        
+        # All required timeframes must pass
+        all_valid = all(is_valid for is_valid, _ in results)
+        
+        if all_valid:
+            reasons = [reason for _, reason in results]
+            return True, " | ".join(reasons)
+        else:
+            # Return first failure
+            for is_valid, reason in results:
+                if not is_valid:
+                    return False, reason
+            
+            return False, "Unknown validation failure"
+    
+    def _validate_timeframe_indicators(
+        self,
+        symbol: str,
+        timeframe: str,
+        trend: TrendData,
+        indicators: List[Dict],
+        min_indicators_required: int
+    ) -> Tuple[bool, str]:
+        """
+        Validate multiple indicators for a single timeframe.
+        Returns True if at least min_indicators_required pass.
+        
+        SUPPORTS BOTH OLD AND NEW INDICATOR NAMES:
+        - "ema_alignment" (old) → treated as "ema_cross"
+        - "ema_cross" (new) → EMA20 > EMA50
+        - Both work identically
+        """
+        results = []
+        
+        for indicator_config in indicators:
+            indicator_type = indicator_config.get("type")
+            params = indicator_config.get("params", {})
+            
+            # === BACKWARD COMPATIBILITY: ema_alignment → ema_cross ===
             if indicator_type == "ema_alignment":
-                is_bullish = trend.ema20 > trend.ema50
-                msg = f"EMA{params.get('fast', 20)}/{params.get('slow', 50)}: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f})"
+                indicator_type = "ema_cross"  # Treat as ema_cross
+            
+            # === CORE INDICATORS (ORIGINAL) ===
+            
+            if indicator_type == "ema_cross":
+                # EMA20 must be above EMA50 (with optional slope check)
+                use_slope = params.get("use_slope", False)
+                min_slope_pct = params.get("min_slope_pct", 0.01)
+                
+                if use_slope:
+                    # Check both cross and slope
+                    slope_pct, slope_direction = self._get_ema_slope(symbol, timeframe, "ema20")
+                    
+                    if slope_pct is None:
+                        is_bullish = trend.ema20 > trend.ema50
+                        msg = f"EMA cross: {'✓' if is_bullish else '✗'} (no slope data)"
+                    else:
+                        is_bullish = (
+                            trend.ema20 > trend.ema50 and 
+                            slope_pct > min_slope_pct
+                        )
+                        msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f}, slope: {slope_direction})"
+                else:
+                    is_bullish = trend.ema20 > trend.ema50
+                    msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f})"
+                
                 results.append((is_bullish, msg))
                 
             elif indicator_type == "rsi_threshold":
@@ -500,10 +587,12 @@ class TrendCache:
             return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
     
     def get_cache_info(self) -> dict:
-        """Get cache status with statistics"""
+        """Get cache status with statistics including DB persistence stats"""
         total = self._stats['total_updates']
         significant = self._stats['indicator_changes']
         refresh = self._stats['refresh_only']
+        db_saves = self._stats['db_saves']
+        db_errors = self._stats['db_save_errors']
         
         return {
             "symbols_cached": len(self._cache),
@@ -511,6 +600,8 @@ class TrendCache:
             "indicator_changes": significant,
             "refresh_only": refresh,
             "efficiency_pct": (refresh / total * 100) if total > 0 else 0,
+            "db_saves": db_saves,
+            "db_save_errors": db_errors,
             "entries": [
                 {
                     "key": key,
@@ -533,4 +624,21 @@ def get_trend_cache() -> TrendCache:
     global _trend_cache
     if _trend_cache is None:
         _trend_cache = TrendCache()
+    return _trend_cache
+
+
+def initialize_trend_cache_with_db(db_session_factory, persist_to_db: bool = True) -> TrendCache:
+    """
+    Initialize the global trend cache with database support.
+    Call this during application startup after database is configured.
+    
+    Args:
+        db_session_factory: Factory function that returns a new database session
+        persist_to_db: Whether to persist trend changes to database (default True)
+        
+    Returns:
+        Initialized TrendCache instance
+    """
+    global _trend_cache
+    _trend_cache = TrendCache()
     return _trend_cache

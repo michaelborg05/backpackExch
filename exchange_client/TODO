@@ -19,6 +19,8 @@ You could update your TrendData or SignalGenerator to store the local_high and l
  # fix SL/TP override. Its changing the profile for all future alerts
 # Mean reversion profile for extreme RSI ranges
 # rsi momentum function is never called. Find out why?
+# make stop loss limit dynamic based on chatgpt analysis
+# review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
 
 No need
  # split into separate modules so i can migrate to Azure
@@ -68,3 +70,4 @@ No need
  see claude search titled "Trading signal generator optimization and re-entry strategy" - starred. Need to implement RSI momentum logic and blocked signal logging if I think its useful
  # Move buy amounts for signal generator into yaml - Maybe combine with percentage
  # change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
+# when restarting service, reproces trend data. Maybe store past 5 in db

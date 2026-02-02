@@ -1,8 +1,10 @@
 # db/models.py
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from utils.constants import TradeReason, PositionCloseReason
+
+
 
 Base = declarative_base()
 
@@ -199,4 +201,38 @@ class SymbolConfig(Base):
             'order_size_usdc IS NOT NULL',
             name='check_order_size_specified'
         ),
+    )
+
+class TrendHistory(Base):
+    """
+    Stores trend indicator snapshots for cache warmup after deployments.
+    Keeps last N entries per symbol/timeframe to rebuild historical context.
+    """
+    __tablename__ = "trend_history"
+    
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, index=True)
+    
+    # Core indicators (store as JSON for flexibility)
+    trend_data = Column(JSON, nullable=False)
+    
+    # Denormalized for easier querying
+    price = Column(Float, nullable=False)
+    rsi = Column(Float, nullable=False)
+    ema20 = Column(Float, nullable=False)
+    ema50 = Column(Float, nullable=False)
+    vwap = Column(Float, nullable=True)
+    volume_ratio = Column(Float, nullable=True)
+    
+    # Tracking
+    indicators_changed = Column(Boolean, default=True)  # Was this a significant change?
+    data_timestamp = Column(DateTime(timezone=True), nullable=False)  # When data was generated
+    created_at = Column(DateTime(timezone=True), server_default=func.now())  # When saved to DB
+    
+    __table_args__ = (
+        # Composite index for efficient lookups
+        Index('ix_trend_history_symbol_timeframe_timestamp', 'symbol', 'timeframe', 'data_timestamp'),
+        # Prevent exact duplicates
+        UniqueConstraint('symbol', 'timeframe', 'data_timestamp', name='uq_trend_history_entry'),
     )

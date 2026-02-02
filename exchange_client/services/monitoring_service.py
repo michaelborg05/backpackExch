@@ -22,6 +22,8 @@ from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager
 from services.signal_generator import get_signal_generator
 from utils.position_calculator import get_position_size_calculator
+from cache.trend_cache import initialize_trend_cache_with_db
+from cache.trend_cache_warmup import warmup_trend_cache
 
 from db.utils import get_db_session
 from db.crud import (
@@ -49,6 +51,18 @@ class MonitoringService:
                 db_tickers = get_active_symbols(db)
                 # Fallback to a hardcoded list ONLY if the DB is empty
                 self.tickers = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
+
+                trend_cache = initialize_trend_cache_with_db(
+                    db,
+                    persist_to_db=True
+                )
+                # Warm up from database
+                try:
+                    stats = warmup_trend_cache(db, trend_cache)
+                    self.logger.info(f"Cache warmed up: {stats['symbols_loaded']} symbols, "
+                            f"{stats['total_snapshots_replayed']} snapshots")
+                except Exception as e:
+                    self.logger.error(f"Error warming up cache: {e}")   
 
         self.is_running = False
         self.thread = None
