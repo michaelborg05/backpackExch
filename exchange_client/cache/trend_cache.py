@@ -627,7 +627,7 @@ def get_trend_cache() -> TrendCache:
     return _trend_cache
 
 
-def initialize_trend_cache_with_db(db_session_factory, persist_to_db: bool = True) -> TrendCache:
+def initialize_trend_cache_with_db() -> TrendCache:
     """
     Initialize the global trend cache with database support.
     Call this during application startup after database is configured.

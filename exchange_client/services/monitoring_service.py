@@ -52,10 +52,7 @@ class MonitoringService:
                 # Fallback to a hardcoded list ONLY if the DB is empty
                 self.tickers = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
 
-                trend_cache = initialize_trend_cache_with_db(
-                    db,
-                    persist_to_db=True
-                )
+                trend_cache = initialize_trend_cache_with_db()
                 # Warm up from database
                 try:
                     stats = warmup_trend_cache(db, trend_cache)

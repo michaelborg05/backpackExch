@@ -5,7 +5,7 @@ Handles saving and loading trend data for cache warmup.
 """
 
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from db.models import TrendHistory
