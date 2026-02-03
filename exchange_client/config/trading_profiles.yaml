@@ -41,7 +41,7 @@ profiles:
       - type: "rsi_threshold"
         params: 
           period: 14
-          min_value: 48
+          min_value: 55
           use_momentum: true
           early_threshold: 40
       - type: "price_vs_vwap"
