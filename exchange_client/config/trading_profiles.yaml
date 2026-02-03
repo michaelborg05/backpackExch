@@ -5,7 +5,7 @@ profiles:
     secret_env: SECRET
 
     take_profit_pct: 1.2
-    stop_loss_pct: 0.7
+    stop_loss_pct: 1
     trailing_stop_pct: 0.6
     arm_trailing_stop_pct: 0.7
     use_trailing_stop: true
@@ -33,16 +33,45 @@ profiles:
     trend_indicators:
       - type: "ema_cross"
         params: {fast: 20, slow: 50}
+      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
+        params:
+          ema: 20
+          direction: "rising"
+          min_slope_pct: 0.01
       - type: "rsi_threshold"
         params: 
           period: 14
-          min_value: 48          # Traditional threshold
-          use_momentum: true     # Enable momentum detection
-          early_threshold: 40    # Catch early momentum (RSI > 40 + increasing)
+          min_value: 48
+          use_momentum: true
+          early_threshold: 40
       - type: "price_vs_vwap"
         params: {}
-    min_indicators_required: 2  # Need 2/3 indicators bullish
-    
+    min_indicators_required: 3  # Require 3/4 (stricter)
+
+    use_entry_filter: true
+    entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
+    entry_indicators:
+      - type: "price_vs_ema"  # NEW: Price must be at/above EMA20
+        params:
+          ema: 20
+          min_gap_pct: 0.0
+      - type: "ema_cross"
+        params: {fast: 20, slow: 50}
+      - type: "rsi_threshold"
+        params:
+          period: 14
+          min_value: 48
+          use_momentum: true
+          early_threshold: 40
+      - type: "rsi_range"  # NEW: Block RSI indecision zone
+        params:
+          min: 46
+          max: 52
+          invert: false
+      - type: "price_vs_vwap"
+        params: {}
+    min_entry_indicators_required: 4  # Require 4/5
+
     # ATR filter (volatility)
     use_atr_filter: false
      # Trend-based exit (intelligent)
@@ -77,6 +106,11 @@ profiles:
     trend_indicators:
       - type: "ema_cross"
         params: {fast: 20, slow: 50}
+      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
+        params:
+          ema: 20
+          direction: "rising"
+          min_slope_pct: 0.01
       - type: "rsi_threshold"
         params: 
           period: 14

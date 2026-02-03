@@ -3,10 +3,12 @@ TO DO
  # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
  # possibly sell as MAX if no other positions available
-#
+# double check rsi momentum is being counted when deciding on trade - or weight it higher
+# make dynamic stop losses as per chat gpt suggestions
+# review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
+# move TP/SL to database
+
  Gemini Suggestions
-# Possibly add a trend filter even on 1m profile - but using smaller timeframe. If thats not possible maybe some other indicator to indicate market trend
-# on 1m, can Add simple Price > ema 200 filter
 Improvement: The "Mean Reversion" Check
 In your trend_cache.py, you currently track price_vs_vwap. A simple way to avoid peaks is to monitor the Distance from VWAP or the EMA20.
 The Logic: If the price is more than X% away from the EMA20, it is "overextended".
@@ -18,9 +20,6 @@ You could update your TrendData or SignalGenerator to store the local_high and l
 
  # fix SL/TP override. Its changing the profile for all future alerts
 # Mean reversion profile for extreme RSI ranges
-# rsi momentum function is never called. Find out why?
-# make stop loss limit dynamic based on chatgpt analysis
-# review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
 
 No need
  # split into separate modules so i can migrate to Azure
