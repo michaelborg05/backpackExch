@@ -264,7 +264,7 @@ class SignalGenerator:
             trend_timeframe=self.trend_timeframe,
             indicators=indicators,
             timestamp=time.time(),
-            reasons=reasons + "\nRegime: " + regime_reason,
+            reasons=reasons,
             regime_confidence=regime_reason
         )
 
