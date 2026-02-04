@@ -69,3 +69,4 @@ No need
  # change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
 # when restarting service, reproces trend data. Maybe store past 5 in db
 # double check rsi momentum is being counted when deciding on trade - or weight it higher
+# change circuit breaker  baseline to highest price so it will only ever lose % from highest portfolio price

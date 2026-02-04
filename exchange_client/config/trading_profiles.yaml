@@ -37,7 +37,7 @@ profiles:
         params:
           ema: 20
           direction: "rising"
-          min_slope_pct: 0.01
+          min_slope_pct: 0.02
       - type: "rsi_threshold"
         params: 
           period: 14
@@ -243,111 +243,87 @@ profiles:
     
     use_atr_filter: false
 
-  1h_MB_TV:
-    enabled: false
+  15m_MB_ATR:
+    enabled: true
     api_key_env: BP_API_KEY_1M
     secret_env: BP_SECRET_1M
 
-    take_profit_pct: 3.8
-    stop_loss_pct: 2.1
-    trailing_stop_pct: 1.5
-    arm_trailing_stop_pct: 1
+    take_profit_pct: 1.2
+    stop_loss_pct: 0.7
+    trailing_stop_pct: 0.6
+    arm_trailing_stop_pct: 0.7
     use_trailing_stop: true
 
-    default_order_size_usdc: 100.0
-    max_position_size_pct: 40.0
-    max_open_positions: 3
-    max_portfolio_exposure_pct: 100.0
+    #position sizing
+    default_order_size_usdc: 100.0      # Buy $100 per order
+    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    
+    # Risk management
+    max_open_positions: 3               # Max concurrent positions per token
+    max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
     use_market_regime_filter: true
 
+    # 🎯 SIGNAL GENERATION SETTINGS (NEW)
+    enable_signal_generation: true    # Enable automated signal generation
+    signal_timeframe: "15"           # Timeframe for entry signals
+    signal_cooldown_seconds: 600      # Wait 10min between signals for same symbol
+    min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
+    min_volume_ratio: 1.25             # Require 25% above average volume
+    
+    # Trend filters
     use_trend_filter: true
-    trend_timeframe: "240"
+    trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
-      # 1. EMA20 must be above EMA50 on 4h
       - type: "ema_cross"
         params: {fast: 20, slow: 50}
-      # 2. Price must be above EMA50 on 4h
-      - type: "price_vs_ema"
-        params: 
-          ema: 50              # Check vs EMA50
-          min_gap_pct: 0.0     # Must be at/above (no gap required)
-      
-      # 3. EMA20 must be rising on 4h (NEW)
-      - type: "ema_slope"
+      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
         params:
-          ema: 20              # Check EMA20 slope
-          direction: "rising"  # Must be rising
-          min_slope_pct: 0.01  # At least 0.01% increase
-      
-      # 4. RSI >= 52 on 4h with momentum
+          ema: 20
+          direction: "rising"
+          min_slope_pct: 0.02
       - type: "rsi_threshold"
         params: 
           period: 14
-          min_value: 52           # Higher threshold for 4h
+          min_value: 50
           use_momentum: true
-          early_threshold: 45     # Early momentum for 4h
-      
-      # 5. Block 4h RSI indecision zone 48-52 (NEW)
-      - type: "rsi_range"
-        params:
-          min: 48
-          max: 52
-          invert: false  # Block when IN this range
-      
-      # 6. Prevent EMA20/EMA50 crossover on 4h (NEW)
-      # Blocks if EMAs are too close (within 0.3%)
-      - type: "ema_gap"
-        params:
-          min_gap_pct: 0.3  # EMAs must be >0.3% apart
-          mode: "min"       # Minimum gap required
-      
-      # 7. Prevent price oscillation around EMA50 on 4h (NEW)
-      # Blocks if price is choppy around EMA50
-      - type: "price_ema50_range"
-        params:
-          max_gap_pct: 1.0  # Price must be >1% away from EMA50
-      
-      # 8. Price vs VWAP on 4h
+          early_threshold: 40
       - type: "price_vs_vwap"
         params: {}
-    
-    # Require ALL 8 indicators to pass (conservative for 4h)
-    #reduced to 5 for Trading View indicators
-    min_indicators_required: 5
+    min_indicators_required: 3  # Require 3/4 (stricter)
 
-    use_atr_filter: false
-    use_trend_invalidation_exit: false
-    min_position_age_for_trend_check: 12
-    max_position_hours: 4
-
-  1m_MB_ATR:
-    enabled: false
-    api_key_env: BP_API_KEY_1M_ATR
-    secret_env: BP_SECRET_1M_ATR
-    take_profit_pct: 0.6
-    stop_loss_pct: 0.4
-    trailing_stop_pct: 0.4
-    arm_trailing_stop_pct: 0.4
-    use_trailing_stop: true
-
-    default_order_size_usdc: 60.0
-    max_position_size_pct: 40.0
-    max_open_positions: 3
-    max_portfolio_exposure_pct: 100.0
-
-    use_trend_filter: true
-    trend_timeframe: "60" 
-    trend_indicators:
+    use_entry_filter: true
+    entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
+    entry_indicators:
+      - type: "price_vs_ema"  # NEW: Price must be at/above EMA20
+        params:
+          ema: 20
+          min_gap_pct: 0.0
+      - type: "ema_cross"
+        params: {fast: 20, slow: 50}
       - type: "rsi_threshold"
-        params: 
+        params:
           period: 14
-          min_value: 45
+          min_value: 48
           use_momentum: true
-          early_threshold: 35
-    min_indicators_required: 1
-    
+          early_threshold: 40
+      - type: "rsi_range"  # NEW: Block RSI indecision zone
+        params:
+          min: 46
+          max: 52
+          invert: false
+      - type: "price_vs_vwap"
+        params: {}
+    min_entry_indicators_required: 4  # Require 4/5
+
+    # ATR filter (volatility)
     use_atr_filter: true
-    atr_timeframe: "1m"
-    atr_threshold: 1.05
+    atr_timeframe: "15m"
+    atr_threshold: 1.03
     atr_filter_mode: "require_high"
+    # Trend-based exit (intelligent)
+    use_trend_invalidation_exit: true
+    min_position_age_for_trend_check: 6  # hours
+    # Time-based invalidation and max position backstop (last resort)
+    max_position_hours: 18  # Force exit if stuck
+

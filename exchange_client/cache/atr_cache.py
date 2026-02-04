@@ -17,7 +17,7 @@ class ATRData:
         atr: Decimal,
         atr_sma: Decimal,
         atr_period: int = 14,
-        sma_period: int = 20
+        sma_period: int = 50
     ):
         self.symbol = symbol
         self.timeframe = timeframe

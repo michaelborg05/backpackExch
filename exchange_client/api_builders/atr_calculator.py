@@ -214,7 +214,7 @@ class ATRCalculator:
         atr_values = list(self._atr_history[key])
         return sum(atr_values) / len(atr_values)
     
-    def update_atr(self, symbol: str, timeframe: str = "1m", bootstrap: bool = True) -> Optional[ATRData]:
+    def update_atr(self, symbol: str, timeframe: str = "15m", bootstrap: bool = True) -> Optional[ATRData]:
         """
         Fetch candles, calculate ATR and ATR_SMA, update cache
         
