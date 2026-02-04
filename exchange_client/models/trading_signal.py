@@ -23,7 +23,6 @@ class TradingSignal:
     timestamp: float
     timeframe: str
     trend_timeframe: str
-    market_regime: str
     regime_confidence: str
     
     def to_dict(self) -> dict:

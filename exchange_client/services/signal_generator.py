@@ -123,16 +123,19 @@ class SignalGenerator:
         if self.profile.use_market_regime_filter:
             can_trade, regime_reason = self.regime_filter.can_trade(
                 symbol=symbol,
-                profile_name=self.profile.name,
-                primary_timeframe=self.trend_timeframe,
-                confirm_timeframe=self.trading_timeframe
+                profile_name=self.profile.name
             )
-            
+
             if not can_trade:
                 self.logger.debug(
                     f"{symbol}: Market regime blocked - {regime_reason}"
                 )
                 return None
+        else:
+            self.logger.debug(
+                f"{symbol}: Market regime filter not applied"
+            )
+            regime_reason = "Regime filter disabled"
 
         # 3. RE-ENTRY CHECK
         from services.reentry_manager import get_reentry_manager
@@ -244,11 +247,6 @@ class SignalGenerator:
         else:
             strength = SignalStrength.WEAK
 
-        regime, regime_reason = self.regime_filter.get_regime(
-            symbol=symbol,
-            primary_timeframe=self.trend_timeframe,
-            confirm_timeframe=self.trading_timeframe       
-        )
 
         # Get current price
         current_price = self.price_cache.get_price(symbol)
@@ -266,8 +264,7 @@ class SignalGenerator:
             trend_timeframe=self.trend_timeframe,
             indicators=indicators,
             timestamp=time.time(),
-            market_regime=regime.value,
-            reasons=reasons,
+            reasons=reasons + "\nRegime: " + regime_reason,
             regime_confidence=regime_reason
         )
 

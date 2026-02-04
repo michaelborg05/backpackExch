@@ -3,12 +3,10 @@ TO DO
  # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
  # alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
  # possibly sell as MAX if no other positions available
-# double check rsi momentum is being counted when deciding on trade - or weight it higher
 # make dynamic stop losses as per chat gpt suggestions
 # review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
 # move TP/SL to database
 
- Gemini Suggestions
 Improvement: The "Mean Reversion" Check
 In your trend_cache.py, you currently track price_vs_vwap. A simple way to avoid peaks is to monitor the Distance from VWAP or the EMA20.
 The Logic: If the price is more than X% away from the EMA20, it is "overextended".
@@ -70,3 +68,4 @@ No need
  # Move buy amounts for signal generator into yaml - Maybe combine with percentage
  # change buy logic from signal generator to buy X amount up to max amount . Maybe track max buys in a separate config in db? I.e. SOL/ETH Max 30%, hype, sui max 20%
 # when restarting service, reproces trend data. Maybe store past 5 in db
+# double check rsi momentum is being counted when deciding on trade - or weight it higher
