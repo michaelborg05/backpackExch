@@ -6,6 +6,7 @@ TO DO
 # make dynamic stop losses as per chat gpt suggestions
 # review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
 # move TP/SL to database
+#fix circuit breaker logic. Changed baseline to always be highest price but now it means 5% profit will never hit as baseline keeps climbing
 
 Improvement: The "Mean Reversion" Check
 In your trend_cache.py, you currently track price_vs_vwap. A simple way to avoid peaks is to monitor the Distance from VWAP or the EMA20.

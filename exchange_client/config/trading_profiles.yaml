@@ -245,8 +245,8 @@ profiles:
 
   15m_MB_ATR:
     enabled: true
-    api_key_env: BP_API_KEY_1M
-    secret_env: BP_SECRET_1M
+    api_key_env: BP_API_KEY_1M_ATR
+    secret_env: BP_SECRET_1M_ATR
 
     take_profit_pct: 1.2
     stop_loss_pct: 0.7
