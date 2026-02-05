@@ -25,8 +25,8 @@ profiles:
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 600      # Wait 10min between signals for same symbol
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
-    min_volume_ratio: 1.25             # Require 25% above average volume
-    
+    min_volume_ratio: 1.1             # Require 10% above average volume
+
     # Trend filters
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
@@ -152,8 +152,8 @@ profiles:
     signal_timeframe: "60"           # 1h execution timeframe
     signal_cooldown_seconds: 1800    # 30min between signals
     min_signal_confidence: 75.0      # Higher bar for 1h
-    min_volume_ratio: 1.25            # 25% above average
-    
+    min_volume_ratio: 1.1            # 10% above average
+
     # ========================================
     # 4H TREND AUTHORITY VALIDATION
     # ========================================
@@ -269,8 +269,8 @@ profiles:
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 600      # Wait 10min between signals for same symbol
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
-    min_volume_ratio: 1.25             # Require 25% above average volume
-    
+    min_volume_ratio: 1.1             # Require 10% above average volume
+
     # Trend filters
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
