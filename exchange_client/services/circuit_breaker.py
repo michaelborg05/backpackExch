@@ -223,12 +223,15 @@ class CircuitBreakerService:
                     return False, None
 
 
-            # ⭐ KEY CHANGE: Use circuit_breaker_baseline if set, otherwise use starting_balance
-            # This allows profit limit resets without losing historical tracking
-            cb_baseline = snapshot.circuit_breaker_baseline or snapshot.starting_balance
-            
-            
-            # Calculate PnL from circuit breaker baseline
+            # ⭐ KEY CHANGE: Use circuit_breaker_baseline if set, otherwise use the higher of starting_balance and highest_balance
+            # This allows profit limit resets without losing historical tracking, and ensures we only drop off the max of the day 
+            # (i.e. If we are up 4% , I want to use that as the baseline for working out loss %)
+            if snapshot.circuit_breaker_baseline:
+                cb_baseline = snapshot.circuit_breaker_baseline
+            else:
+                cb_baseline = max(snapshot.starting_balance, snapshot.highest_balance)
+
+            # Calculate PnL from circuit breaker baseline/highest_
             cb_pnl_pct = ((current_value - cb_baseline) / cb_baseline) * 100
             
             # Also calculate actual daily PnL for logging (from starting_balance)
@@ -239,8 +242,8 @@ class CircuitBreakerService:
                 f"(Daily: {daily_pnl_pct:+.2f}% from ${snapshot.starting_balance:.2f})"
             )
             
-            # Check profit limit using circuit breaker baseline
-            if cb_pnl_pct >= float(config.max_daily_profit_pct):
+            # For Profit limit check, compare to starting balance
+            if daily_pnl_pct >= float(config.max_daily_profit_pct):
                 reason = (
                     f"Daily profit limit reached: {cb_pnl_pct:+.2f}% "
                     f"(limit: +{config.max_daily_profit_pct}%)"
@@ -269,7 +272,7 @@ class CircuitBreakerService:
                 )
                 return True, reason
             
-          
+            #for loss percent, compare to baseline
             if cb_pnl_pct <= -float(config.max_daily_loss_pct):
                 reason = (
                     f"Daily loss limit reached: {cb_pnl_pct:+.2f}% "

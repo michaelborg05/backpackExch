@@ -551,7 +551,7 @@ def create_daily_snapshot(
         starting_balance=starting_balance,
         highest_balance=starting_balance,
         lowest_balance=starting_balance,
-        circuit_breaker_baseline=starting_balance
+        circuit_breaker_baseline=None
     )
     
     db.add(snapshot)
@@ -575,7 +575,6 @@ def update_daily_snapshot(
     # Update high/low
     if current_balance > (snapshot.highest_balance or 0):
         snapshot.highest_balance = current_balance
-        snapshot.circuit_breaker_baseline = current_balance  # ⭐ Update baseline on new high
     
     if current_balance < (snapshot.lowest_balance or float('inf')):
         snapshot.lowest_balance = current_balance
