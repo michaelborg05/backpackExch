@@ -57,10 +57,20 @@ profiles:
           min_gap_pct: 0.0
       - type: "ema_cross"
         params: {fast: 20, slow: 50}
+      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
+        params:
+          ema: 20
+          direction: "rising"
+          min_slope_pct: 0.02
+      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
+        params:
+          ema: 50
+          direction: "rising"
+          min_slope_pct: 0.01
       - type: "rsi_threshold"
         params:
           period: 14
-          min_value: 48
+          min_value: 50
           use_momentum: true
           early_threshold: 40
       - type: "rsi_range"  # NEW: Block RSI indecision zone
@@ -70,7 +80,7 @@ profiles:
           invert: false
       - type: "price_vs_vwap"
         params: {}
-    min_entry_indicators_required: 4  # Require 4/5
+    min_entry_indicators_required: 5
 
     # ATR filter (volatility)
     use_atr_filter: false
@@ -317,7 +327,7 @@ profiles:
     min_entry_indicators_required: 4  # Require 4/5
 
     # ATR filter (volatility)
-    use_atr_filter: true
+    use_atr_filter: false
     atr_timeframe: "15m"
     atr_threshold: 1.03
     atr_filter_mode: "require_high"
