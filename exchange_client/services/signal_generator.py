@@ -206,6 +206,7 @@ class SignalGenerator:
         else:
             reasons.append(f"⚠️  Volume: {volume_reason}")
             confidence_score += self.volume_weight * 0.3  # Partial credit
+            return None  # HARD STOP - volume must be present
         
         # 7. ATR/VOLATILITY CHECK (optional)
         if self.profile.use_atr_filter:

@@ -84,6 +84,9 @@ class ReEntryManager:
             
             # After stop loss, allow but log it (signal generator should be more cautious)
             elif close_reason == "STOP_LOSS":
+                # Don't re-enter at higher price after stop
+                if current_trend.price > recent_exit.exit_price:
+                    return False, f"Re-entry rejected. Price higher than exit (Curr: {current_trend.price:.2f} > Exit: {recent_exit.exit_price:.2f})"
                 reset_ok, reset_reason = self._check_momentum_reset(
                     recent_exit,
                     current_trend
@@ -102,7 +105,7 @@ class ReEntryManager:
         db: Session,
         profile_name: str,
         symbol: str,
-        lookback_hours: int = 6  # Only check last 6 hours
+        lookback_hours: int = 2  # Only check last 2 hours
     ) -> Optional[Position]:
         """
         Get the most recent closed position for a symbol

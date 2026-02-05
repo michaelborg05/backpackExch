@@ -152,7 +152,7 @@ profiles:
     signal_timeframe: "60"           # 1h execution timeframe
     signal_cooldown_seconds: 1800    # 30min between signals
     min_signal_confidence: 75.0      # Higher bar for 1h
-    min_volume_ratio: 1.5            # 50% above average
+    min_volume_ratio: 1.25            # 25% above average
     
     # ========================================
     # 4H TREND AUTHORITY VALIDATION
