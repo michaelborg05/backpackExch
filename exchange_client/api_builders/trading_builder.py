@@ -510,20 +510,20 @@ class TradingService:
                 self._refresh_balance_cache_after_trade(order_response)
 
                 #Create TP limit order
-                tp_order = self.create_limit_order(
-                   position_id=position.id,
-                   symbol=position.symbol,
-                   side="ASK",
-                   quantity=str(position.quantity),
-                   price=str(position.tp_price),
-                   purpose="TAKE_PROFIT"
-                )
-                if tp_order:
-                    self.logger.info(
-                        f"TP order created: ID {tp_order.id}, "
-                        f"Position ID: {position.id}, "
-                        f"Price: {tp_order.price}, Quantity: {tp_order.quantity}"
-                    )
+                #tp_order = self.create_limit_order(
+                #   position_id=position.id,
+                #   symbol=position.symbol,
+                #   side="ASK",
+                #   quantity=str(position.quantity),
+                #   price=str(position.tp_price),
+                #   purpose="TAKE_PROFIT"
+                #)
+                #if tp_order:
+                #    self.logger.info(
+                #        f"TP order created: ID {tp_order.id}, "
+                #        f"Position ID: {position.id}, "
+                #        f"Price: {tp_order.price}, Quantity: {tp_order.quantity}"
+                #    )
 
             else:
                 from db.crud import close_positions_fifo
