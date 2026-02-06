@@ -61,8 +61,9 @@ class RegimeFilter:
         self.distribution_volume = 1.5      # High volume + down = distribution
         
         # 4. WHIPSAW DETECTION
-        self.whipsaw_reversal_threshold = 1.0   # Strong trend reversing
-        
+        self.whipsaw_threshold = 1.0  # Require very strong established UPTREND
+        self.reversal_threshold = -0.8  # Strong bearish reversal on LTF
+            
         # Cache results
         self._regime_cache: Dict[str, Tuple[MarketRegime, str, float]] = {}
         self._cache_ttl = 60
@@ -150,20 +151,30 @@ class RegimeFilter:
             if atr_ratio > self.atr_spike:
                 return True, f"Volatility spike - ATR {atr_ratio:.2f}x normal (stops unreliable)"
         
-        # 4. DANGEROUS WHIPSAW - Strong trend reversing sharply
-        # This is different from "15m leading" - this is established trend breaking
+         # 4. DANGEROUS WHIPSAW - Strong UPTREND breaking sharply
+        # IMPORTANT: Only block when a strong UPTREND is breaking down
+        # Do NOT block bullish recoveries from downtrends (that's 15m leading, which is GOOD)
+        #
+        # Philosophy:
+        # - Uptrend breaking = Danger (institutional exit, something broke)
+        # - Downtrend recovering = Opportunity (15m leading HTF into recovery)
+        #
+        # We're trading LONG only, so:
+        # - Block: Strong bullish HTF + bearish LTF reversal (uptrend breaking)
+        # - Allow: Bearish HTF + bullish LTF recovery (downtrend recovering - GOOD!)
+
         if confirm_trend is not None:
             primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
             confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-            
-            # Only flag if 60m has VERY strong established trend that's reversing
-            if primary_diff_pct > self.whipsaw_reversal_threshold:  # Strong bullish 60m
-                if confirm_diff_pct < -0.8:  # Strong bearish 15m (reversal)
-                    return True, f"Whipsaw reversal - strong uptrend breaking (60m +{primary_diff_pct:.2f}%, 15m {confirm_diff_pct:.2f}%)"
-            
-            elif primary_diff_pct < -self.whipsaw_reversal_threshold:  # Strong bearish 60m
-                if confirm_diff_pct > 0.8:  # Strong bullish 15m (reversal)
-                    return True, f"Whipsaw reversal - strong downtrend breaking (60m {primary_diff_pct:.2f}%, 15m +{confirm_diff_pct:.2f}%)"
+                        
+            # ONLY Case: Strong bullish HTF + Strong bearish LTF
+            # (Do NOT check the inverse - that's a recovery, not a whipsaw)
+            if primary_diff_pct > self.whipsaw_threshold:  # Strong bullish 60m
+                if confirm_diff_pct < self.reversal_threshold:  # Strong bearish 15m (reversal)
+                    return True, (
+                        f"Whipsaw reversal - strong uptrend breaking "
+                        f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
+                    )
         
         # 5. DISTRIBUTION PATTERN - High volume selling
         # (Only flag if we have volume data AND it's extreme)
