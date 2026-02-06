@@ -25,7 +25,7 @@ from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
 from db.session import SessionLocal
-from db.crud import close_positions_fifo, save_trade, open_position, close_position
+from db.crud import save_trade, open_position, close_position, save_order
 from utils.position_calculator import PositionCalculator
 
 class TradingService:
@@ -368,14 +368,14 @@ class TradingService:
         order = create_buy(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order, profile_name=profile_name)
         order = self._validate_market_rules(order)
-        return self.ExecuteOrder(order, source=source, reason_summary=reason_summary)
+        return self.ProcessMarketOrder(order, source=source, reason_summary=reason_summary)
 
     def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", profile_name: str = "default",position_id: str =None, reason_summary: List[str] = None, **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order, profile_name=profile_name)
         order = self._validate_market_rules(order)
-        return self.ExecuteOrder(order, source=source, position_id=position_id, reason_summary=reason_summary)
+        return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary) 
 
     # Order management
     def cancel_order(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None):
@@ -471,7 +471,146 @@ class TradingService:
         
         return order
 
-    def ExecuteOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None) -> OrderResponse:
+    def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None) -> OrderResponse:
+        try:
+            #execute order
+            order_response = self.ExecuteOrder(order)
+            if order_response is None:
+                return None
+            
+            # If order was successful, save to DB
+            db = SessionLocal()
+            saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary)
+            self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
+            # Open position if this is a BUY order
+            if order_response.side.upper() == "BID":
+                # Calculate position prices based on profile settings
+                tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
+                    entry_price=saved_trade.price,
+                    side=saved_trade.side,
+                    profile=self.profile  # You'll need to store the profile object
+                )
+                
+                # Open the position
+                position = open_position(
+                    db=db,
+                    trade=saved_trade,
+                    tp_price=tp_price,
+                    sl_price=sl_price,
+                    trailing_sl_price=trailing_sl_price,
+                    highest_price=saved_trade.price,
+                    lowest_price=saved_trade.price
+                )
+                self.logger.info(
+                    f"Position opened: ID {position.id}, "
+                    f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
+                )
+                
+                #Update balance cache before creating TP order
+                self._refresh_balance_cache_after_trade(order_response)
+
+                #Create TP limit order
+                tp_order = self.create_limit_order(
+                   position_id=position.id,
+                   symbol=position.symbol,
+                   side="ASK",
+                   quantity=str(position.quantity),
+                   price=str(position.tp_price),
+                   purpose="TAKE_PROFIT"
+                )
+                if tp_order:
+                    self.logger.info(
+                        f"TP order created: ID {tp_order.id}, "
+                        f"Position ID: {position.id}, "
+                        f"Price: {tp_order.price}, Quantity: {tp_order.quantity}"
+                    )
+
+            else:
+                from db.crud import close_positions_fifo
+                if position_id:
+                    try:
+                        position_id_int = int(position_id)
+                        closed_position = close_position(
+                            db=db,
+                            position_id=position_id_int,
+                            sell_trade=saved_trade,
+                            reason=source
+                        )
+
+                        closed_positions = [{
+                            'position_id': closed_position.id,
+                            'status': 'FULLY_CLOSED',
+                            'closed_quantity': closed_position.quantity,
+                            'profit': closed_position.profit,
+                            'profit_pct': (
+                                (closed_position.exit_price - closed_position.entry_price)
+                                / closed_position.entry_price
+                            ) * 100
+                        }]                                
+                        
+                        # Calculate P/L for logging
+                        entry_price = closed_position.entry_price
+                        exit_price = saved_trade.price
+                        quantity = saved_trade.quantity
+                        profit = (exit_price - entry_price) * quantity
+                        profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                        
+                        self.logger.info(
+                            f"Closed position {position_id}: {closed_position.symbol}, "
+                            f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)"
+                        )
+                    except ValueError as e:
+                        self.logger.error(f"Invalid position_id: {position_id}")
+                        # Fall back to FIFO
+                        closed_positions = close_positions_fifo(
+                            db=db,
+                            profile_name=self.profile.name,
+                            symbol=saved_trade.symbol,
+                            sell_trade=saved_trade,
+                            reason=source
+                        )
+                else:
+                    # No specific position - use FIFO
+                    closed_positions = close_positions_fifo(
+                        db=db,
+                        profile_name=self.profile.name,
+                        symbol=saved_trade.symbol,
+                        sell_trade=saved_trade,
+                        reason=source
+                    )
+                                            
+                if not closed_positions:
+                    self.logger.warning(
+                        f"No open positions found for {saved_trade.symbol} to close"
+                    )
+                else:
+                    # Log details of closed positions
+                    total_profit = sum(p['profit'] for p in closed_positions)
+                    
+                    summary = f"Closed {len(closed_positions)} position(s) for {saved_trade.symbol}:\n"
+                    for p in closed_positions:
+                        summary += (
+                            f"  - Position {p['position_id']}: {p['status']}, "
+                            f"Qty: {p['closed_quantity']}, "
+                            f"P/L: ${p['profit']:.2f} ({p['profit_pct']:+.2f}%)\n"
+                        )
+                    summary += f"Total P/L: ${total_profit:.2f}"
+                    
+                    self.logger.info(summary)
+                    order_response.profit = total_profit
+
+            # Refresh balance cache after trade
+            self._refresh_balance_cache_after_trade(order_response)
+
+        except Exception as db_error:
+            self.logger.error(f"Failed to save trade to database: {db_error}")
+        finally:
+            db.close()
+        
+        return order_response
+        
+
+    def ExecuteOrder(self, order: OrderExecuteRequest) -> OrderResponse:
         url = APIEndpoints.backpack_ExecuteOrder()
         
         # Convert model to dict, excluding None values
@@ -494,121 +633,11 @@ class TradingService:
                 self.logger.debug(f"API call for trade completed successfully\r\n{trade}")
                 order_response = OrderResponse(**trade)
                 self.logger.info(f"Trade executed: {order_response}")
-                # Save to database
-                db = SessionLocal()
-                try:
-                    saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary)
-                    self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
-                    # Open position if this is a BUY order
-                    if order_response.side.upper() == "BID":
-                        # Calculate position prices based on profile settings
-                        tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
-                            entry_price=saved_trade.price,
-                            side=saved_trade.side,
-                            profile=self.profile  # You'll need to store the profile object
-                        )
-                        
-                        # Open the position
-                        position = open_position(
-                            db=db,
-                            trade=saved_trade,
-                            tp_price=tp_price,
-                            sl_price=sl_price,
-                            trailing_sl_price=trailing_sl_price,
-                            highest_price=saved_trade.price,
-                            lowest_price=saved_trade.price
-                        )
-                        
-                        self.logger.info(
-                            f"Position opened: ID {position.id}, "
-                            f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
-                        )
-                    else:
-                        from db.crud import close_positions_fifo
-                        if position_id:
-                            try:
-                                position_id_int = int(position_id)
-                                closed_position = close_position(
-                                    db=db,
-                                    position_id=position_id_int,
-                                    sell_trade=saved_trade,
-                                    reason=source
-                                )
-
-                                closed_positions = [{
-                                    'position_id': closed_position.id,
-                                    'status': 'FULLY_CLOSED',
-                                    'closed_quantity': closed_position.quantity,
-                                    'profit': closed_position.profit,
-                                    'profit_pct': (
-                                        (closed_position.exit_price - closed_position.entry_price)
-                                        / closed_position.entry_price
-                                    ) * 100
-                                }]                                
-                                
-                                # Calculate P/L for logging
-                                entry_price = closed_position.entry_price
-                                exit_price = saved_trade.price
-                                quantity = saved_trade.quantity
-                                profit = (exit_price - entry_price) * quantity
-                                profit_pct = ((exit_price - entry_price) / entry_price) * 100
-                                
-                                self.logger.info(
-                                    f"Closed position {position_id}: {closed_position.symbol}, "
-                                    f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)"
-                                )
-                            except ValueError as e:
-                                self.logger.error(f"Invalid position_id: {position_id}")
-                                # Fall back to FIFO
-                                closed_positions = close_positions_fifo(
-                                    db=db,
-                                    profile_name=self.profile.name,
-                                    symbol=saved_trade.symbol,
-                                    sell_trade=saved_trade,
-                                    reason=source
-                                )
-                        else:
-                            # No specific position - use FIFO
-                            closed_positions = close_positions_fifo(
-                                db=db,
-                                profile_name=self.profile.name,
-                                symbol=saved_trade.symbol,
-                                sell_trade=saved_trade,
-                                reason=source
-                            )
-                                                    
-                        if not closed_positions:
-                            self.logger.warning(
-                                f"No open positions found for {saved_trade.symbol} to close"
-                            )
-                        else:
-                            # Log details of closed positions
-                            total_profit = sum(p['profit'] for p in closed_positions)
-                            
-                            summary = f"Closed {len(closed_positions)} position(s) for {saved_trade.symbol}:\n"
-                            for p in closed_positions:
-                                summary += (
-                                    f"  - Position {p['position_id']}: {p['status']}, "
-                                    f"Qty: {p['closed_quantity']}, "
-                                    f"P/L: ${p['profit']:.2f} ({p['profit_pct']:+.2f}%)\n"
-                                )
-                            summary += f"Total P/L: ${total_profit:.2f}"
-                            
-                            self.logger.info(summary)
-                            order_response.profit = total_profit
-
-                    # Refresh balance cache after trade
-                    self._refresh_balance_cache_after_trade(order_response)
-
-                except Exception as db_error:
-                    self.logger.error(f"Failed to save trade to database: {db_error}")
-                finally:
-                    db.close()
-                
                 return order_response
             else:
                 self.logger.error(f"API call for trade failed\r\n{trade}")
                 raise ExchangeAPIError("Empty response from exchange")
+            
         except ExchangeAPIError as e:
             # Log and re-raise as HTTPException for FastAPI
             self.logger.error(f"Exchange API error: {e.message}")
@@ -623,6 +652,7 @@ class TradingService:
                 status_code=500,
                 detail=f"Trading service error: {str(e)}"
             )
+        
         
     def _refresh_balance_cache_after_trade(self, order_response: OrderResponse):
         """
@@ -656,6 +686,59 @@ class TradingService:
                 f"Failed to refresh balance cache after trade: {e}. "
                 "Cache will be updated on next monitoring cycle."
             )        
+
+
+    def create_limit_order(self,
+        position_id: int,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+        purpose: str,
+        profile_name: str = "default"
+    ) -> OrderResponse:
+        """
+        Create a limit order in the database.
+
+        Args:
+            position_id: The ID of the position associated with the order.
+            side: The side of the order (BID/ASK).
+            quantity: The quantity of the asset to trade.
+            price: The limit price for the order.
+            source: what triggered the order (TAKE_PROFIT/STOP_LOSS/etc.).
+
+        Returns:
+            The created Order object.
+        """
+
+        #Create initial order
+        if side.upper() == "BID":
+            order = create_buy(symbol, quantity, price)
+        else:
+            order = create_sell(symbol, quantity, price)
+        
+        #Adjust quantity based on balances and market rules
+        order = self._validate_and_adjust_order(order, profile_name=profile_name)
+        order = self._validate_market_rules(order)
+
+        #Execute order
+        try:
+            order_response = self.ExecuteOrder(order)
+            if order_response is None:
+                return None
+        
+            # If order was successful, save to orders table
+            db = SessionLocal()
+            saved_order = save_order(db, order_response, self.profile.name, position_id, purpose=purpose)
+            self.logger.info(f"Order saved to database: ID {saved_order.id}")
+        except Exception as db_error:
+            self.logger.error(f"Failed to save order to database: {db_error}")
+        finally:
+            db.close()
+
+        return order_response
+
+
 
     def validate_balance_for_trade(self,
         sale_action: str,

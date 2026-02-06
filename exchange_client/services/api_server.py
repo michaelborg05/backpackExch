@@ -385,7 +385,10 @@ async def place_order(
                 apiserver_logger.debug(f"Balance pre-validation failed: {e}")
         
         # Proceed with trade - trading_builder will adjust quantity if needed
-        trading = TradingService()  
+        profile_manager = get_profile_manager()
+        profile = profile_manager.get(request.profile_name)
+        trading = TradingService(profile)
+
 
         if request.side.lower() == "buy":
             result = trading.order_buy(

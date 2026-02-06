@@ -236,3 +236,44 @@ class TrendHistory(Base):
         # Prevent exact duplicates
         UniqueConstraint('symbol', 'timeframe', 'data_timestamp', name='uq_trend_history_entry'),
     )
+
+class Order(Base):
+    __tablename__ = "orders"
+    
+    id = Column(Integer, primary_key=True)
+    profile_name = Column(String, nullable=False, index=True)
+    position_id = Column(Integer, ForeignKey('positions.id'), nullable=True, index=True)
+    
+    # Order details
+    exchange_order_id = Column(String, unique=True, index=True)  # Backpack's order ID
+    symbol = Column(String, nullable=False)
+    side = Column(String, nullable=False)  # BID/ASK
+    exchange = Column(String, default="backpack")
+    
+    quantity = Column(Numeric(20, 8), nullable=False)
+    price = Column(Numeric(20, 8), nullable=True)  # NULL for market orders
+    
+    # Lifecycle
+    status = Column(String, nullable=False, default="PENDING")  # PENDING, FILLED, PARTIALLY_FILLED, CANCELLED, REJECTED, EXPIRED
+    purpose = Column(String, nullable=False)  # TAKE_PROFIT, STOP_LOSS, TRAILING_STOP, ENTRY
+    
+    # Execution tracking
+    filled_quantity = Column(Numeric(20, 8), default=0)
+    average_fill_price = Column(Numeric(20, 8), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    filled_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    position = relationship("Position", backref="orders")
+    trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)  # Link when filled
+    
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'FILLED', 'PARTIALLY_FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED')", name="valid_order_status"),
+        CheckConstraint("side IN ('BID', 'ASK')", name="valid_order_side"),
+        CheckConstraint("purpose IN ('TAKE_PROFIT', 'STOP_LOSS', 'TRAILING_STOP', 'ENTRY')", name="valid_order_purpose"),
+        Index('ix_orders_status_profile', 'status', 'profile_name'),
+    )

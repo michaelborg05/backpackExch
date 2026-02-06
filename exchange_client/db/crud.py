@@ -4,7 +4,7 @@ from sqlalchemy import func
 from decimal import Decimal
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
-from db.models import Trade, Position
+from db.models import Trade, Position, Order
 from models.trade import OrderResponse
 from models.trading_profile import TradingProfile
 from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
@@ -34,6 +34,28 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
     db.commit()
     db.refresh(trade)
     return trade
+
+def save_order(db: Session, order: OrderResponse, profile_name: str, position_id: int, purpose: str = None) -> Trade:
+    """Save an order to the database"""
+
+    order = Order(
+        profile_name=profile_name,
+        exchange_order_id=str(order.id),
+        symbol=order.symbol,
+        side=order.side.upper(),
+        position_id=position_id,
+        quantity=Decimal(str(order.quantity)),
+        price=Decimal(str(order.price)) if order.price is not None else Decimal('0'),
+        status="PENDING",
+        exchange="backpack",
+        purpose=purpose,
+        filled_quantity=0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    return order
 
 def open_position(
     db: Session, 

@@ -18,6 +18,8 @@ class OrderRequest(BaseModel):
     symbol: str
     quantity: str
     side: str  # "buy" or "sell"
+    profile_name: str = "default"
+    price: str = None
 
 # Request Models
 class OrderExecuteRequest(BaseModel):
