@@ -531,15 +531,25 @@ class TrendCache:
                 min_rsi = params.get("min", 30)
                 max_rsi = params.get("max", 70)
                 invert = params.get("invert", False)
-                
-                in_range = min_rsi <= trend.rsi <= max_rsi
-                
-                if invert:
-                    is_bullish = in_range
-                    msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'in' if in_range else 'outside'} {min_rsi}-{max_rsi})"
+                momentum_override = params.get('momentum_override_threshold', None)
+                rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
+
+                if momentum_override is not None and rsi_momentum is not None:
+                    if abs(rsi_momentum) >= momentum_override:
+                        is_bullish = rsi_momentum > 0 
+                        msg = (
+                            f"RSI momentum override {'✓' if is_bullish else '✗'} "
+                            f"(RSI {trend.rsi:.1f}, momentum {rsi_momentum:+.2f}, "
+                            f"direction {rsi_direction})"
+                        )
                 else:
-                    is_bullish = not in_range
-                    msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'outside' if is_bullish else 'in'} indecision {min_rsi}-{max_rsi})"
+                    in_range = min_rsi <= trend.rsi <= max_rsi
+                    if invert:
+                        is_bullish = in_range
+                        msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'in' if in_range else 'outside'} {min_rsi}-{max_rsi})"
+                    else:
+                        is_bullish = not in_range
+                        msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'outside' if is_bullish else 'in'} indecision {min_rsi}-{max_rsi})"
                 
                 results.append((is_bullish, msg))
             

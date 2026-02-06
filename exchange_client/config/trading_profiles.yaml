@@ -78,6 +78,7 @@ profiles:
           min: 46
           max: 52
           invert: false
+          momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
       - type: "price_vs_vwap"
         params: {}
     min_entry_indicators_required: 6
@@ -202,6 +203,7 @@ profiles:
           min: 48
           max: 52
           invert: false  # Block when IN this range
+          momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
       
       # 6. Prevent EMA20/EMA50 crossover on 4h (NEW)
       # Blocks if EMAs are too close (within 0.3%)
@@ -322,6 +324,7 @@ profiles:
           min: 46
           max: 52
           invert: false
+          momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
       - type: "price_vs_vwap"
         params: {}
     min_entry_indicators_required: 4  # Require 4/5
