@@ -124,3 +124,17 @@ class SystemOrderType(str, Enum):
     LIQUIDATE_POSITION_ON_BOOK = "LiquidatePositionOnBook"
     LIQUIDATE_POSITION_ON_BACKSTOP = "LiquidatePositionOnBackstop"
     ORDER_BOOK_CLOSED = "OrderBookClosed"
+
+class MarketRegime(Enum):
+    """Market regime classification"""
+    SAFE = "safe"               # ✅ Safe to trade
+    CHOPPY = "choppy"           # ⚠️ Whipsaw risk - wait for clarity
+    HIGH_RISK = "high_risk"     # 🚫 Dangerous - don't trade
+    EXPANDING = "expanding"     # 🚀 Strong momentum - best entries
+
+class TrendState(Enum):
+    """Trend health state for each timeframe"""
+    EXPANDING = "expanding"     # Trend strengthening
+    HEALTHY = "healthy"         # Trend stable
+    DECAYING = "decaying"       # Trend weakening
+    BROKEN = "broken"          # Trend failed
