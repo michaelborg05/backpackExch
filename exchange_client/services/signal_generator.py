@@ -206,7 +206,9 @@ class SignalGenerator:
         else:
             reasons.append(f"⚠️  Volume: {volume_reason}")
             confidence_score += self.volume_weight * 0.3  # Partial credit
-            #return None  # HARD STOP - volume must be present
+            if "Less than half" in volume_reason:
+                self.logger.debug(f"{symbol}: ❌ Volume check failed - {volume_reason}")
+                return None  # HARD STOP - volume must be present
         
         # 7. ATR/VOLATILITY CHECK (optional)
         if self.profile.use_atr_filter:
@@ -248,6 +250,7 @@ class SignalGenerator:
         else:
             strength = SignalStrength.WEAK
 
+        reasons.append(f"Score {confidence_pct:.1f}% ({strength.value})")
 
         # Get current price
         current_price = self.price_cache.get_price(symbol)
@@ -350,10 +353,17 @@ class SignalGenerator:
                 "volume_ratio": float(volume_ratio)
             }, f"{volume_ratio:.1f}x average ({self.min_volume_ratio}x required)"
         else:
-            return {
-                "has_volume": False,
-                "volume_ratio": float(volume_ratio)
-            }, f"Only {volume_ratio:.1f}x average (need {self.min_volume_ratio}x)"
+            # If volume is less than 50% of the minimum required
+            if volume_ratio < self.min_volume_ratio * 0.5:
+                return {
+                    "has_volume": False,
+                    "volume_ratio": float(volume_ratio)
+                }, f"Only {volume_ratio:.1f} - Less than half of minimum (need {self.min_volume_ratio}x)"
+            else:
+                return {
+                    "has_volume": False,
+                    "volume_ratio": float(volume_ratio)
+                }, f"Only {volume_ratio:.1f}x average (need {self.min_volume_ratio}x)"
     
     def _check_atr(self, symbol: str) -> Tuple[dict, str]:
         """Check ATR/volatility conditions"""

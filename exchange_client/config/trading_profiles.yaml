@@ -159,7 +159,7 @@ profiles:
     # MULTI-TIMEFRAME STRATEGY (4h + 1h)
     # ========================================
     # Signal generation on 1h bars
-    enable_signal_generation: true
+    enable_signal_generation: false
     signal_timeframe: "60"           # 1h execution timeframe
     signal_cooldown_seconds: 1800    # 30min between signals
     min_signal_confidence: 75.0      # Higher bar for 1h

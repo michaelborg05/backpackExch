@@ -436,7 +436,7 @@ class TrendCache:
                             trend.ema20 > trend.ema50 and 
                             slope_pct > min_slope_pct
                         )
-                        msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f}, slope: {slope_direction})"
+                        msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f} - slope: {slope_direction})"
                 else:
                     is_bullish = trend.ema20 > trend.ema50
                     msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f})"
@@ -457,7 +457,7 @@ class TrendCache:
                     # 1. RSI > min_value (traditional - strong)
                     # 2. RSI > early_threshold AND increasing (catching early momentum)
                     is_bullish = (
-                        trend.rsi > min_rsi or 
+                        (trend.rsi > min_rsi and rsi_direction in ("increasing", "stable")) or 
                         (trend.rsi > early_threshold and rsi_direction == "increasing")
                     )
                     
@@ -465,9 +465,9 @@ class TrendCache:
                     if trend.rsi > min_rsi:
                         msg = f"RSI: ✓ ({trend.rsi:.1f} > {min_rsi}) - {rsi_direction} momentum {rsi_momentum:+.1f}"
                     elif trend.rsi > early_threshold and rsi_direction == "increasing":
-                        msg = f"RSI: ✓ ({trend.rsi:.1f} {rsi_direction}, momentum: {rsi_momentum:+.1f})"
+                        msg = f"RSI: ✓ ({trend.rsi:.1f} {rsi_direction} momentum: {rsi_momentum:+.1f})"
                     else:
-                        msg = f"RSI: ✗ ({trend.rsi:.1f}, {rsi_direction or 'no momentum'})"
+                        msg = f"RSI: ✗ ({trend.rsi:.1f} {rsi_direction or 'no momentum'})"
                 else:
                     is_bullish = trend.rsi > min_rsi
                     msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} vs {min_rsi})"
@@ -492,7 +492,7 @@ class TrendCache:
                 gap_pct = ((trend.price - ema_value) / ema_value) * 100
                 
                 is_bullish = gap_pct >= min_gap_pct
-                msg = f"Price vs EMA{ema_type}: {'✓' if is_bullish else '✗'} ({gap_pct:+.2f}% gap, need {min_gap_pct:+.2f}%)"
+                msg = f"Price vs EMA{ema_type}: {'✓' if is_bullish else '✗'} ({gap_pct:+.2f}% gap - need {min_gap_pct:+.2f}%)"
                 results.append((is_bullish, msg))
             
             elif indicator_type == "ema_slope":
@@ -519,7 +519,7 @@ class TrendCache:
                         is_bullish = abs(slope_pct) <= min_slope_pct
                         direction = "flat"
                     
-                    msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction}, {slope_pct:+.3f}%)"
+                    msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction} {slope_pct:+.3f}%)"
                 
                 results.append((is_bullish, msg))
             
@@ -544,8 +544,8 @@ class TrendCache:
                         if abs(rsi_momentum) >= momentum_override:
                             is_bullish = rsi_momentum > 0 
                             msg = (
-                                f"RSI momentum override {'✓' if is_bullish else '✗'} "
-                                f"(RSI {trend.rsi:.1f}, momentum {rsi_momentum:+.2f}, "
+                                f"RSI range: momentum override {'✓' if is_bullish else '✗'} "
+                                f"(RSI {trend.rsi:.1f}, momentum {rsi_momentum:+.2f} - "
                                 f"direction {rsi_direction})"
                             )
                         else: 
@@ -567,10 +567,10 @@ class TrendCache:
                 
                 if mode == "min":
                     is_bullish = gap_pct >= min_gap_pct
-                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap, need >{min_gap_pct}%)"
+                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need >{min_gap_pct}%)"
                 else:  # mode == "max"
                     is_bullish = gap_pct <= min_gap_pct
-                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap, need <{min_gap_pct}%)"
+                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need <{min_gap_pct}%)"
                 
                 results.append((is_bullish, msg))
             
@@ -583,7 +583,7 @@ class TrendCache:
                 gap_pct = abs((trend.price - trend.ema50) / trend.ema50) * 100
                 
                 is_bullish = gap_pct > max_gap_pct
-                msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50, need >{max_gap_pct}%)"
+                msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50 - need >{max_gap_pct}%)"
                 results.append((is_bullish, msg))
         
         # Count bullish indicators
