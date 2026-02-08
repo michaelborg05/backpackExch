@@ -462,7 +462,7 @@ class TrendCache:
                     )
                     
                     # Build descriptive message
-                    if trend.rsi > min_rsi:
+                    if trend.rsi > min_rsi  and rsi_direction in ("increasing", "stable"):
                         msg = f"RSI: ✓ ({trend.rsi:.1f} > {min_rsi}) - {rsi_direction} momentum {rsi_momentum:+.1f}"
                     elif trend.rsi > early_threshold and rsi_direction == "increasing":
                         msg = f"RSI: ✓ ({trend.rsi:.1f} {rsi_direction} momentum: {rsi_momentum:+.1f})"
@@ -562,6 +562,7 @@ class TrendCache:
                 # mode="max": Require gap < min_gap_pct (not overextended)
                 min_gap_pct = params.get("min_gap_pct", 0.3)
                 mode = params.get("mode", "min")
+                max_gap_pct = params.get("max_gap_pct", 0.3)
                 
                 gap_pct = abs((trend.ema20 - trend.ema50) / trend.ema50) * 100
                 
@@ -569,9 +570,9 @@ class TrendCache:
                     is_bullish = gap_pct >= min_gap_pct
                     msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need >{min_gap_pct}%)"
                 else:  # mode == "max"
-                    is_bullish = gap_pct <= min_gap_pct
-                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need <{min_gap_pct}%)"
-                
+                    is_bullish = gap_pct <= max_gap_pct
+                    msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need <{max_gap_pct}%)"
+
                 results.append((is_bullish, msg))
             
             elif indicator_type == "price_ema50_range":

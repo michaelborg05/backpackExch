@@ -41,7 +41,7 @@ profiles:
       - type: "rsi_threshold"
         params: 
           period: 14
-          min_value: 50
+          min_value: 52
           use_momentum: true
           early_threshold: 40
       - type: "price_vs_vwap"
@@ -81,7 +81,7 @@ profiles:
           momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
       - type: "price_vs_vwap"
         params: {}
-    min_entry_indicators_required: 6
+    min_entry_indicators_required: 7
 
     # ATR filter (volatility)
     use_atr_filter: false
@@ -277,7 +277,7 @@ profiles:
     use_market_regime_filter: false
 
     # 🎯 SIGNAL GENERATION SETTINGS (NEW)
-    enable_signal_generation: true    # Enable automated signal generation
+    enable_signal_generation: false    # Enable automated signal generation
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 600      # Wait 10min between signals for same symbol
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
@@ -288,20 +288,23 @@ profiles:
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
       - type: "ema_cross"
-        params: {fast: 20, slow: 50}
-      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
-        params:
-          ema: 20
-          direction: "rising"
-          min_slope_pct: 0.02
-      - type: "rsi_threshold"
         params: 
-          period: 14
-          min_value: 50
-          use_momentum: true
-          early_threshold: 40
-      - type: "price_vs_vwap"
-        params: {}
+          fast: 20
+          slow: 50
+          use_slope: true
+          min_slope_pct: 0.01
+      - type: ema_gap
+        params:
+          min_gap_pct: 0.3
+          mode: min
+      - type: ema_gap
+        params:
+          min_gap_pct: 3.0
+          mode: max
+      - type: rsi_threshold
+        params:
+          min_value: 52
+          use_momentum: false
     min_indicators_required: 3  # Require 3/4 (stricter)
 
     use_entry_filter: true
@@ -310,30 +313,20 @@ profiles:
       - type: "price_vs_ema"  # NEW: Price must be at/above EMA20
         params:
           ema: 20
-          min_gap_pct: 0.0
-      - type: "ema_cross"
-        params: {fast: 20, slow: 50}
-      - type: "rsi_threshold"
-        params:
-          period: 14
-          min_value: 48
-          use_momentum: true
-          early_threshold: 40
+          min_gap_pct: -1.0
       - type: "rsi_range"  # NEW: Block RSI indecision zone
         params:
           min: 46
           max: 52
           invert: false
           momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
-      - type: "price_vs_vwap"
-        params: {}
     min_entry_indicators_required: 4  # Require 4/5
 
     # ATR filter (volatility)
     use_atr_filter: false
     atr_timeframe: "15m"
-    atr_threshold: 1.03
-    atr_filter_mode: "require_high"
+    atr_threshold: 1.15
+    atr_filter_mode: "require_low"
     # Trend-based exit (intelligent)
     use_trend_invalidation_exit: true
     min_position_age_for_trend_check: 6  # hours
