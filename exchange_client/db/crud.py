@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 from db.models import Trade, Position, Order
-from models.trade import OrderResponse
+from models.trade import OrderResponse, OrderHistoryResponse
 from models.trading_profile import TradingProfile
 from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
 
@@ -35,6 +35,32 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
     db.refresh(trade)
     return trade
 
+def save_limit_trade(db: Session, order: OrderHistoryResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None) -> Trade:
+    """Save a limit trade to the database"""
+
+    if order.price is None or order.price == "0":
+        # Calculate average price from executed values
+        unit_price = Decimal(order.executedQuoteQuantity) / Decimal(order.executedQuantity)
+    else:
+        unit_price = Decimal(str(order.price))
+
+    trade = Trade(
+        profile_name=profile_name,
+        order_id=str(order.id),
+        symbol=order.symbol,
+        side=order.side.upper(),
+        quantity=Decimal(str(order.executedQuantity)),
+        price=Decimal(str(unit_price)),
+        exchange="backpack",
+        reason=reason,
+        created_at=datetime.now(timezone.utc),
+        reason_summary=reason_summary
+    )
+    db.add(trade)
+    db.commit()
+    db.refresh(trade)
+    return trade
+
 def save_order(db: Session, order: OrderResponse, profile_name: str, position_id: int, purpose: str = None) -> Trade:
     """Save an order to the database"""
 
@@ -46,7 +72,7 @@ def save_order(db: Session, order: OrderResponse, profile_name: str, position_id
         position_id=position_id,
         quantity=Decimal(str(order.quantity)),
         price=Decimal(str(order.price)) if order.price is not None else Decimal('0'),
-        status="PENDING",
+        status="New",
         exchange="backpack",
         purpose=purpose,
         filled_quantity=0,
@@ -177,6 +203,25 @@ def close_invalid_position(
     db: Session,
     position_id: int,
     reason: str = "INVALID_POSITION"
+) -> Position:
+    """Close a position that's invalid (no sell trade)"""
+    position = db.query(Position).filter(Position.id == position_id).first()
+    if not position:
+        raise ValueError(f"Position {position_id} not found")
+    
+    position.status = "CLOSED"
+    position.close_reason = reason
+    position.closed_at = datetime.now(timezone.utc)
+    position.profit = None  # No profit calculation since we don't have sell details
+    
+    db.commit()
+    db.refresh(position)
+    return position
+
+def close_limit_position(
+    db: Session,
+    position_id: int,
+    reason: str
 ) -> Position:
     """Close a position that's invalid (no sell trade)"""
     position = db.query(Position).filter(Position.id == position_id).first()
@@ -342,6 +387,41 @@ def get_open_positions_for_symbol(
         .order_by(Position.created_at.asc())
         .all()
     )
+
+def get_active_orders(db: Session, profile_name: str, symbol: str = None) -> List[Order]:
+    """Get all open positions for a profile"""
+    active_statuses = ["New", "PartiallyFilled", "TriggerPending"]
+
+    query = db.query(Order).filter(
+        Order.profile_name == profile_name,
+        Order.status.in_(active_statuses)
+    )
+
+    if symbol:
+        query = query.filter(Order.symbol == symbol)
+
+    return query.all()
+
+def update_order(db: Session, profile_name: str, exch_order_id: str, status: str) -> List[Order]:
+    """Update an existing order"""
+
+    order = db.query(Order).filter(
+        Order.profile_name == profile_name,
+        Order.exchange_order_id == exch_order_id
+    ).first()
+
+    if not order:
+        raise ValueError(f"Order {exch_order_id} not found")
+
+    if order.status == status:
+        # Status already matching
+        return order
+
+    order.status = status
+
+    db.commit()
+    db.refresh(order)
+    return order
 
 def get_profile_by_name(db: Session, name: str) -> Optional[TradingProfileDB]:
     """Get a trading profile by name"""

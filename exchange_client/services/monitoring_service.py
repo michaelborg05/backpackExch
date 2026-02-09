@@ -1,9 +1,11 @@
+import json
 import time
 import threading
 from typing import List,  Dict,Optional
+from services.position_manager import get_position_manager
 from utils.logging import log_manager
 from utils.config import Config
-from utils.constants import MessagePriority
+from utils.constants import MessagePriority, OrderStatus
 from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price, get_market_info
@@ -28,10 +30,14 @@ from cache.trend_cache_warmup import warmup_trend_cache
 from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
+    save_limit_trade,
+    save_trade,
     update_position_trailing_stop,
     close_invalid_position,
     update_high_low,
-    get_active_symbols
+    get_active_symbols,
+    get_active_orders,
+    update_order
 )
 
 class MonitoringService:
@@ -163,6 +169,9 @@ class MonitoringService:
                     self._monitor_circuit_breakers()
                     self._circuit_breaker_counter = 0
 
+                #monitor open orders
+                self._monitor_orders()
+
                 # Monitor open balances and check for SL/TP/Trailing SL
                 self._monitor_open_positions()
 
@@ -263,6 +272,41 @@ class MonitoringService:
             self.logger.info(f"Market info initialized for {len(self.tickers)} tickers")
         except Exception as e:
             self.logger.error(f"Error initializing market info: {e}")
+
+    def _monitor_orders(self):
+        # Check active orders 
+        profile_manager = get_profile_manager()
+
+        if profile_manager is None:
+            self.logger.error("Profile manager not initialized. Skipping open position monitoring.")
+            return 
+        
+        # Use the context manager - session is automatically closed
+        profiles = profile_manager._profiles.values()
+        for profile in profiles:
+            with get_db_session() as db:
+                #get open orders from DB
+                open_orders = get_active_orders(db, profile.name)
+
+                for order in open_orders:
+                    trading = TradingService(profile)
+                    order_response = trading.process_limit_order(order=order, position_id=order.position_id)
+                    if order_response and order_response.status == OrderStatus.FILLED:
+                        icon = "🎯" if order.purpose == "TAKE_PROFIT" else "❌"
+                        self._send_telegram(
+                            f"{icon} Position Closed [{profile.name}]\n"
+                            f"Symbol: {order_response.symbol}\n"
+                            f"Reason: {order.purpose}\n"
+                            f"Quantity: {order_response.executedQuantity:.4f}\n"
+                            f"P/L: ${order_response.profit:.2f}",
+                            MessagePriority.NORMAL
+                        )
+                    #else:
+                    #    self.logger.warning(f"Order {order.exchange_order_id} not filled.")
+
+    def close_open_order(self):
+        """Close an open order."""
+        pass
 
     def _monitor_open_positions(self):
         """Check open positions for TP / SL / trailing SL conditions"""

@@ -11,7 +11,9 @@ from utils.constants import (
     SelfTradePrevention,
     OrderStatus,
     SlippageToleranceType,
-    MarketType
+    MarketType,
+    ExpiryReason,
+    SystemOrderType
 )
 
 class OrderRequest(BaseModel):
@@ -213,4 +215,49 @@ def create_sell(symbol: str, quantity: str = None, price: str = None, **kwargs) 
     return OrderExecuteRequest(**params)
 
 
+class OrderHistoryResponse(BaseModel):
+    id: str
+    createdAt: str
 
+    executedQuantity: Optional[Decimal] = None
+    executedQuoteQuantity: Optional[Decimal] = None
+
+    expiryReason: Optional[ExpiryReason] = None
+
+    orderType: OrderType
+    postOnly: Optional[bool] = None
+
+    price: Optional[Decimal] = None
+    quantity: Optional[Decimal] = None
+    quoteQuantity: Optional[Decimal] = None
+
+    selfTradePrevention: SelfTradePrevention
+
+    status: OrderStatus
+    side: Side
+
+    stopLossTriggerPrice: Optional[str] = None
+    stopLossLimitPrice: Optional[Decimal] = None
+    stopLossTriggerBy: Optional[str] = None
+
+    symbol: str
+
+    takeProfitTriggerPrice: Optional[str] = None
+    takeProfitLimitPrice: Optional[Decimal] = None
+    takeProfitTriggerBy: Optional[str] = None
+
+    timeInForce: TimeInForce
+
+    triggerBy: Optional[str] = None
+    triggerPrice: Optional[str] = None
+    triggerQuantity: Optional[str] = None
+
+    clientId: Optional[int] = None
+
+    systemOrderType: Optional[SystemOrderType] = None
+    strategyId: Optional[str] = None
+
+    slippageTolerance: Optional[Decimal] = None
+    slippageToleranceType: Optional[SlippageToleranceType] = None
+
+    profit: Optional[str] = Field(None, alias="profit")
