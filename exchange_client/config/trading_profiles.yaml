@@ -81,7 +81,7 @@ profiles:
           momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
       - type: "price_vs_vwap"
         params: {}
-    min_entry_indicators_required: 7
+    min_entry_indicators_required: 6
 
     # ATR filter (volatility)
     use_atr_filter: false
