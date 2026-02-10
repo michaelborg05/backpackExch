@@ -31,8 +31,11 @@ profiles:
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
-      - type: "ema_cross"
-        params: {fast: 20, slow: 50}
+      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
+        params:
+          ema: 50
+          direction: "not_falling"
+          min_slope_pct: 0.01
       - type: "ema_slope"  # NEW: Ensure 60m trend is rising
         params:
           ema: 20
@@ -55,8 +58,7 @@ profiles:
         params:
           ema: 20
           min_gap_pct: 0.0
-      - type: "ema_cross"
-        params: {fast: 20, slow: 50}
+          max_gap_pct: 1.5
       - type: "ema_slope"  # NEW: Ensure 15m trend is rising
         params:
           ema: 20
@@ -65,23 +67,18 @@ profiles:
       - type: "ema_slope"  # NEW: Ensure 15m trend is rising
         params:
           ema: 50
-          direction: "rising"
+          direction: "not_falling"
           min_slope_pct: 0.01
       - type: "rsi_threshold"
         params:
           period: 14
-          min_value: 55
+          min_value: 53
           use_momentum: true
           early_threshold: 40
-      - type: "rsi_range"  # NEW: Block RSI indecision zone
-        params:
-          min: 46
-          max: 52
-          invert: false
-          momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
+          hard_stop: true
       - type: "price_vs_vwap"
         params: {}
-    min_entry_indicators_required: 6
+    min_entry_indicators_required: 4
 
     # ATR filter (volatility)
     use_atr_filter: false

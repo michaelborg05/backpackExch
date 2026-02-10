@@ -1,11 +1,8 @@
 TO DO
-# change TP to a limit order . Need to track open orders and sell if it hits SL or goes above TP and doesnt trigger
 # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
-# alternative option is if there is a balance and no open position, create a position with current price and then track SL/TP from there 
-# possibly sell as MAX if no other positions available
 # make dynamic stop losses as per chat gpt suggestions
 # review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
-# move TP/SL to database
+# move TP/SL limits to database
 
 Improvement: The "Mean Reversion" Check
 In your trend_cache.py, you currently track price_vs_vwap. A simple way to avoid peaks is to monitor the Distance from VWAP or the EMA20.
@@ -23,6 +20,7 @@ No need
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish
  # remove trades table. not required unless i use this for limit orders to track whats open?
+# possibly sell as MAX if no other positions available
  
  DONE
 # Add arming of trailing stop only after x percent profit
@@ -71,3 +69,4 @@ No need
 # double check rsi momentum is being counted when deciding on trade - or weight it higher
 # change circuit breaker  baseline to highest price so it will only ever lose % from highest portfolio price#fix circuit breaker logic. Changed baseline to always be highest price but now it means 5% profit will never hit as baseline keeps climbing
 #fix circuit breaker logic. Changed baseline to always be highest price but now it means 5% profit will never hit as baseline keeps climbing
+# change TP to a limit order . Need to track open orders and sell if it hits SL or goes above TP and doesnt trigger

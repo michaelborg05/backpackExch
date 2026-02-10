@@ -254,9 +254,9 @@ class TrendCache:
         momentum = current_rsi - previous_rsi
         
         # Determine direction
-        if momentum > 0.5:  # Increasing threshold
+        if momentum > 1:  # Increasing threshold
             direction = "increasing"
-        elif momentum < -0.5:  # Decreasing threshold
+        elif momentum < -1:  # Decreasing threshold
             direction = "decreasing"
         else:
             direction = "stable"
@@ -408,11 +408,13 @@ class TrendCache:
         - Both work identically
         """
         results = []
-        
+        hard_stop_failures = []
+
         for indicator_config in indicators:
             indicator_type = indicator_config.get("type")
             params = indicator_config.get("params", {})
-            
+            hard_stop = params.get("hard_stop", False)  
+
             # === BACKWARD COMPATIBILITY: ema_alignment → ema_cross ===
             if indicator_type == "ema_alignment":
                 indicator_type = "ema_cross"  # Treat as ema_cross
@@ -442,6 +444,8 @@ class TrendCache:
                     msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f})"
                 
                 results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
                 
             elif indicator_type == "rsi_threshold":
                 # Get RSI momentum (from actual changes only)
@@ -458,7 +462,7 @@ class TrendCache:
                     # 2. RSI > early_threshold AND increasing (catching early momentum)
                     is_bullish = (
                         (trend.rsi > min_rsi and rsi_direction in ("increasing", "stable")) or 
-                        (trend.rsi > early_threshold and rsi_direction == "increasing")
+                        (trend.rsi > early_threshold and rsi_momentum > 2)
                     )
                     
                     # Build descriptive message
@@ -473,12 +477,16 @@ class TrendCache:
                     msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} vs {min_rsi})"
                 
                 results.append((is_bullish, msg))
-                
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
+
             elif indicator_type == "price_vs_vwap":
                 # Uses latest price and VWAP (refreshed every update)
                 is_bullish = trend.price > trend.vwap
                 msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({trend.price:.2f} vs {trend.vwap:.2f})"
                 results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
             
             # === NEW INDICATORS ===
             
@@ -487,13 +495,22 @@ class TrendCache:
                 # params: {ema: 20|50, min_gap_pct: 0.0}
                 ema_type = params.get("ema", 20)
                 min_gap_pct = params.get("min_gap_pct", 0.0)
-                
+                max_gap_pct = params.get("max_gap_pct", 0.0)
+
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((trend.price - ema_value) / ema_value) * 100
                 
                 is_bullish = gap_pct >= min_gap_pct
-                msg = f"Price vs EMA{ema_type}: {'✓' if is_bullish else '✗'} ({gap_pct:+.2f}% gap - need {min_gap_pct:+.2f}%)"
+                if max_gap_pct > 0:
+                    is_bullish = is_bullish and gap_pct <= max_gap_pct
+                msg = f"Price vs EMA{ema_type}: {'✓' if is_bullish else '✗'} ({gap_pct:+.2f}% gap - min {min_gap_pct:+.2f}%" 
+                if max_gap_pct > 0:
+                    msg += f"/max {max_gap_pct:+.2f}%)"
+                else:
+                    msg += f"/no max limit)"
                 results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
             
             elif indicator_type == "ema_slope":
                 # Check if EMA is rising/falling/flat
@@ -522,6 +539,8 @@ class TrendCache:
                     msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction} {slope_pct:+.3f}%)"
                 
                 results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
             
             elif indicator_type == "rsi_range":
                 # Block if RSI is in a specific range (indecision zone)
@@ -554,6 +573,8 @@ class TrendCache:
                         msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'outside' if is_bullish else 'in'} indecision {min_rsi}-{max_rsi})"
 
                 results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
             
             elif indicator_type == "ema_gap":
                 # Check gap between EMA20 and EMA50
@@ -574,6 +595,8 @@ class TrendCache:
                     msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need <{max_gap_pct}%)"
 
                 results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
             
             elif indicator_type == "price_ema50_range":
                 # Check if price is oscillating around EMA50 (choppy)
@@ -586,7 +609,15 @@ class TrendCache:
                 is_bullish = gap_pct > max_gap_pct
                 msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50 - need >{max_gap_pct}%)"
                 results.append((is_bullish, msg))
-        
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
+
+        # NEW: Check for hard_stop failures FIRST (before scoring)
+        if hard_stop_failures:
+            details = ", ".join(msg for _, msg in results)
+            failed_indicators = "; ".join(hard_stop_failures)
+            return False, f"🚫 HARD STOP: {failed_indicators} ({details})"   
+             
         # Count bullish indicators
         bullish_count = sum(1 for is_bullish, _ in results if is_bullish)
         total_count = len(results)
