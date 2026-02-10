@@ -33,6 +33,10 @@ class OrderStatus(str, Enum):
     CANCELLED = "Cancelled"
     FILLED = "Filled"
     NEW = "New"
+    EXPIRED = "Expired"
+    PARTIALLY_FILLED = "PartiallyFilled"
+    TRIGGER_PENDING = "TriggerPending"
+    TRIGGER_FAILED = "TriggerFailed"
 
 
 class SlippageToleranceType(str, Enum):
@@ -77,3 +81,46 @@ class PositionCloseReason(str, enum.Enum):
     FORCE_CLOSE = "FORCE_CLOSE"
     TREND_INVALIDATION = "TREND_INVALIDATION"
     STALE_POSITION = "STALE_POSITION"
+
+class OrderStatus(str,enum.Enum):
+    FILLED = "Filled"
+    CANCELLED = "Cancelled"
+    EXPIRED = "Expired"
+    NEW = "New"
+    PARTIALLY_FILLED = "PartiallyFilled"
+    TRIGGER_PENDING = "TriggerPending"
+    TRIGGER_FAILED = "TriggerFailed"
+
+class ExpiryReason(str, Enum):
+    ACCOUNT_TRADING_SUSPENDED = "AccountTradingSuspended"
+    BORROW_REQUIRES_LEND_REDEEM = "BorrowRequiresLendRedeem"
+    FILL_OR_KILL = "FillOrKill"
+    INSUFFICIENT_BORROWABLE_QUANTITY = "InsufficientBorrowableQuantity"
+    INSUFFICIENT_FUNDS = "InsufficientFunds"
+    INSUFFICIENT_LIQUIDITY = "InsufficientLiquidity"
+    INVALID_PRICE = "InvalidPrice"
+    INVALID_QUANTITY = "InvalidQuantity"
+    IMMEDIATE_OR_CANCEL = "ImmediateOrCancel"
+    INSUFFICIENT_MARGIN = "InsufficientMargin"
+    LIQUIDATION = "Liquidation"
+    NEGATIVE_EQUITY = "NegativeEquity"
+    POST_ONLY_MODE = "PostOnlyMode"
+    POST_ONLY_TAKER = "PostOnlyTaker"
+    PRICE_OUT_OF_BOUNDS = "PriceOutOfBounds"
+    REDUCE_ONLY_NOT_REDUCED = "ReduceOnlyNotReduced"
+    SELF_TRADE_PREVENTION = "SelfTradePrevention"
+    STOP_WITHOUT_POSITION = "StopWithoutPosition"
+    PRICE_IMPACT = "PriceImpact"
+    UNKNOWN = "Unknown"
+    USER_PERMISSIONS = "UserPermissions"
+    MAX_STOP_ORDERS_PER_POSITION = "MaxStopOrdersPerPosition"
+    POSITION_LIMIT = "PositionLimit"
+    SLIPPAGE_TOLERANCE_EXCEEDED = "SlippageToleranceExceeded"
+
+class SystemOrderType(str, Enum):
+    COLLATERAL_CONVERSION = "CollateralConversion"
+    FUTURE_EXPIRY = "FutureExpiry"
+    LIQUIDATE_POSITION_ON_ADL = "LiquidatePositionOnAdl"
+    LIQUIDATE_POSITION_ON_BOOK = "LiquidatePositionOnBook"
+    LIQUIDATE_POSITION_ON_BACKSTOP = "LiquidatePositionOnBackstop"
+    ORDER_BOOK_CLOSED = "OrderBookClosed"

@@ -1,6 +1,8 @@
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from services.client import api_request
+from utils.constants import OrderStatus, TradeReason
 from typing import Dict, Optional, Any, List
+from db.models import Order
 from utils.config import Config
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
@@ -16,6 +18,7 @@ from utils.exceptions import ExchangeAPIError, InvalidQuantityError, InvalidPric
 from models.trade import (
     OrderExecuteRequest, 
     OrderResponse, 
+    OrderHistoryResponse,
     OrderCancelRequest,
     FillHistory,
     create_buy,
@@ -25,7 +28,7 @@ from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
 from db.session import SessionLocal
-from db.crud import save_trade, open_position, close_position, save_order
+from db.crud import save_trade, open_position, close_position, save_order, save_limit_trade, update_order
 from utils.position_calculator import PositionCalculator
 
 class TradingService:
@@ -106,6 +109,53 @@ class TradingService:
                 )
             order.quantity = str(order_qty)
             return order
+        
+        # For explicit quantities, check if we need to cancel open orders
+        if order_qty is None or order_qty > available:
+            self.logger.info(
+                f"Insufficient available balance ({available} < {order_qty}). Checking for open limit sell orders..."
+            )
+            try:
+                    
+                # Get open orders for this symbol
+                open_orders = self.get_open_orders(order.symbol)
+                
+                # Find open limit sell orders
+                open_sell_orders = [
+                    o for o in open_orders
+                    if o.side == Side.ASK and o.order_type == OrderType.LIMIT
+                ]
+                
+                if open_sell_orders:
+                    self.logger.info(f"Found {len(open_sell_orders)} open limit sell order(s) for {order.symbol}")
+                    
+                    # Cancel all open limit sell orders
+                    for open_order in open_sell_orders:
+                        try:
+                            order_response = self.cancel_order(order_id=open_order.id, symbol=order.symbol)
+                            self.logger.info(f"Cancelled open limit sell order {open_order.id} for {order.symbol}")
+                        except Exception as cancel_error:
+                            self.logger.error(f"Failed to cancel order {open_order.id}: {cancel_error}")
+
+                    # Re-fetch balance after cancellation
+                    # Give exchange a moment to update
+                    import time
+                    time.sleep(1)
+                    
+                    # Refresh balance cache
+                    if order_response is not None:
+                        self._refresh_balance_cache_after_trade(order_response)
+                    available = self.balance_cache.get_available_balance(profile_name=profile_name, asset=base_asset)
+                    
+                    if available is None:
+                        self.logger.warning(f"Could not refresh balance for {base_asset} after cancelling orders")
+                    else:
+                        self.logger.info(f"Balance after cancelling orders: {available} {base_asset}")
+                else:
+                    self.logger.info(f"No open limit sell orders found for {order.symbol}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error checking/cancelling open orders: {e}")
         
         # Check sufficient balance
         if available <= 0:
@@ -377,14 +427,132 @@ class TradingService:
         order = self._validate_market_rules(order)
         return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary) 
 
-    # Order management
-    def cancel_order(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None):
-        """Cancel an order"""
-        return self.CancelOrder(symbol, order_id, client_id)
 
     def get_open_orders(self, symbol: Optional[str] = None):
-        """Get open orders"""
-        return self.get_open_orders(symbol)
+        query_params = {"marketType": "SPOT"}
+
+        if symbol:
+            query_params["symbol"] = symbol
+            url = APIEndpoints.backpack_GetOpenOrders(symbol=symbol)
+        else:
+            url = APIEndpoints.backpack_GetOpenOrders()
+        
+    
+        headers=data_converters.build_authorisation_header(
+            api_key=self.profile.api_key,
+            secret=self.profile.secret,
+            query_params=query_params,
+            body={},
+            instruction="orderQueryAll",
+            window=60000
+        )
+
+        try:
+            self.logger.debug(f"Open Orders Request Request")
+            orders = api_request(url, headers,requestType=HttpMethod.GET)
+            if orders:
+                #order_list = orders.get("orders", [])
+                # Deserialize each order into an OrderResponse
+                order_responses = [OrderResponse(**o) for o in orders]
+                self.logger.debug(f"API call for open orders completed successfully\r\n{len(order_responses)} orders retrieved")
+
+                return order_responses
+
+        except ExchangeAPIError as e:
+            # Log and re-raise as HTTPException for FastAPI
+            self.logger.error(f"Exchange API error: {e.message}")
+            raise HTTPException(
+                status_code=e.status_code or 500,
+                detail=f"Exchange API error: {e.message}"
+            )
+        except Exception as e:
+            # Handle other errors
+            self.logger.error(f"Unexpected error in get_open_orders: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Trading service error in get_open_orders: {str(e)}"
+            )
+        
+        return orders
+
+    def get_single_order(self, symbol: str,order_id: str):
+        url = APIEndpoints.backpack_GetSingleOrder(symbol=symbol, order_id=order_id)
+
+        headers=data_converters.build_authorisation_header(
+            api_key=self.profile.api_key,
+            secret=self.profile.secret,
+            query_params={"symbol": symbol, "orderId": order_id},
+            body={},
+            instruction="orderQuery",
+            window=60000
+        )
+
+        try:
+            self.logger.debug(f"Open Order Request Request - Order # {order_id}")
+            order = api_request(url, headers,requestType=HttpMethod.GET)
+            if order:
+                # Deserialize the order into an OrderResponse
+                order_response = OrderResponse(**order)
+                self.logger.debug(f"API call for open order completed successfully\r\n{order_response}")
+
+                return order_response
+
+        except ExchangeAPIError as e:
+            # Log and re-raise as HTTPException for FastAPI
+            self.logger.error(f"Exchange API error: {e.message}")
+            raise HTTPException(
+                status_code=e.status_code or 500,
+                detail=f"Exchange API error: {e.message}"
+            )
+        except Exception as e:
+            # Handle other errors
+            self.logger.error(f"Unexpected error in get_open_orders: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Trading service error in get_open_orders: {str(e)}"
+            )
+        
+        return None
+
+    def get_order_history(self, symbol: str, order_id: str):
+        url = APIEndpoints.backpack_GetOrderHistory(symbol=symbol, order_id=order_id)
+
+        headers=data_converters.build_authorisation_header(
+            api_key=self.profile.api_key,
+            secret=self.profile.secret,
+            query_params={"symbol": symbol, "orderId": order_id},
+            body={},
+            instruction="orderHistoryQueryAll",
+            window=60000
+        )
+
+        try:
+            self.logger.debug(f"Open Order Request Request - Order # {order_id}")
+            order = api_request(url, headers,requestType=HttpMethod.GET)
+            if order:
+                first = order[0] # take the first item 
+                order_response = OrderHistoryResponse(**first)
+                self.logger.debug(f"API call for open order completed successfully\r\n{order_response}")
+
+                return order_response
+
+        except ExchangeAPIError as e:
+            # Log and re-raise as HTTPException for FastAPI
+            self.logger.error(f"Exchange API error: {e.message}")
+            raise HTTPException(
+                status_code=e.status_code or 500,
+                detail=f"Exchange API error: {e.message}"
+            )
+        except Exception as e:
+            # Handle other errors
+            self.logger.error(f"Unexpected error in get_open_orders: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Trading service error in get_open_orders: {str(e)}"
+            )
+        
+        return None
+
 
     def cancel_all_orders(self, symbol: str):
         """Cancel all orders for a symbol"""
@@ -471,15 +639,83 @@ class TradingService:
         
         return order
 
+    
+    def process_limit_order(self, order: Order, position_id: str = None) -> OrderResponse:
+        try:
+            db = SessionLocal()
+            #try to find open order
+            exchange_order = self.get_single_order(order.symbol, order.exchange_order_id)
+            #If exchange_order is none, check history
+            if exchange_order is None:
+                history_order = self.get_order_history(symbol=order.symbol, order_id=order.exchange_order_id)
+                if history_order is None:
+                    return
+
+                if history_order.status == order.status:
+                    self.logger.debug(f"Order status match. Do nothing. History order status: {history_order.status}  Db Order status:  {order.status} [{self.profile.name}]")
+                # No change in Order status
+                    return history_order
+            
+                if history_order.status == OrderStatus.FILLED:
+                    if order.purpose == TradeReason.TAKE_PROFIT:
+                        self.logger.info(f"TP hit for {order.symbol} @ {history_order.price} [{self.profile.name}]")
+                    else:
+                        self.logger.info(f"Order {order.exchange_order_id} was filled as expected.")
+                    saved_trade = save_limit_trade(db, history_order, self.profile.name, reason=order.purpose)
+                    self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
+                    position_id_int = int(position_id)
+                    closed_position = close_position(
+                        db=db,
+                        position_id=position_id_int,
+                        sell_trade=saved_trade,
+                        reason=order.purpose
+                    )
+                    # Calculate P/L for logging
+                    entry_price = closed_position.entry_price
+                    exit_price = saved_trade.price
+                    quantity = saved_trade.quantity
+                    profit = (exit_price - entry_price) * quantity
+                    profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                    
+                    self.logger.info(
+                        f"Closed position {position_id}: {closed_position.symbol}, "
+                        f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)"
+                    )
+                    
+                    history_order.profit = profit
+
+                    # Update order status to match exchange
+                    update_order(db, self.profile.name, order.exchange_order_id, status=history_order.status)
+                    return history_order
+                else: 
+                    self.logger.info(f"Order {order.exchange_order_id} status updated. Previous: {order.status}, Current: {history_order.status}")
+                    update_order(db, self.profile.name, order.exchange_order_id, status=history_order.status)
+                    return history_order
+
+            #exchange_order found
+            elif exchange_order.status == order.status:
+                # No change in Order status. dont do anything
+                return exchange_order
+            else:
+                # Order status has changed, update DB to match
+                update_order(db, self.profile.name, order.exchange_order_id, status=exchange_order.status)
+                return exchange_order
+        except Exception as e:
+            self.logger.error(f"Error processing order {order.exchange_order_id}: {e}")
+        finally:
+            db.close()
+            
+        return None
+
     def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None) -> OrderResponse:
         try:
+            db = SessionLocal()
             #execute order
             order_response = self.ExecuteOrder(order)
             if order_response is None:
                 return None
             
             # If order was successful, save to DB
-            db = SessionLocal()
             saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary)
             self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
             # Open position if this is a BUY order
@@ -510,20 +746,20 @@ class TradingService:
                 self._refresh_balance_cache_after_trade(order_response)
 
                 #Create TP limit order
-                #tp_order = self.create_limit_order(
-                #   position_id=position.id,
-                #   symbol=position.symbol,
-                #   side="ASK",
-                #   quantity=str(position.quantity),
-                #   price=str(position.tp_price),
-                #   purpose="TAKE_PROFIT"
-                #)
-                #if tp_order:
-                #    self.logger.info(
-                #        f"TP order created: ID {tp_order.id}, "
-                #        f"Position ID: {position.id}, "
-                #        f"Price: {tp_order.price}, Quantity: {tp_order.quantity}"
-                #    )
+                tp_order = self.create_limit_order(
+                  position_id=position.id,
+                  symbol=position.symbol,
+                  side="ASK",
+                  quantity=str(position.quantity),
+                  price=str(position.tp_price),
+                  purpose="TAKE_PROFIT"
+                )
+                if tp_order:
+                   self.logger.info(
+                       f"TP order created: ID {tp_order.id}, "
+                       f"Position ID: {position.id}, "
+                       f"Price: {tp_order.price}, Quantity: {tp_order.quantity}"
+                   )
 
             else:
                 from db.crud import close_positions_fifo
@@ -723,12 +959,12 @@ class TradingService:
 
         #Execute order
         try:
+            db = SessionLocal()
             order_response = self.ExecuteOrder(order)
             if order_response is None:
                 return None
         
             # If order was successful, save to orders table
-            db = SessionLocal()
             saved_order = save_order(db, order_response, self.profile.name, position_id, purpose=purpose)
             self.logger.info(f"Order saved to database: ID {saved_order.id}")
         except Exception as db_error:
@@ -737,8 +973,6 @@ class TradingService:
             db.close()
 
         return order_response
-
-
 
     def validate_balance_for_trade(self,
         sale_action: str,
@@ -831,7 +1065,52 @@ class TradingService:
         
         # Balance is sufficient - let trading_builder adjust if needed
         return True, None
+    
+    def cancel_order(self,
+        order_id: int,
+        symbol: str
+    ) -> OrderResponse:
 
+        url = APIEndpoints.backpack_CancelOrder()
+        body = {
+            "orderId": order_id,
+            "symbol": symbol
+        }
+        headers=data_converters.build_authorisation_header(
+            api_key=self.profile.api_key,
+            secret=self.profile.secret,
+            query_params={},
+            body=body,
+            instruction="orderCancel",
+            window=60000
+        )
+
+        try:
+            self.logger.debug(f"Cancel Order Request - Order # {order_id}")
+            order = api_request(url, headers, body=body, requestType=HttpMethod.DELETE)
+            if order:
+                # Deserialize the order into an OrderResponse
+                order_response = OrderResponse(**order)
+                self.logger.debug(f"API call for cancel order completed successfully\r\n{order_response}")
+
+                return order_response
+
+        except ExchangeAPIError as e:
+            # Log and re-raise as HTTPException for FastAPI
+            self.logger.error(f"Exchange API error: {e.message}")
+            raise HTTPException(
+                status_code=e.status_code or 500,
+                detail=f"Exchange API error: {e.message}"
+            )
+        except Exception as e:
+            # Handle other errors
+            self.logger.error(f"Unexpected error in get_open_orders: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Trading service error in get_open_orders: {str(e)}"
+            )
+        
+        return None
 
 async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK", reason_summary: List[str] = None) -> Optional[OrderResponse]:
     """
@@ -925,29 +1204,3 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     else:
         raise ValueError(f"Unknown action: {alert.action}")
 
-    """
-    def CancelOrder(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None) -> OrderResponse:
-        url = APIEndpoints.backpack_ExecuteOrder()
-        # Convert model to dict, excluding None values
-        order_data = order.model_dump(by_alias=True, exclude_none=True)
-            
-        headers=data_converters.build_authorisation_header(
-            api_key=config.api_key,
-            secret=config.secret,
-            query_params={},
-            body=order_data,
-            instruction="orderExecute",
-            window=60000
-        )
-
-        trade = api_request(url, headers,requestType="POST")
-        
-        if trade:
-            logger.debug(f"API call for trade completed successfully\r\n{trade}")
-            return trade
-        else:
-            logger.error(f"API call for balances failed\r\n{trade}")
-
-        return None
-
-        """

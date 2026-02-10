@@ -327,63 +327,6 @@ async def place_order(
 ):
     """Place an order"""
     try:
-        # Pre-validate balance for SELL orders only if balance is unusable
-        if request.side.lower() == "sell":
-            try:
-                base_asset = request.symbol.split('_')[0]
-                balance_cache = get_balance_cache()
-                market_info_cache = get_market_info_cache()
-                
-                available = balance_cache.get_available_balance(
-                    profile_name="default",  # Adjust if you support profile in OrderRequest
-                    asset=base_asset
-                )
-                
-                # Only reject if balance is zero
-                if available is not None and available <= 0:
-                    error_msg = f"No available balance for {base_asset}"
-                    apiserver_logger.warning(error_msg)
-                    raise HTTPException(
-                        status_code=400,
-                        detail=error_msg
-                    )
-                
-                # Check against market minimum if we have both balance and market info
-                if available is not None:
-                    market_info = market_info_cache.get_market_info(request.symbol)
-                    
-                    if market_info is not None:
-                        # Check if below minimum quantity
-                        if available < market_info.min_quantity:
-                            error_msg = (
-                                f"Balance too low for {base_asset}. "
-                                f"Available: {available}, Minimum: {market_info.min_quantity}"
-                            )
-                            apiserver_logger.warning(error_msg)
-                            raise HTTPException(
-                                status_code=400,
-                                detail=error_msg
-                            )
-                        
-                        # Check if would round to zero
-                        rounded = market_info.round_quantity(available)
-                        if rounded == 0:
-                            error_msg = (
-                                f"Balance too small for {base_asset}. "
-                                f"Available: {available} rounds to 0 (step size: {market_info.step_size})"
-                            )
-                            apiserver_logger.warning(error_msg)
-                            raise HTTPException(
-                                status_code=400,
-                                detail=error_msg
-                            )
-                
-            except HTTPException:
-                raise
-            except Exception as e:
-                # If validation fails for any reason, let trading_builder handle it
-                apiserver_logger.debug(f"Balance pre-validation failed: {e}")
-        
         # Proceed with trade - trading_builder will adjust quantity if needed
         profile_manager = get_profile_manager()
         profile = profile_manager.get(request.profile_name)

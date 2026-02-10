@@ -105,6 +105,8 @@ def api_request(
     except urllib.error.HTTPError as e:
         body_text = _read_error_body(e)
         error_msg = f"HTTP {e.code} Error: {body_text or e.reason}"
+        if "RESOURCE_NOT_FOUND" in error_msg:
+            return None  # Gracefully handle not found errors as None
         client_logger.error(error_msg)
         raise ExchangeAPIError(error_msg, status_code=e.code)
         
