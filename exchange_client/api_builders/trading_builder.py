@@ -110,6 +110,53 @@ class TradingService:
             order.quantity = str(order_qty)
             return order
         
+        # For explicit quantities, check if we need to cancel open orders
+        if order_qty is None or order_qty > available:
+            self.logger.info(
+                f"Insufficient available balance ({available} < {order_qty}). Checking for open limit sell orders..."
+            )
+            try:
+                    
+                # Get open orders for this symbol
+                open_orders = self.get_open_orders(order.symbol)
+                
+                # Find open limit sell orders
+                open_sell_orders = [
+                    o for o in open_orders
+                    if o.side == Side.ASK and o.order_type == OrderType.LIMIT
+                ]
+                
+                if open_sell_orders:
+                    self.logger.info(f"Found {len(open_sell_orders)} open limit sell order(s) for {order.symbol}")
+                    
+                    # Cancel all open limit sell orders
+                    for open_order in open_sell_orders:
+                        try:
+                            order_response = self.cancel_order(order_id=open_order.id, symbol=order.symbol)
+                            self.logger.info(f"Cancelled open limit sell order {open_order.id} for {order.symbol}")
+                        except Exception as cancel_error:
+                            self.logger.error(f"Failed to cancel order {open_order.id}: {cancel_error}")
+
+                    # Re-fetch balance after cancellation
+                    # Give exchange a moment to update
+                    import time
+                    time.sleep(1)
+                    
+                    # Refresh balance cache
+                    if order_response is not None:
+                        self._refresh_balance_cache_after_trade(order_response)
+                    available = self.balance_cache.get_available_balance(profile_name=profile_name, asset=base_asset)
+                    
+                    if available is None:
+                        self.logger.warning(f"Could not refresh balance for {base_asset} after cancelling orders")
+                    else:
+                        self.logger.info(f"Balance after cancelling orders: {available} {base_asset}")
+                else:
+                    self.logger.info(f"No open limit sell orders found for {order.symbol}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error checking/cancelling open orders: {e}")
+        
         # Check sufficient balance
         if available <= 0:
             raise InsufficientBalanceError(
@@ -380,18 +427,21 @@ class TradingService:
         order = self._validate_market_rules(order)
         return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary) 
 
-    # Order management
-    def cancel_order(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None):
-        """Cancel an order"""
-        return self.CancelOrder(symbol, order_id, client_id)
 
     def get_open_orders(self, symbol: Optional[str] = None):
-        url = APIEndpoints.backpack_GetOpenOrders()
+        query_params = {"marketType": "SPOT"}
+
+        if symbol:
+            query_params["symbol"] = symbol
+            url = APIEndpoints.backpack_GetOpenOrders(symbol=symbol)
+        else:
+            url = APIEndpoints.backpack_GetOpenOrders()
         
+    
         headers=data_converters.build_authorisation_header(
             api_key=self.profile.api_key,
             secret=self.profile.secret,
-            query_params={"marketType": "SPOT"},
+            query_params=query_params,
             body={},
             instruction="orderQueryAll",
             window=60000
@@ -401,9 +451,9 @@ class TradingService:
             self.logger.debug(f"Open Orders Request Request")
             orders = api_request(url, headers,requestType=HttpMethod.GET)
             if orders:
-                order_list = orders.get("orders", [])
+                #order_list = orders.get("orders", [])
                 # Deserialize each order into an OrderResponse
-                order_responses = [OrderResponse(**o) for o in order_list]
+                order_responses = [OrderResponse(**o) for o in orders]
                 self.logger.debug(f"API call for open orders completed successfully\r\n{len(order_responses)} orders retrieved")
 
                 return order_responses
@@ -924,8 +974,6 @@ class TradingService:
 
         return order_response
 
-
-
     def validate_balance_for_trade(self,
         sale_action: str,
         symbol: str,
@@ -1017,7 +1065,52 @@ class TradingService:
         
         # Balance is sufficient - let trading_builder adjust if needed
         return True, None
+    
+    def cancel_order(self,
+        order_id: int,
+        symbol: str
+    ) -> OrderResponse:
 
+        url = APIEndpoints.backpack_CancelOrder()
+        body = {
+            "orderId": order_id,
+            "symbol": symbol
+        }
+        headers=data_converters.build_authorisation_header(
+            api_key=self.profile.api_key,
+            secret=self.profile.secret,
+            query_params={},
+            body=body,
+            instruction="orderCancel",
+            window=60000
+        )
+
+        try:
+            self.logger.debug(f"Cancel Order Request - Order # {order_id}")
+            order = api_request(url, headers, body=body, requestType=HttpMethod.DELETE)
+            if order:
+                # Deserialize the order into an OrderResponse
+                order_response = OrderResponse(**order)
+                self.logger.debug(f"API call for cancel order completed successfully\r\n{order_response}")
+
+                return order_response
+
+        except ExchangeAPIError as e:
+            # Log and re-raise as HTTPException for FastAPI
+            self.logger.error(f"Exchange API error: {e.message}")
+            raise HTTPException(
+                status_code=e.status_code or 500,
+                detail=f"Exchange API error: {e.message}"
+            )
+        except Exception as e:
+            # Handle other errors
+            self.logger.error(f"Unexpected error in get_open_orders: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Trading service error in get_open_orders: {str(e)}"
+            )
+        
+        return None
 
 async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK", reason_summary: List[str] = None) -> Optional[OrderResponse]:
     """
@@ -1111,29 +1204,3 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     else:
         raise ValueError(f"Unknown action: {alert.action}")
 
-    """
-    def CancelOrder(self, symbol: str, order_id: Optional[str] = None, client_id: Optional[int] = None) -> OrderResponse:
-        url = APIEndpoints.backpack_ExecuteOrder()
-        # Convert model to dict, excluding None values
-        order_data = order.model_dump(by_alias=True, exclude_none=True)
-            
-        headers=data_converters.build_authorisation_header(
-            api_key=config.api_key,
-            secret=config.secret,
-            query_params={},
-            body=order_data,
-            instruction="orderExecute",
-            window=60000
-        )
-
-        trade = api_request(url, headers,requestType="POST")
-        
-        if trade:
-            logger.debug(f"API call for trade completed successfully\r\n{trade}")
-            return trade
-        else:
-            logger.error(f"API call for balances failed\r\n{trade}")
-
-        return None
-
-        """

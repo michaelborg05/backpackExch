@@ -35,8 +35,10 @@ class APIEndpoints:
         return f"{cls.BACKPACK_BASE}/api/v1/order"
 
     @classmethod
-    def backpack_GetOpenOrders(cls, marketType: str = "SPOT") -> str:
+    def backpack_GetOpenOrders(cls, marketType: str = "SPOT", symbol: str = None) -> str:
         """Backpack Open Orders endpoint"""
+        if symbol is not None:
+            return f"{cls.BACKPACK_BASE}/api/v1/orders?marketType={marketType}&symbol={symbol}"
         return f"{cls.BACKPACK_BASE}/api/v1/orders?marketType={marketType}"
 
     @classmethod
@@ -56,6 +58,11 @@ class APIEndpoints:
     def backpack_GetSingleOrder(cls, symbol: str, order_id: str) -> str:
         """Backpack Single Order endpoint"""
         return f"{cls.BACKPACK_BASE}/api/v1/order?orderId={order_id}&symbol={symbol}"
+
+    @classmethod
+    def backpack_CancelOrder(cls) -> str:
+        """Backpack Cancel Order endpoint"""
+        return f"{cls.BACKPACK_BASE}/api/v1/order"
 
     @classmethod
     def backpack_MarketInfo(cls, symbol: str = "SOL_USDC") -> str:
