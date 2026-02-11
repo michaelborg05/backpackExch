@@ -371,7 +371,8 @@ class TelegramService:
                                     # Split the key back into components
                                     # Using rsplit allows for symbols with underscores if they exist
                                     symbol, timeframe = key.rsplit('_', 1)
-
+                                    if timeframe=='240':
+                                        continue 
                                     # Call your is_bullish method
                                     # This will use your configured indicator logic (EMA, RSI, VWAP)
                                     is_bullish, reason = trend_cache.is_bullish(symbol, timeframe)
