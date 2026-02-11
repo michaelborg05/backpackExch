@@ -307,7 +307,7 @@ profiles:
       - type: "price_extended_below_ema"
         params:
           ema: 20
-          min_gap_pct: -2.0       # At least 2% below
+          min_gap_pct: -1.5       # At least 2% below
           max_gap_pct: -10.0
       
       # 4. Volume spike (capitulation)
