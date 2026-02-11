@@ -681,7 +681,7 @@ class TrendCache:
                 gap_pct = ((current_price - trend.vwap) / trend.vwap) * 100
 
                 # Want price below VWAP but not TOO far below
-                is_bullish = min_gap_pct <= gap_pct <= max_gap_pct
+                is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
                 
                 msg = (
                     f"Price below VWAP: {'✓' if is_bullish else '✗'} "
