@@ -328,7 +328,7 @@ profiles:
         params:
           min_value: 70  # Fail if RSI > 70 (don't buy tops)
     
-    min_entry_indicators_required: 3  # Need 4/5 or 4/6
+    min_entry_indicators_required: 4  # Need 4/5 or 4/6
     # ATR filter (volatility)
     use_atr_filter: false
     atr_timeframe: "15m"
