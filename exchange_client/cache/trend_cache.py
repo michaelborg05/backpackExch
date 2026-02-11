@@ -411,8 +411,8 @@ class TrendCache:
         hard_stop_failures = []
         from cache.price_cache import get_price_cache
         price_cache = get_price_cache()
-        current_price = float(price_cache.get_price(symbol))
-
+        price = price_cache.get_price(symbol)
+        current_price = float(price) if price is not None else trend.price
 
         for indicator_config in indicators:
             indicator_type = indicator_config.get("type")

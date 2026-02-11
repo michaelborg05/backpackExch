@@ -48,7 +48,7 @@ class RegimeFilter:
         # ------------------------------------------------------------------
         
         # 1. CHOP DETECTION
-        self.chop_ema_range_pct = 0.3       # EMAs within 0.3% = choppy
+        self.chop_ema_range_pct = 0.5       # EMAs within 0.5% = choppy
         self.chop_rsi_neutral = (45, 55)    # RSI stuck here = no momentum
         
         # 2. EXTREME CONDITIONS  
@@ -57,9 +57,10 @@ class RegimeFilter:
         self.atr_spike = 1.8                # Volatility explosion
         
         # 3. VOLUME QUALITY
-        self.min_volume_ratio = 0.5         # Below 0.5x = dead market
+        self.min_volume_ratio = 0.6         # Below 0.6x = dead market
+        self.min_volume_ratio_confirm = 0.7  # NEW: Stricter for 15m        
         self.distribution_volume = 1.5      # High volume + down = distribution
-        
+
         # 4. WHIPSAW DETECTION
         self.whipsaw_threshold = 1.0  # Require very strong established UPTREND
         self.reversal_threshold = -0.8  # Strong bearish reversal on LTF
@@ -248,7 +249,19 @@ class RegimeFilter:
         ema_diff_pct = abs(((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100)
         if ema_diff_pct < self.chop_ema_range_pct:
             issues.append(f"60m EMAs compressed ({ema_diff_pct:.2f}% - no clear direction)")
-        
+
+        # NEW: Check 15m compression too
+        if confirm_trend is not None:
+            confirm_ema_diff = abs(((confirm_trend.ema20 - confirm_trend.ema50) / 
+                                    confirm_trend.ema50) * 100)
+            
+            if confirm_ema_diff < self.chop_ema_range_pct:
+                # Both compressed = definitely choppy
+                if ema_diff_pct < self.chop_ema_range_pct:
+                    issues.append(
+                        f"Both TFs compressed (60m: {ema_diff_pct:.2f}%, "
+                        f"15m: {confirm_ema_diff:.2f}%)"
+                    )        
         # 2. RSI STUCK IN NEUTRAL - No momentum
         rsi_low, rsi_high = self.chop_rsi_neutral
         if rsi_low < primary_trend.rsi < rsi_high:
@@ -263,32 +276,40 @@ class RegimeFilter:
         # 3. DEAD VOLUME - No conviction
         if primary_trend.volume_ratio is not None:
             if primary_trend.volume_ratio < self.min_volume_ratio:
-                issues.append(f"Dead volume ({primary_trend.volume_ratio:.2f}x - no conviction)")
-        
-        # 4. BOTH TIMEFRAMES CONFLICTED
-        # This is different from "15m leading" - this is both TFs showing different structure
-        if confirm_trend is not None:
-            # Check if 60m and 15m are showing opposite EMA alignments
-            # BUT both are weak (not a strong lead)
-            primary_bullish = primary_trend.ema20 > primary_trend.ema50
-            confirm_bullish = confirm_trend.ema20 > confirm_trend.ema50
+                issues.append(
+                    f"Dead volume ({primary_trend.volume_ratio:.2f}x - no conviction)"
+                )
             
-            if primary_bullish != confirm_bullish:
-                # Calculate strength of disagreement
-                primary_strength = abs(((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100)
-                confirm_strength = abs(((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100)
-                
-                # Only flag if BOTH are weak (true chop)
-                # Don't flag if 15m is strongly leading (that's a good early trend)
-                if primary_strength < 0.5 and confirm_strength < 0.5:
-                    issues.append(f"Timeframe conflict - both weak (60m {primary_strength:.2f}%, 15m {confirm_strength:.2f}%)")
+            # NEW: Check both timeframes
+            if confirm_trend is not None and confirm_trend.volume_ratio is not None:
+                if (primary_trend.volume_ratio < self.min_volume_ratio and 
+                    confirm_trend.volume_ratio < self.min_volume_ratio_confirm):
+                    issues.append(
+                        f"Both TFs dead volume (60m: {primary_trend.volume_ratio:.2f}x, "
+                        f"15m: {confirm_trend.volume_ratio:.2f}x)"
+                    )
+
+        # 4. PRICE STAGNATION (NEW - use price vs EMA as proxy)
+        # If price is very close to BOTH EMA20 and EMA50, it's oscillating (dead)
+        price_ema20_gap = abs((primary_trend.price - primary_trend.ema20) / 
+                              primary_trend.ema20) * 100
+        price_ema50_gap = abs((primary_trend.price - primary_trend.ema50) / 
+                              primary_trend.ema50) * 100
         
+        if price_ema20_gap < 0.3 and price_ema50_gap < 0.5:
+            issues.append(
+                f"Price stagnant (EMA20: {price_ema20_gap:.2f}%, "
+                f"EMA50: {price_ema50_gap:.2f}%)"
+            )
+            # If we found price stagnation, it's definitely choppy
+            issues.append("Price stagnation detected")
+
         # Evaluate: flag as choppy if we found 2+ issues
         if len(issues) >= 2:
             return True, f"Choppy conditions ({len(issues)} issues): {'; '.join(issues)}"
         
         return False, ""
-    
+        
     def can_trade(
         self,
         symbol: str,
@@ -306,6 +327,7 @@ class RegimeFilter:
         1. Regime filter: Is market safe? → If no, skip this symbol entirely
         2. Trend logic: Is there a bullish setup? → If yes, enter
         """
+        
         regime, reason = self.get_regime(
             symbol, 
             primary_timeframe, 

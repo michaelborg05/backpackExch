@@ -255,7 +255,7 @@ profiles:
     use_atr_filter: false
 
   15m_MB_ATR:
-    enabled: false
+    enabled: true
     api_key_env: BP_API_KEY_1M_ATR
     secret_env: BP_SECRET_1M_ATR
     
