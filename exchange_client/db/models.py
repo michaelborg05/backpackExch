@@ -272,7 +272,6 @@ class Order(Base):
     trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)  # Link when filled
     
     __table_args__ = (
-        CheckConstraint("status IN ('PENDING', 'FILLED', 'PARTIALLY_FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED')", name="valid_order_status"),
         CheckConstraint("side IN ('BID', 'ASK')", name="valid_order_side"),
         CheckConstraint("purpose IN ('TAKE_PROFIT', 'STOP_LOSS', 'TRAILING_STOP', 'ENTRY')", name="valid_order_purpose"),
         Index('ix_orders_status_profile', 'status', 'profile_name'),

@@ -275,7 +275,7 @@ profiles:
     max_open_positions: 2               # Max concurrent positions per token
     max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
-    use_market_regime_filter: false
+    use_market_regime_filter: true
 
     # 🎯 SIGNAL GENERATION SETTINGS (NEW)
     enable_signal_generation: true    # Enable automated signal generation
@@ -293,27 +293,27 @@ profiles:
       # 1. RSI oversold and turning up
       - type: "rsi_oversold"
         params:
-          max_value: 35
+          max_value: 40
           require_rising: true
           min_momentum: 1.0
       
       # 2. Price below VWAP (stretched)
       - type: "price_below_vwap"
         params:
-          min_gap_pct: -1.0       # At least 1% below
+          min_gap_pct: -0.6       # At least 1% below
           max_gap_pct: -8.0       # Not more than 8% (too risky)
       
       # 3. Price extended below EMA20
       - type: "price_extended_below_ema"
         params:
           ema: 20
-          min_gap_pct: -1.5       # At least 2% below
+          min_gap_pct: -0.6       # at least below ema
           max_gap_pct: -10.0
       
       # 4. Volume spike (capitulation)
       - type: "volume_spike"
         params:
-          min_ratio: 1.5
+          min_ratio: 1.0
           max_ratio: 5.0
       
       # 5. Bollinger Band touch (if you implement it)
