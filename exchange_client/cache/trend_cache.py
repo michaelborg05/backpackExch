@@ -409,6 +409,10 @@ class TrendCache:
         """
         results = []
         hard_stop_failures = []
+        from cache.price_cache import get_price_cache
+        price_cache = get_price_cache()
+        current_price = float(price_cache.get_price(symbol))
+
 
         for indicator_config in indicators:
             indicator_type = indicator_config.get("type")
@@ -482,8 +486,8 @@ class TrendCache:
 
             elif indicator_type == "price_vs_vwap":
                 # Uses latest price and VWAP (refreshed every update)
-                is_bullish = trend.price > trend.vwap
-                msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({trend.price:.2f} vs {trend.vwap:.2f})"
+                is_bullish = current_price > trend.vwap
+                msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({current_price:.2f} vs {trend.vwap:.2f})"
                 results.append((is_bullish, msg))
                 if hard_stop and not is_bullish:
                     hard_stop_failures.append(msg)
@@ -498,7 +502,7 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", 0.0)
 
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
-                gap_pct = ((trend.price - ema_value) / ema_value) * 100
+                gap_pct = ((current_price - ema_value) / ema_value) * 100
                 
                 is_bullish = gap_pct >= min_gap_pct
                 if max_gap_pct > 0:
@@ -604,13 +608,235 @@ class TrendCache:
                 # Blocks if price is within +/- max_gap_pct of EMA50
                 max_gap_pct = params.get("max_gap_pct", 1.0)
                 
-                gap_pct = abs((trend.price - trend.ema50) / trend.ema50) * 100
+                gap_pct = abs((current_price - trend.ema50) / trend.ema50) * 100
                 
                 is_bullish = gap_pct > max_gap_pct
                 msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50 - need >{max_gap_pct}%)"
                 results.append((is_bullish, msg))
                 if hard_stop and not is_bullish:
                     hard_stop_failures.append(msg)
+
+            elif indicator_type == "rsi_oversold":
+                """
+                Enter when RSI is LOW (oversold) but starting to turn up
+                params: {
+                    max_value: 35,          # RSI must be below this (oversold)
+                    require_rising: true,   # Must be turning up (not knife-catching)
+                    min_momentum: 0.5       # Minimum upward momentum required
+                }
+                """
+                max_value = params.get("max_value", 35)
+                require_rising = params.get("require_rising", True)
+                min_momentum = params.get("min_momentum", 0.5)
+                
+                # Check if oversold
+                is_oversold = trend.rsi < max_value
+                
+                if require_rising:
+                    rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
+                    is_turning_up = (
+                        rsi_momentum is not None and 
+                        rsi_direction == "increasing" and 
+                        rsi_momentum >= min_momentum
+                    )
+                    
+                    is_bullish = is_oversold and is_turning_up
+                    msg = (
+                        f"RSI oversold: {'✓' if is_bullish else '✗'} "
+                        f"(RSI {trend.rsi:.1f} {'<' if is_oversold else '>'} {max_value}, "
+                        f"momentum {rsi_momentum if rsi_momentum else 'N/A'} - {rsi_direction})"
+                    )
+                else:
+                    is_bullish = is_oversold
+                    msg = f"RSI oversold: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} < {max_value})"
+                
+                results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
+
+            elif indicator_type == "rsi_overbought":
+                """
+                INVERSE - for short positions or avoiding longs
+                params: {min_value: 70}
+                """
+                min_value = params.get("min_value", 70)
+                is_overbought = trend.rsi > min_value
+                is_bullish = not is_overbought  # Bullish = NOT overbought
+                msg = f"RSI overbought check: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f})"
+                results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
+
+            elif indicator_type == "price_below_vwap":
+                """
+                Bullish when price is BELOW VWAP (oversold)
+                params: {
+                    min_gap_pct: -1.0,      # Require at least 1% below VWAP
+                    max_gap_pct: -5.0       # But not more than 5% (too extended)
+                }
+                """
+                min_gap_pct = params.get("min_gap_pct", -1.0)  # e.g., -1.0 = 1% below
+                max_gap_pct = params.get("max_gap_pct", -10.0)  # e.g., -10.0 = max 10% below
+
+                gap_pct = ((current_price - trend.vwap) / trend.vwap) * 100
+
+                # Want price below VWAP but not TOO far below
+                is_bullish = min_gap_pct <= gap_pct <= max_gap_pct
+                
+                msg = (
+                    f"Price below VWAP: {'✓' if is_bullish else '✗'} "
+                    f"({gap_pct:+.2f}% - need between {max_gap_pct:.1f}% and {min_gap_pct:.1f}%)"
+                )
+                results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
+
+            elif indicator_type == "price_extended_below_ema":
+                """
+                Bullish when price is stretched below EMA (rubber band effect)
+                params: {
+                    ema: 20,                # Which EMA to check
+                    min_gap_pct: -2.0,      # Must be at least 2% below
+                    max_gap_pct: -8.0       # But not more than 8% (too risky)
+                }
+                """
+                ema_type = params.get("ema", 20)
+                min_gap_pct = params.get("min_gap_pct", -2.0)
+                max_gap_pct = params.get("max_gap_pct", -10.0)
+                
+                ema_value = trend.ema20 if ema_type == 20 else trend.ema50
+                gap_pct = ((current_price - ema_value) / ema_value) * 100
+                
+                # Want price below EMA (negative gap) but not too far
+                is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
+                
+                msg = (
+                    f"Price below EMA{ema_type}: {'✓' if is_bullish else '✗'} "
+                    f"({gap_pct:+.2f}% - need between {max_gap_pct:.1f}% and {min_gap_pct:.1f}%)"
+                )
+                results.append((is_bullish, msg))
+                if hard_stop and not is_bullish:
+                    hard_stop_failures.append(msg)
+
+            elif indicator_type == "bollinger_bands":
+                """
+                Check if price is near/below lower Bollinger Band
+                
+                params: {
+                    band: "lower",          # Which band to check
+                    mode: "touch",          # "touch" or "breach"
+                    tolerance_pct: 0.5      # Within 0.5% of band = touch
+                }
+                """
+                band = params.get("band", "lower")
+                mode = params.get("mode", "touch")
+                tolerance_pct = params.get("tolerance_pct", 0.5)
+                
+                # Check if you have BB data
+                bb_lower = getattr(trend, 'bb_lower', None)
+                bb_upper = getattr(trend, 'bb_upper', None)
+                
+                if bb_lower is None:
+                    is_bullish = False
+                    msg = "Bollinger Bands: ✗ (no BB data available)"
+                else:
+                    if band == "lower":
+                        target_band = bb_lower
+                        
+                        if mode == "touch":
+                            # Within tolerance of lower band
+                            distance_pct = abs((current_price - target_band) / target_band) * 100
+                            is_bullish = distance_pct <= tolerance_pct
+                            msg = (
+                                f"BB lower touch: {'✓' if is_bullish else '✗'} "
+                                f"(price {distance_pct:.2f}% from band)"
+                            )
+                        else:  # "breach"
+                            # Below lower band
+                            is_bullish = current_price <= target_band
+                            gap_pct = ((current_price - target_band) / target_band) * 100
+                            msg = (
+                                f"BB lower breach: {'✓' if is_bullish else '✗'} "
+                                f"(price {gap_pct:+.2f}% vs band)"
+                            )
+                    else:  # upper band (for avoiding overbought)
+                        target_band = bb_upper
+                        is_bullish = current_price < target_band  # Not above upper band
+                        msg = f"BB upper check: {'✓' if is_bullish else '✗'}"
+                
+                results.append((is_bullish, msg))
+
+            elif indicator_type == "volume_spike":
+                """
+                Bullish when volume spikes (selling climax/capitulation)
+                params: {
+                    min_ratio: 1.5,         # Volume must be 1.5x average
+                    max_ratio: 5.0          # But not insane (flash crash)
+                }
+                """
+                min_ratio = params.get("min_ratio", 1.5)
+                max_ratio = params.get("max_ratio", 10.0)
+                
+                if trend.volume_ratio is None:
+                    is_bullish = False
+                    msg = "Volume spike: ✗ (no volume data)"
+                else:
+                    is_bullish = min_ratio <= trend.volume_ratio <= max_ratio
+                    msg = (
+                        f"Volume spike: {'✓' if is_bullish else '✗'} "
+                        f"({trend.volume_ratio:.2f}x - need {min_ratio:.1f}x-{max_ratio:.1f}x)"
+                    )
+                
+                results.append((is_bullish, msg))
+
+            elif indicator_type == "reversal_candle":
+                """
+                Check for bullish reversal candle patterns
+                
+                NOTE: Requires adding candle data to TrendData:
+                - open, high, low, close (you probably have close as 'price')
+                
+                params: {
+                    pattern: "hammer",      # "hammer", "engulfing", "doji"
+                    min_body_pct: 0.3       # Minimum body size (% of range)
+                }
+                """
+                pattern = params.get("pattern", "hammer")
+                
+                # Check if you have OHLC data
+                candle_open = getattr(trend, 'open', None)
+                candle_high = getattr(trend, 'high', None)
+                candle_low = getattr(trend, 'low', None)
+                candle_close = trend.price  # Assuming close = price
+                
+                if candle_open is None:
+                    is_bullish = False
+                    msg = f"Reversal candle ({pattern}): ✗ (no OHLC data)"
+                else:
+                    # Implement pattern detection
+                    # (This is complex - start with simpler patterns)
+                    if pattern == "hammer":
+                        # Hammer: small body at top, long lower wick
+                        body_size = abs(candle_close - candle_open)
+                        total_range = candle_high - candle_low
+                        lower_wick = min(candle_open, candle_close) - candle_low
+                        upper_wick = candle_high - max(candle_open, candle_close)
+                        
+                        if total_range > 0:
+                            is_hammer = (
+                                lower_wick > body_size * 2 and  # Long lower wick
+                                upper_wick < body_size * 0.3     # Small upper wick
+                            )
+                            is_bullish = is_hammer
+                            msg = f"Hammer pattern: {'✓' if is_bullish else '✗'}"
+                        else:
+                            is_bullish = False
+                            msg = "Hammer pattern: ✗ (doji - no range)"
+                    else:
+                        is_bullish = False
+                        msg = f"Reversal candle ({pattern}): ✗ (pattern not implemented)"
+                
+                results.append((is_bullish, msg))
 
         # NEW: Check for hard_stop failures FIRST (before scoring)
         if hard_stop_failures:

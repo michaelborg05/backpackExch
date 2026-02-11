@@ -7,13 +7,8 @@ TO DO
 #Figure out a way to make reason_summary in db more AI readable for analysis
 
 Improvement: The "Mean Reversion" Check
-In your trend_cache.py, you currently track price_vs_vwap. A simple way to avoid peaks is to monitor the Distance from VWAP or the EMA20.
-The Logic: If the price is more than X% away from the EMA20, it is "overextended".
-The Action: Even if is_bullish is true, block the entry until the price pulls back closer to the moving average.
-You could update your TrendData or SignalGenerator to store the local_high and local_low for the last n candles:
-  # Conceptual check for _check_entry_conditions
-  if current_price >= local_high * 0.998:  # Price is within 0.2% of local high
-      return False, "Too close to local peak/resistance"
+  Still need to add scoring to signal_generator for mean_reversion strategy
+  Need to update the pine script to include new indicator info
 
  # fix SL/TP override. Its changing the profile for all future alerts
 # Mean reversion profile for extreme RSI ranges

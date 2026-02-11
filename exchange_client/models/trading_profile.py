@@ -8,6 +8,8 @@ class TradingProfile(BaseModel):
     api_key: str
     secret: str    
     
+    strategy_type: str = Field("trend_following", description="Type of strategy (e.g., 'trend_following', 'mean_reversion')")
+
     # Position management settings (as percentages)
     take_profit_pct: Optional[Decimal] = Field(None, description="Take profit percentage (e.g., 5.0 for 5%)")
     stop_loss_pct: Optional[Decimal] = Field(None, description="Stop loss percentage (e.g., 2.0 for 2%)")

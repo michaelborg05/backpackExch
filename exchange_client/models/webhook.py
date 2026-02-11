@@ -111,6 +111,17 @@ class TrendData(BaseModel):
     ema50_changed: Optional[bool] = Field(False)
     rsi_changed: Optional[bool] = Field(False)
 
+    # NEW: Optional fields for advanced indicators
+    bb_lower: Optional[float] = None      # Bollinger lower band
+    bb_upper: Optional[float] = None      # Bollinger upper band
+    bb_middle: Optional[float] = None     # Bollinger middle (SMA)
+    
+    # NEW: OHLC for candle patterns
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    
     def is_bullish(self, min_rsi: float = 50) -> bool:
         """Quick check if trend is bullish"""
         return (

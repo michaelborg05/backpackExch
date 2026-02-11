@@ -69,12 +69,16 @@ class ReEntryManager:
             
             # RULE 2: Exit-specific requirements
             close_reason = recent_exit.close_reason
+            from cache.price_cache import get_price_cache
+            price_cache = get_price_cache()
+            current_price = float(price_cache.get_price(symbol))
             
             # After profitable exit (TP/Trailing Stop), require momentum reset
             if close_reason in ["TAKE_PROFIT", "TRAILING_STOP"]:
                 reset_ok, reset_reason = self._check_momentum_reset(
                     recent_exit,
-                    current_trend
+                    current_trend,
+                    current_price
                 )
                 
                 if not reset_ok:
@@ -85,11 +89,13 @@ class ReEntryManager:
             # After stop loss, allow but log it (signal generator should be more cautious)
             elif close_reason == "STOP_LOSS":
                 # Don't re-enter at higher price after stop
-                if current_trend.price > recent_exit.exit_price:
-                    return False, f"Re-entry rejected. Price higher than exit (Curr: {current_trend.price:.2f} > Exit: {recent_exit.exit_price:.2f})"
+
+                if current_price > recent_exit.exit_price:
+                    return False, f"Re-entry rejected. Price higher than exit (Curr: {current_price:.2f} > Exit: {recent_exit.exit_price:.2f})"
                 reset_ok, reset_reason = self._check_momentum_reset(
                     recent_exit,
-                    current_trend
+                    current_trend,
+                    current_price
                 )
                 if not reset_ok:
                     return False, f"Re-entry after Stop loss exit @ {recent_exit.closed_at.strftime('%H:%M')}: {reset_reason}"
@@ -138,6 +144,7 @@ class ReEntryManager:
         self,
         recent_exit: Position,
         current_trend: TrendData,
+        current_price: float
     ) -> Tuple[bool, str]:
         """
         Check momentum reset using TRADING timeframe
@@ -206,21 +213,21 @@ class ReEntryManager:
             checks.append(f"RSI extreme ({rsi:.1f})")
         
         # 3. Price vs EMA20 (0-20 points)
-        if current_trend.price >= current_trend.ema20 * 0.997:
+        if current_price >= current_trend.ema20 * 0.997:
             score += 20
             checks.append("Price @ EMA20+")
-        elif current_trend.price >= current_trend.ema20 * 0.99:
+        elif current_price >= current_trend.ema20 * 0.99:
             score += 10
             checks.append("Price near EMA20")
         else:
-            price_vs_ema = ((current_trend.price - current_trend.ema20) / current_trend.ema20) * 100
+            price_vs_ema = ((current_price - current_trend.ema20) / current_trend.ema20) * 100
             score += 0
             checks.append(f"Price below EMA20 ({price_vs_ema:.2f}%)")
         
         # 4. Price vs exit price (0-10 points)
         exit_price = float(recent_exit.exit_price)
         if exit_price and exit_price > 0:
-            price_change_pct = ((current_trend.price - exit_price) / exit_price) * 100
+            price_change_pct = ((current_price - exit_price) / exit_price) * 100
             
             if -1.0 <= price_change_pct <= 0.5:  # Slight pullback is ideal
                 score += 10

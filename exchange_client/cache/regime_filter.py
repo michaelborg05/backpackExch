@@ -74,11 +74,13 @@ class RegimeFilter:
         self, 
         symbol: str,
         primary_timeframe: str = "60",
-        confirm_timeframe: str = "15"
+        confirm_timeframe: str = "15",
+        strategy_type: str = "trend_following"
     ) -> Tuple[MarketRegime, str]:
         """
         Determine if market environment is SAFE for trading
-        
+         Args:
+            strategy_type: "trend_following" or "mean_reversion"
         Returns:
             (regime, reason) where regime is SAFE, CHOPPY, or HIGH_RISK
         """
@@ -96,7 +98,7 @@ class RegimeFilter:
         
         # PRIORITY 1: Check for HIGH RISK (blocks everything)
         high_risk, risk_reason = self._check_high_risk(
-            symbol, primary_trend, confirm_trend, primary_timeframe
+            symbol, primary_trend, confirm_trend, primary_timeframe, strategy_type=strategy_type
         )
         if high_risk:
             regime = MarketRegime.HIGH_RISK
@@ -127,7 +129,8 @@ class RegimeFilter:
         symbol: str,
         primary_trend,
         confirm_trend,
-        primary_timeframe: str
+        primary_timeframe: str,
+        strategy_type: str = "trend_following"
     ) -> Tuple[bool, Optional[str]]:
         """
         Detect HIGH RISK conditions that invalidate ALL setups
@@ -135,10 +138,27 @@ class RegimeFilter:
         These are conditions where even a "perfect" 3/3 bullish trend should be avoided
         """
         rsi = primary_trend.rsi
+
+        #1. Panic zone
+        if strategy_type == "trend_following":
+            # Original logic - block extreme panic
+            if rsi < self.rsi_panic:  # 30
+                return True, f"Panic zone - RSI {rsi:.0f} indicates distribution"
         
-        # 1. PANIC ZONE - Institutional dumping
-        if rsi < self.rsi_panic:
-            return True, f"Panic zone - RSI {rsi:.0f} indicates distribution"
+        elif strategy_type == "mean_reversion":
+            # Mean reversion LOVES oversold, but not EXTREME panic
+            # Only block if RSI < 20 (true panic) or dropping very fast
+            rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
+                symbol, primary_timeframe
+            )
+            
+            if rsi < 20:  # Extreme panic
+                return True, f"Extreme panic - RSI {rsi:.0f} too low even for mean reversion"
+            
+            # Block if RSI is plummeting (momentum < -10)
+            if rsi_momentum is not None and rsi_momentum < -10:
+                return True, f"Free fall - RSI dropping {rsi_momentum:.1f} (wait for stabilization)"
+                
         
         # 2. EUPHORIA ZONE - Retail FOMO topping
         if rsi > self.rsi_euphoria:
@@ -163,19 +183,36 @@ class RegimeFilter:
         # - Block: Strong bullish HTF + bearish LTF reversal (uptrend breaking)
         # - Allow: Bearish HTF + bullish LTF recovery (downtrend recovering - GOOD!)
 
-        if confirm_trend is not None:
-            primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
-            confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                        
-            # ONLY Case: Strong bullish HTF + Strong bearish LTF
-            # (Do NOT check the inverse - that's a recovery, not a whipsaw)
-            if primary_diff_pct > self.whipsaw_threshold:  # Strong bullish 60m
-                if confirm_diff_pct < self.reversal_threshold:  # Strong bearish 15m (reversal)
+        if strategy_type == "trend_following":
+            # ... existing whipsaw logic ...
+            if confirm_trend is not None:
+                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
+                            
+                # ONLY Case: Strong bullish HTF + Strong bearish LTF
+                # (Do NOT check the inverse - that's a recovery, not a whipsaw)
+                if primary_diff_pct > self.whipsaw_threshold:  # Strong bullish 60m
+                    if confirm_diff_pct < self.reversal_threshold:  # Strong bearish 15m (reversal)
+                        return True, (
+                            f"Whipsaw reversal - strong uptrend breaking "
+                            f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
+                        )
+        
+        elif strategy_type == "mean_reversion":
+            # Mean reversion LIKES volatility and reversals
+            # Only block if BOTH timeframes are in free fall
+            if confirm_trend is not None:
+                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
+                
+                # Only block if BOTH very bearish (coordinated crash)
+                if primary_diff_pct < -2.0 and confirm_diff_pct < -2.0:
                     return True, (
-                        f"Whipsaw reversal - strong uptrend breaking "
+                        f"Coordinated crash - both timeframes very bearish "
                         f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
                     )
         
+         
         # 5. DISTRIBUTION PATTERN - High volume selling
         # (Only flag if we have volume data AND it's extreme)
         if primary_trend.volume_ratio is not None:
@@ -257,7 +294,8 @@ class RegimeFilter:
         symbol: str,
         profile_name: str,
         primary_timeframe: str = "60",
-        confirm_timeframe: str = "15"
+        confirm_timeframe: str = "15",
+        strategy_type: str = "trend_following"
     ) -> Tuple[bool, str]:
         """
         Simple yes/no: Is the market SAFE enough to trade?
@@ -268,7 +306,12 @@ class RegimeFilter:
         1. Regime filter: Is market safe? → If no, skip this symbol entirely
         2. Trend logic: Is there a bullish setup? → If yes, enter
         """
-        regime, reason = self.get_regime(symbol, primary_timeframe, confirm_timeframe)
+        regime, reason = self.get_regime(
+            symbol, 
+            primary_timeframe, 
+            confirm_timeframe, 
+            strategy_type=strategy_type
+        )
         
         if regime == MarketRegime.SAFE:
             # Market is safe - now use your trend logic to find entries

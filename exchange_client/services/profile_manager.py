@@ -56,7 +56,8 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             
         api_key = os.getenv(cfg["api_key_env"])
         secret = os.getenv(cfg["secret_env"])
-
+        strategy_type = cfg.get("strategy_type", "trend_following")  # Default to trend_following if not specified
+        
         if not api_key or not secret:
             raise RuntimeError(f"Missing env vars for profile '{name}'")
 
@@ -161,7 +162,8 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             name=name,
             api_key=api_key,
             secret=secret,
-        
+
+            strategy_type=strategy_type,
             # Position sizing
             default_order_size_usdc=float(cfg.get("default_order_size_usdc", 100)), # Default order size in USDC (fixed amount)
             max_position_size_pct=float(cfg.get("max_position_size_pct", 10)),      # Max position as % of portfolio (e.g., 10% = 10.0)

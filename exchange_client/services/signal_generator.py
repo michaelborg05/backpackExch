@@ -123,7 +123,8 @@ class SignalGenerator:
         if self.profile.use_market_regime_filter:
             can_trade, regime_reason = self.regime_filter.can_trade(
                 symbol=symbol,
-                profile_name=self.profile.name
+                profile_name=self.profile.name,
+                strategy_type=self.profile.strategy_type
             )
 
             if not can_trade:
