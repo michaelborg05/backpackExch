@@ -275,11 +275,12 @@ class RegimeFilter:
         
         # 3. DEAD VOLUME - No conviction
         if primary_trend.volume_ratio is not None:
-            if primary_trend.volume_ratio < self.min_volume_ratio:
-                issues.append(
-                    f"Dead volume ({primary_trend.volume_ratio:.2f}x - no conviction)"
-                )
-            
+            #Remove first check. Low volume is counting as 2 issues and will cause choppy all the time during low trade windows
+
+            #if primary_trend.volume_ratio < self.min_volume_ratio:
+                #issues.append(
+                #    f"Dead volume ({primary_trend.volume_ratio:.2f}x - no conviction)"
+                #)
             # NEW: Check both timeframes
             if confirm_trend is not None and confirm_trend.volume_ratio is not None:
                 if (primary_trend.volume_ratio < self.min_volume_ratio and 
