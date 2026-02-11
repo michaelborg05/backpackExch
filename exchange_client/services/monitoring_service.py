@@ -26,6 +26,7 @@ from services.signal_generator import get_signal_generator
 from utils.position_calculator import get_position_size_calculator
 from cache.trend_cache import initialize_trend_cache_with_db
 from cache.trend_cache_warmup import warmup_trend_cache
+import os
 
 from db.utils import get_db_session
 from db.crud import (
@@ -90,7 +91,7 @@ class MonitoringService:
         self._dust_conversion_interval = 2880  # Convert dust every 2880 cycles (24 hours if cycle is 30s)
 
         self._signal_check_counter = 0
-        self._signal_check_interval = 1  # Check for signals every 10 cycles (5 min if cycle is 30s)
+        self._signal_check_interval = 10  # Check for signals every 10 cycles (5 min if cycle is 30s)
         self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
 
 
