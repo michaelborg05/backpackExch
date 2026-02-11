@@ -293,10 +293,11 @@ profiles:
       # 1. RSI oversold and turning up
       - type: "rsi_oversold"
         params:
-          max_value: 40
+          max_value: 42
           require_rising: true
-          min_momentum: 1.0
-      
+          min_momentum: 0.5
+          hard_stop: true
+
       # 2. Price below VWAP (stretched)
       - type: "price_below_vwap"
         params:
