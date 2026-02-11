@@ -507,7 +507,7 @@ class MonitoringService:
                     if balance_info is None:
                         current_balance = 0
                     else:
-                        current_balance = float(balance_info.get('available', 0))
+                        current_balance = float(balance_info.get('available', 0)) + float(balance_info.get('locked', 0))
                     
                     # If balance is zero or less than 1% of expected, position is invalid
                     if current_balance < (float(expected_quantity) * 0.01):  # 1% threshold
