@@ -349,8 +349,8 @@ profiles:
 
     take_profit_pct: 0.9
     stop_loss_pct: 0.7
-    trailing_stop_pct: 0.8
-    arm_trailing_stop_pct: 0.7
+    trailing_stop_pct: 0.4
+    arm_trailing_stop_pct: 0.4
     use_trailing_stop: true
 
     #position sizing
