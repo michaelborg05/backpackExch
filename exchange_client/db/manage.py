@@ -299,6 +299,68 @@ def setup_symbol_configs():
     finally:
         db.close()
 
+def add_new_profile():
+    # Function to add a new trading profile
+    profile_name = input("\nEnter new profile name: ")
+    print(f"Adding new profile: {profile_name}")
+    confirm = input("\nConfirm? (yes/no): ").lower() == "yes"
+    if confirm == False: 
+        return
+    
+    from db.crud import create_circuit_breaker_config
+    try:
+        db = SessionLocal()
+        create_circuit_breaker_config(
+            db,
+            profile_name=profile_name,
+            max_daily_profit_pct=Decimal("5.0"),
+            max_daily_loss_pct=Decimal("3.0"),
+            profit_lock_hours=6,
+            loss_lock_hours=12
+        )
+        default_configs = {
+            "SOL_USDC": {
+                "order_size_usdc": 150.0,
+                "max_position_size_pct": 50.0  # 15% of portfolio
+            },
+            "ETH_USDC": {
+                "order_size_usdc": 150.0,
+                "max_position_size_pct": 50.0  # 20% of portfolio
+            },
+            "HYPE_USDC": {
+                "order_size_usdc": 100.0,
+                "max_position_size_pct": 40.0  # 10% of portfolio
+            },
+            "SUI_USDC": {
+                "order_size_usdc": 100.0,
+                "max_position_size_pct": 40.0  # 15% of portfolio
+            }
+        } 
+        
+        from db.crud import upsert_symbol_config
+        for symbol, config in default_configs.items():
+            try:
+                upsert_symbol_config(
+                    db,
+                    profile_name=profile_name,
+                    symbol=symbol,
+                    order_size_usdc=config["order_size_usdc"],
+                    max_position_size_pct=config.get("max_position_size_pct")
+                )
+
+                print(f"  ✓ {symbol}: ${config['order_size_usdc']}, max {config.get('max_position_size_pct', 'N/A')}% of portfolio")
+
+            except Exception as e:
+                print(f"  ✗ Failed to create config for {symbol}: {e}")
+       
+    except Exception as e:
+        print(f"✗ Failed to migrate {profile_name}: {e}")
+        
+    finally:
+        db.close()
+    print("\n✓ Profile setup complete")
+
+
 # Update the commands dict:
 commands = {
     "create": create_tables,
@@ -306,9 +368,10 @@ commands = {
     "reset": reset_tables,
     "migrate-profiles": migrate_yaml_profiles,
     "load-dummy": load_dummy_data,
-    "migrate_circuit_breaker": migrate_circuit_breaker,  
-    "setup-symbols": setup_symbol_configs,  
-    }
+    "migrate_circuit_breaker": migrate_circuit_breaker,
+    "setup-symbols": setup_symbol_configs,
+    "add-profile": add_new_profile
+}
 
 if __name__ == "__main__":
     #command = "migrate_circuit_breaker"
@@ -323,6 +386,7 @@ if __name__ == "__main__":
          print("  load-dummy - Load dummy data into database")
          print("  migrate-circuit-breaker - Migrate circuit breaker configurations")
          print("  setup-symbols - Set up symbol-specific configurations")
+         print("  add-profile - Add a new trading profile")
          sys.exit(1)
     
     command = sys.argv[1]

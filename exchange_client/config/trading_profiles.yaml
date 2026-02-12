@@ -340,3 +340,93 @@ profiles:
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 8  # Force exit if stuck
 
+  15m_no_trend:
+    enabled: true
+    api_key_env: BP_API_KEY_1H
+    secret_env: BP_SECRET_1H
+
+    strategy_type: trend_following
+
+    take_profit_pct: 0.9
+    stop_loss_pct: 0.7
+    trailing_stop_pct: 0.8
+    arm_trailing_stop_pct: 0.7
+    use_trailing_stop: true
+
+    #position sizing
+    default_order_size_usdc: 100.0      # Buy $100 per order
+    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    
+    # Risk management
+    max_open_positions: 2               # Max concurrent positions per token
+    max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
+
+    use_market_regime_filter: true
+
+    # 🎯 SIGNAL GENERATION SETTINGS (NEW)
+    enable_signal_generation: true    # Enable automated signal generation
+    signal_timeframe: "15"           # Timeframe for entry signals
+    signal_cooldown_seconds: 600      # Wait 10min between signals for same symbol
+    min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
+    min_volume_ratio: 1.1             # Require 10% above average volume
+
+    # Trend filters
+    use_trend_filter: false
+    trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
+    trend_indicators:
+      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
+        params:
+          ema: 50
+          direction: "not_falling"
+          min_slope_pct: 0.01
+      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
+        params:
+          ema: 20
+          direction: "rising"
+          min_slope_pct: 0.02
+      - type: "rsi_threshold"
+        params: 
+          period: 14
+          min_value: 52
+          use_momentum: true
+          early_threshold: 40
+      - type: "price_vs_vwap"
+        params: {}
+    min_indicators_required: 3  # Require 3/4 (stricter)
+
+    use_entry_filter: true
+    entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
+    entry_indicators:
+      - type: "price_vs_ema"  # NEW: Price must be at/above EMA20
+        params:
+          ema: 20
+          min_gap_pct: 0.0
+          max_gap_pct: 1.5
+      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
+        params:
+          ema: 20
+          direction: "rising"
+          min_slope_pct: 0.02
+      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
+        params:
+          ema: 50
+          direction: "not_falling"
+          min_slope_pct: 0.01
+      - type: "rsi_threshold"
+        params:
+          period: 14
+          min_value: 53
+          use_momentum: true
+          early_threshold: 40
+          hard_stop: true
+      - type: "price_vs_vwap"
+        params: {}
+    min_entry_indicators_required: 4
+
+    # ATR filter (volatility)
+    use_atr_filter: false
+     # Trend-based exit (intelligent)
+    use_trend_invalidation_exit: true
+    min_position_age_for_trend_check: 6  # hours
+    # Time-based invalidation and max position backstop (last resort)
+    max_position_hours: 18  # Force exit if stuck
