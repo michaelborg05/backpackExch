@@ -309,12 +309,10 @@ class TelegramService:
                         from cache.atr_cache import get_atr_cache
                         from services.circuit_breaker import get_circuit_breaker
                         from cache.regime_filter import get_regime_filter
-                        from cache.regime_filter_new import get_regime_filter_new
                         
                         trend_cache = get_trend_cache()
                         circuit_breaker = get_circuit_breaker()
                         regime_filter = get_regime_filter()
-                        regime_filter_new = get_regime_filter_new()
 
                         if not self.profile_manager:
                             self.logger.warning("Profile manager not initialized")
@@ -414,42 +412,6 @@ class TelegramService:
                                 if details.get('choppy'):
                                     msg += f"\n🟡 choppy: {', '.join([i['symbol'] for i in details['choppy']])}\n"
                                 
-                                await bot.send_message(
-                                    chat_id=chat_id,
-                                    text=msg,
-                                    parse_mode="HTML"
-                                )
-
-
-                                regime_summary_new = regime_filter_new.get_regime_summary(db_tickers)
-                                msg = f"🌐 *Market Regime Report*\n"
-                                #msg += f"✅ Safe: {regime_summary['safe']} | "
-                                #msg += f"✅ High Risk: {regime_summary['expanding']}\n"
-                                #msg += f"⚠️ choppy: {regime_summary['choppy']} | "
-                                #msg += f"🚫 High Risk: {regime_summary['high_risk']}\n"
-                                #msg += "─" * 15 + "\n"
-
-                                details = regime_summary_new.get('details', {})
-                                if details.get('safe') or details.get('expanding'):
-                                    msg += "\n🟢 *TRADE READY (safe)*\n"
-                                    for item in details['safe']:
-                                        msg += f"• {item['symbol']} - {item['reason']}\n"
-                                    for item in details['expanding']:
-                                        msg += f"• {item['symbol']} - {item['reason']}\n"
-
-                                # Show High Risk (Protection)
-                                if details.get('high_risk'):
-                                    msg += "\n🚫 *HALTED (High Risk)*\n"
-                                    for item in details['high_risk']:
-                                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
-                                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
-
-                                # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
-                                if details.get('choppy'):
-                                    msg += "\n🟡 *CHOPPY (Uncertain)*\n"
-                                    for item in details['choppy']:
-                                        msg += f"• {item['symbol']} - {item['reason']}\n"
-                                    
                                 await bot.send_message(
                                     chat_id=chat_id,
                                     text=msg,
