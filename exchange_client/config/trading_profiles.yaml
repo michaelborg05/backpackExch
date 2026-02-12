@@ -293,7 +293,7 @@ profiles:
       # 1. RSI oversold and turning up
       - type: "rsi_oversold"
         params:
-          max_value: 42
+          max_value: 45
           require_rising: true
           min_momentum: 0.5
           hard_stop: true
