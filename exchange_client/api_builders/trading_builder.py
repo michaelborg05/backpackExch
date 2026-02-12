@@ -53,7 +53,7 @@ class TradingService:
             self.logger.info("Initialized with default config")
             
 
-    def _validate_and_adjust_order(self, order: OrderExecuteRequest, profile_name: str = "default") -> OrderExecuteRequest:
+    def _validate_and_adjust_order(self, order: OrderExecuteRequest) -> OrderExecuteRequest:
         """
         Validate order against available balance and adjust if needed
         Handles both BUY (checks quote asset) and SELL (checks base asset)
@@ -76,12 +76,12 @@ class TradingService:
         
         # Determine which asset to check based on order side
         if order.side == Side.ASK:  # SELL - check base asset
-            return self._validate_sell_order(order, base_asset, profile_name=profile_name)
+            return self._validate_sell_order(order, base_asset)
         else:  # BID - check quote asset (USDC)
-            return self._validate_buy_order(order, base_asset, quote_asset, profile_name=profile_name)
+            return self._validate_buy_order(order, base_asset, quote_asset)
 
 
-    def _validate_sell_order(self, order: OrderExecuteRequest, base_asset: str, profile_name: str = "default") -> OrderExecuteRequest:
+    def _validate_sell_order(self, order: OrderExecuteRequest, base_asset: str) -> OrderExecuteRequest:
         """
         Validate SELL order against available base asset balance
         
@@ -92,14 +92,14 @@ class TradingService:
         Returns:
             Adjusted order if needed
         """
-        available = self.balance_cache.get_available_balance(profile_name=profile_name, asset=base_asset)
+        available = self.balance_cache.get_available_balance(profile_name=self.profile.name, asset=base_asset)
         # Parse order quantity
         order_qty = self._parse_order_quantity(order.quantity, available, base_asset)
         
         # Validate we have balance data
         if available is None:
             self.logger.warning(
-                f"Could not retrieve balance for {profile_name} {base_asset}, proceeding without validation"
+                f"Could not retrieve balance for {self.profile.name} {base_asset}, proceeding without validation"
             )
             if order_qty is None:
                 raise InvalidQuantityError(
@@ -145,7 +145,7 @@ class TradingService:
                     # Refresh balance cache
                     if order_response is not None:
                         self._refresh_balance_cache_after_trade(order_response)
-                    available = self.balance_cache.get_available_balance(profile_name=profile_name, asset=base_asset)
+                    available = self.balance_cache.get_available_balance(profile_name=self.profile.name, asset=base_asset)
                     
                     if available is None:
                         self.logger.warning(f"Could not refresh balance for {base_asset} after cancelling orders")
@@ -187,8 +187,7 @@ class TradingService:
         self, 
         order: OrderExecuteRequest, 
         base_asset: str, 
-        quote_asset: str,
-        profile_name: str = "default"
+        quote_asset: str        
     ) -> OrderExecuteRequest:
         """
         Validate BUY order against available quote asset balance (USDC)
@@ -202,7 +201,7 @@ class TradingService:
             Adjusted order if needed
         """
         # Get available quote balance (USDC)
-        available_quote = self.balance_cache.get_available_balance(profile_name=profile_name, asset=quote_asset)
+        available_quote = self.balance_cache.get_available_balance(profile_name=self.profile.name, asset=quote_asset)
         
         if available_quote is None:
             self.logger.warning(
@@ -413,17 +412,17 @@ class TradingService:
         quantize_str = "0." + "0" * decimals
         return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
-    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL",profile_name: str = "default", reason_summary: List[str] = None,**kwargs) -> OrderResponse:
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL", reason_summary: List[str] = None,**kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
-        order = self._validate_and_adjust_order(order, profile_name=profile_name)
+        order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
         return self.ProcessMarketOrder(order, source=source, reason_summary=reason_summary)
 
-    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL", profile_name: str = "default",position_id: str =None, reason_summary: List[str] = None, **kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL",position_id: str =None, reason_summary: List[str] = None, **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
-        order = self._validate_and_adjust_order(order, profile_name=profile_name)
+        order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
         return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary) 
 
@@ -741,10 +740,10 @@ class TradingService:
                     f"Position opened: ID {position.id}, "
                     f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
                 )
-                #give 1 second delay to let exchange balances update after buy
+                #give 0.5 second delay to let exchange balances update after buy
                 import time
-                time.sleep(1)
-                
+                time.sleep(0.5)
+
                 #Update balance cache before creating TP order
                 self._refresh_balance_cache_after_trade(order_response)
 
@@ -933,8 +932,7 @@ class TradingService:
         side: str,
         quantity: float,
         price: float,
-        purpose: str,
-        profile_name: str = "default"
+        purpose: str
     ) -> OrderResponse:
         """
         Create a limit order in the database.
@@ -957,7 +955,7 @@ class TradingService:
             order = create_sell(symbol, quantity, price)
         
         #Adjust quantity based on balances and market rules
-        order = self._validate_and_adjust_order(order, profile_name=profile_name)
+        order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
 
         #Execute order
@@ -979,8 +977,7 @@ class TradingService:
 
     def validate_balance_for_trade(self,
         sale_action: str,
-        symbol: str,
-        profile_name: str
+        symbol: str
     ) -> tuple[bool, Optional[str]]:
         """
         Validate that profile has sufficient balance before attempting trade
@@ -1009,27 +1006,27 @@ class TradingService:
         
         # Get cached balance
         available = self.balance_cache.get_available_balance(
-            profile_name=profile_name,
+            profile_name=self.profile.name,
             asset=base_asset
         )
         
         # If no balance data, let it proceed (will fail later with proper error)
         if available is None:
             self.logger.debug(
-                f"[{profile_name}] No cached balance for {base_asset}, proceeding with trade"
+                f"[{self.profile.name}] No cached balance for {base_asset}, proceeding with trade"
             )
             return True, None
         
         # Check if balance is zero
         if available <= 0:
             error_msg = f"No available balance for {base_asset}"
-            self.logger.warning(f"[{profile_name}] {error_msg}")
+            self.logger.warning(f"[{self.profile.name}] {error_msg}")
             return False, error_msg
 
         #if base_asset is USDC (i.e. its a buy), reject if USDC balance below $5 
         if base_asset == "USDC" and available < 5:
             error_msg = f"Balance for {base_asset} below $5"
-            self.logger.warning(f"[{profile_name}] {error_msg}")
+            self.logger.warning(f"[{self.profile.name}] {error_msg}")
             return False, error_msg
 
         #If buy order and already passed above checks, return true and continue
@@ -1042,7 +1039,7 @@ class TradingService:
         if market_info is None:
             # No market info - let trading_builder handle it
             self.logger.debug(
-                f"[{profile_name}] No market info for {symbol}, proceeding with trade"
+                f"[{self.profile.name}] No market info for {symbol}, proceeding with trade"
             )
             return True, None
         
@@ -1053,7 +1050,7 @@ class TradingService:
                 f"Balance too low for {base_asset}. "
                 f"Available: {available}, Minimum: {market_info.min_quantity}"
             )
-            self.logger.warning(f"[{profile_name}] {error_msg}")
+            self.logger.warning(f"[{self.profile.name}] {error_msg}")
             return False, error_msg
         
         # Check if balance would round to zero due to step size
@@ -1063,7 +1060,7 @@ class TradingService:
                 f"Balance too small for {base_asset}. "
                 f"Available: {available} rounds to 0 (step size: {market_info.step_size})"
             )
-            self.logger.warning(f"[{profile_name}] {error_msg}")
+            self.logger.warning(f"[{self.profile.name}] {error_msg}")
             return False, error_msg
         
         # Balance is sufficient - let trading_builder adjust if needed

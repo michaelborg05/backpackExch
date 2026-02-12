@@ -124,8 +124,7 @@ class SignalGenerator:
         # 1. BALANCE CHECK
         is_valid, balance_error = trading.validate_balance_for_trade(
             sale_action="BUY", 
-            symbol=symbol,
-            profile_name=self.profile.name
+            symbol=symbol
         )
         
         if not is_valid:

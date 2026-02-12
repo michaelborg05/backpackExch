@@ -498,8 +498,7 @@ async def tradingview_webhook(
                 # Only rejects if balance is 0 or below minimum/step size
                 is_valid, balance_error = trading.validate_balance_for_trade(
                     sale_action=alert.action, 
-                    symbol=alert.symbol,
-                    profile_name=profile_name
+                    symbol=alert.symbol                    
                 )
                 
                 if not is_valid:
