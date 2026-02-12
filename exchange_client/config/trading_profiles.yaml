@@ -371,14 +371,9 @@ profiles:
     min_volume_ratio: 1.1             # Require 10% above average volume
 
     # Trend filters
-    use_trend_filter: false
+    use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
-      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
-        params:
-          ema: 50
-          direction: "not_falling"
-          min_slope_pct: 0.01
       - type: "ema_slope"  # NEW: Ensure 60m trend is rising
         params:
           ema: 20
@@ -392,7 +387,7 @@ profiles:
           early_threshold: 40
       - type: "price_vs_vwap"
         params: {}
-    min_indicators_required: 3  # Require 3/4 (stricter)
+    min_indicators_required: 2  # Require 3/4 (stricter)
 
     use_entry_filter: true
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy

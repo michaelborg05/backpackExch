@@ -741,6 +741,9 @@ class TradingService:
                     f"Position opened: ID {position.id}, "
                     f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
                 )
+                #give 1 second delay to let exchange balances update after buy
+                import time
+                time.sleep(1)
                 
                 #Update balance cache before creating TP order
                 self._refresh_balance_cache_after_trade(order_response)
