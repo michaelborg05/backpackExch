@@ -471,11 +471,11 @@ class TrendCache:
                     
                     # Build descriptive message
                     if trend.rsi > min_rsi  and rsi_direction in ("increasing", "stable"):
-                        msg = f"RSI: ✓ ({trend.rsi:.1f} > {min_rsi}) - {rsi_direction} momentum {rsi_momentum:+.1f}"
+                        msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} > {min_rsi}) - {rsi_direction} momentum {rsi_momentum:+.1f}"
                     elif trend.rsi > early_threshold and rsi_direction == "increasing":
-                        msg = f"RSI: ✓ ({trend.rsi:.1f} {rsi_direction} momentum: {rsi_momentum:+.1f})"
+                        msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} {rsi_direction} momentum: {rsi_momentum:+.1f})"
                     else:
-                        msg = f"RSI: ✗ ({trend.rsi:.1f} {rsi_direction or 'no momentum'})"
+                        msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} {rsi_direction or 'no momentum'})"
                 else:
                     is_bullish = trend.rsi > min_rsi
                     msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} vs {min_rsi})"
