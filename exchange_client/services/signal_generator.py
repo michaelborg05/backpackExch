@@ -198,7 +198,10 @@ class SignalGenerator:
             
             reasons.append(f"✅ Trend ({self.trend_timeframe}m): {trend_reason}")
             confidence_score += self.trend_weight
-        
+        elif self.strategy_type == "trend_following":
+            reasons.append(f"✅ Trend filter not applied")
+            confidence_score += self.trend_weight
+
         # 5. ENTRY FILTER (Execution Timeframe)
         if self.use_entry_filter:
             entry_check, entry_reason = self._check_entry_filter(symbol, self.entry_timeframe)

@@ -134,7 +134,7 @@ profiles:
     use_atr_filter: false
 
   1hr_MB:
-    enabled: true
+    enabled: false
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H
     
