@@ -652,7 +652,9 @@ class TrendCache:
                 
                 results.append((is_bullish, msg))
                 if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
+                    #Only make it a hard stop if not turning up
+                    if not is_turning_up:
+                        hard_stop_failures.append(msg)
 
             elif indicator_type == "rsi_overbought":
                 """
