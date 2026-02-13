@@ -241,28 +241,33 @@ class TrendCache:
             - direction: "increasing", "decreasing", or "stable"
         """
         key = f"{symbol}_{timeframe}"
-        
-        if key not in self._rsi_history or len(self._rsi_history[key]) < 2:
+        lookback = 3
+        if key not in self._rsi_history or len(self._rsi_history[key]) < lookback + 1:
             return None, None
         
         history = self._rsi_history[key]
         
-        # Get current and previous RSI values
-        current_rsi = history[-1][1]
-        previous_rsi = history[-2][1]
+        rsi_values = [entry[1] for entry in history]
+        momentums = []
+        for i in range(lookback):
+            # Compare each period: newest - previous
+            momentum = rsi_values[-(i+1)] - rsi_values[-(i+2)]
+            momentums.append(momentum)
         
-        # Calculate momentum
-        momentum = current_rsi - previous_rsi
-        
-        # Determine direction
-        if momentum > 1:  # Increasing threshold
+        # Average momentum over lookback periods
+        avg_momentum = sum(momentums) / len(momentums)
+        most_recent_momentum = momentums[0]  # First in list is most recent
+        if avg_momentum > 0 and most_recent_momentum <= 0:
+            direction = "unstable"
+        # Determine direction based on average momentum
+        elif avg_momentum > 1:  # Increasing threshold
             direction = "increasing"
-        elif momentum < -1:  # Decreasing threshold
+        elif avg_momentum < -1:  # Decreasing threshold
             direction = "decreasing"
         else:
             direction = "stable"
         
-        return momentum, direction
+        return avg_momentum, direction
     
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
         """Get cached trend data if available and not stale"""

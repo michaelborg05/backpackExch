@@ -371,7 +371,7 @@ profiles:
     min_volume_ratio: 1.1             # Require 10% above average volume
 
     # Trend filters
-    use_trend_filter: true
+    use_trend_filter: false
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
       - type: "ema_slope"  # NEW: Ensure 60m trend is rising
