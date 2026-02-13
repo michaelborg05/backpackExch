@@ -5,11 +5,9 @@ from models.signal_validation import SignalValidationResult
 
 class SignalStrength(Enum):
     """Signal confidence levels"""
-    WEAK = 1        # 60-70% confidence
-    MODERATE = 2    # 70-80% confidence
-    STRONG = 3      # 80-90% confidence
-    VERY_STRONG = 4 # 90%+ confidence
-
+    WEAK = 1        # 0-75% confidence
+    MEDIUM = 2    # 75-85% confidence
+    STRONG = 3      # 85-100% confidence
 
 @dataclass
 class TradingSignal:
