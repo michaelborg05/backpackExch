@@ -11,6 +11,7 @@ from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
 from api_builders.trading_builder import TradingService
 from cache.regime_filter import get_regime_filter
+from models.signal_validation import SignalValidationResult, ValidationGroup, MarketContext, IndicatorResult
 
 class SignalGenerator:
     """
@@ -182,14 +183,35 @@ class SignalGenerator:
         # Initialize scoring
         reasons = []
         indicators = {}
+        validation = SignalValidationResult(
+            timestamp=time.time(),
+            symbol=symbol,
+            signal_timeframe=self.trading_timeframe,
+            strategy_type=self.strategy_type,
+            score=0.0,
+            score_components=0,
+            market_context=MarketContext(),
+            trend_validation=ValidationGroup(enabled=self.profile.use_trend_filter),
+            entry_validation=ValidationGroup(enabled=self.use_entry_filter)
+        )
+
         confidence_score = 0.0
         
         # 4. TREND FILTER (Higher Timeframe - ONLY for trend_following)
         if self.profile.use_trend_filter:
-            trend_check, trend_reason = self._check_trend(symbol, self.trend_timeframe)
+            trend_check, trend_reason, trend_indicators = self._check_trend(symbol, self.trend_timeframe)
             indicators['trend'] = trend_check
-            
-            if not trend_check['is_bullish']:
+
+            validation.trend_validation.timeframe = self.trend_timeframe
+            validation.trend_validation.passed = trend_check
+            validation.trend_validation.indicators = trend_indicators
+            validation.trend_validation.indicators_total = len(trend_indicators)
+            validation.trend_validation.indicators_passed = sum(
+                1 for ind in trend_indicators if ind.is_bullish
+            )
+            validation.trend_validation.summary = trend_reason
+
+            if not trend_check:
                 self.logger.debug(
                     f"{symbol}: ❌ Trend filter failed ({self.trend_timeframe}m) - {trend_reason}"
                 )
@@ -197,16 +219,26 @@ class SignalGenerator:
             
             reasons.append(f"✅ Trend ({self.trend_timeframe}m): {trend_reason}")
             confidence_score += self.trend_weight
+
         elif self.strategy_type == "trend_following":
             reasons.append(f"✅ Trend filter not applied")
             confidence_score += self.trend_weight
 
         # 5. ENTRY FILTER (Execution Timeframe)
         if self.use_entry_filter:
-            entry_check, entry_reason = self._check_entry_filter(symbol, self.entry_timeframe)
+            entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
             indicators['entry_filter'] = entry_check
-            
-            if not entry_check['is_bullish']:
+
+            validation.entry_validation.timeframe = self.entry_timeframe
+            validation.entry_validation.passed = entry_check
+            validation.entry_validation.indicators = entry_indicators
+            validation.entry_validation.indicators_total = len(entry_indicators)
+            validation.entry_validation.indicators_passed = sum(
+                1 for ind in entry_indicators if ind.is_bullish
+            )
+            validation.entry_validation.summary = entry_reason
+
+            if not entry_check:
                 self.logger.debug(
                     f"{symbol}: ❌ Entry filter failed ({self.entry_timeframe}m) - {entry_reason}"
                 )
@@ -218,7 +250,13 @@ class SignalGenerator:
         # 6. VOLUME CONFIRMATION
         volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
         indicators['volume'] = volume_check
-        
+
+        validation.market_context.volume = {
+            "is_sufficient": volume_check['has_volume'],
+            "ratio": float(volume_check['volume_ratio']),
+            "required_ratio": self.min_volume_ratio,
+            "message": f"{volume_check['volume_ratio']:.1f}x average ({self.min_volume_ratio}x required)"
+        }        
         if volume_check['has_volume']:
             reasons.append(f"✅ Volume: {volume_reason}")
             confidence_score += self.volume_weight
@@ -230,7 +268,13 @@ class SignalGenerator:
         if self.profile.use_atr_filter:
             atr_check, atr_reason = self._check_atr(symbol)
             indicators['atr'] = atr_check
-            
+            validation.market_context.atr = {
+                "is_valid"   : atr_check['is_valid'],
+                "is_volatile": atr_check['is_volatile'],
+                "ratio": float(atr_check['ratio']),
+                "message": f"{atr_check['ratio']:.1f}x average ({self.profile.atr_threshold}x - {self.profile.atr_filter_mode})"
+            }        
+
             if not atr_check['is_valid']:
                 self.logger.debug(f"{symbol}: ❌ ATR check failed - {atr_reason}")
                 return None
@@ -241,10 +285,22 @@ class SignalGenerator:
         if self.strategy_type == "trend_following":
             overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
             indicators['overbought'] = overbought_check
-            
+            ob_check = IndicatorResult(
+                type="rsi_overbought",
+                is_bullish=overbought_check['is_valid'],
+                config={"threshold": 70},
+                values={"rsi": float(overbought_check['rsi'])},
+                message=f"RSI {overbought_check['rsi']:.0f} {'not overbought' if overbought_check['is_valid'] else 'overbought'}"
+            )
+            validation.additional_checks.append(ob_check)
+
             if not overbought_check['is_valid']:
                 reasons.append(f"⚠️  RSI: {ob_reason}")
-                confidence_score += self.safety_weight * 0.3
+                # If over 80, penalise
+                if overbought_check['rsi'] > 80:
+                    confidence_score += -30
+                else:
+                    confidence_score += self.safety_weight * 0.3
             else:
                 reasons.append(f"✅ RSI: {ob_reason}")
                 confidence_score += self.safety_weight
@@ -267,6 +323,9 @@ class SignalGenerator:
             # Trend following uses standard normalization
             confidence_pct = (confidence_score / self.max_confidence) * 100
         
+        validation.score = confidence_pct
+        validation.score_components = 3  # trend, entry, volume
+
         # Check minimum confidence threshold
         if confidence_pct < self.min_confidence:
             self.logger.debug(
@@ -274,6 +333,22 @@ class SignalGenerator:
             )
             return None
         
+        # Build human-readable summary
+        parts = []
+        if validation.trend_validation.enabled:
+            icon = "✅" if validation.trend_validation.passed else "❌"
+            parts.append(f"{icon} Trend ({validation.trend_validation.timeframe}m): "
+                        f"{validation.trend_validation.indicators_passed}/{validation.trend_validation.indicators_total}")
+        if validation.entry_validation.enabled:
+            icon = "✅" if validation.entry_validation.passed else "❌"
+            parts.append(f"{icon} Entry ({validation.entry_validation.timeframe}m): "
+                        f"{validation.entry_validation.indicators_passed}/{validation.entry_validation.indicators_total}")
+        parts.append(f"Vol: {volume_check['volume_ratio']:.1f}x")
+        parts.append(f"Score: {confidence_pct:.1f}%")
+        
+        validation.human_readable = " | ".join(parts)
+        validation.overall_passed = True
+         
         # Determine signal strength
         if confidence_pct >= 85:
             strength = SignalStrength.STRONG
@@ -301,6 +376,7 @@ class SignalGenerator:
             indicators=indicators,
             timestamp=time.time(),
             reasons=reasons,
+            validation_details=validation.to_json(),
             regime_confidence=regime_reason
         )
 
@@ -315,20 +391,21 @@ class SignalGenerator:
     def _check_trend(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Check trend conditions using YAML-configured trend_indicators"""
         if not self.profile.use_trend_filter:
-            return {"is_bullish": True}, "Trend filter disabled"
+            return True, "Trend filter disabled"
         
         indicators_config = getattr(self.profile, 'trend_indicators', None)
         min_required = getattr(self.profile, 'min_indicators_required', 2)
 
-        is_bullish, reason = self.trend_cache.is_bullish(
+        is_bullish, reason, indicator_results = self.trend_cache.is_bullish(
             symbol=symbol,
             timeframe=timeframe,
             indicators_config=indicators_config,
-            min_indicators_required=min_required
+            min_indicators_required=min_required,
+            return_structured=True
         )
-        
-        return {"is_bullish": is_bullish}, reason
-    
+
+        return is_bullish, reason, indicator_results
+
     def _check_entry_filter(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Check entry conditions using YAML-configured entry_indicators"""
         indicators_config = getattr(self.profile, 'entry_indicators', None)
@@ -336,16 +413,17 @@ class SignalGenerator:
         
         if indicators_config is None:
             # No entry filter configured - pass
-            return {"is_bullish": True}, "No entry filter configured"
+            return True, "No entry filter configured"
         
-        is_bullish, reason = self.trend_cache.is_bullish(
+        is_bullish, reason, indicator_results = self.trend_cache.is_bullish(
             symbol=symbol,
             timeframe=timeframe,
             indicators_config=indicators_config,
-            min_indicators_required=min_required
+            min_indicators_required=min_required,
+            return_structured=True
         )
         
-        return {"is_bullish": is_bullish}, reason
+        return is_bullish, reason, indicator_results
 
     def _check_volume(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Check volume confirmation"""
@@ -414,9 +492,9 @@ class SignalGenerator:
         rsi = trend.rsi
         
         # RSI thresholds
-        if rsi < 70:
+        if rsi < 65:
             return {"is_valid": True, "rsi": float(rsi)}, f"RSI {rsi:.0f} not overbought"
-        elif rsi < 75:
+        elif rsi < 70:
             return {"is_valid": False, "rsi": float(rsi)}, f"RSI {rsi:.0f} getting overbought"
         else:
             return {"is_valid": False, "rsi": float(rsi)}, f"RSI {rsi:.0f} overbought"

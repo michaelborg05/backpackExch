@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List, Dict, Tuple
-
+from models.signal_validation import SignalValidationResult
 
 class SignalStrength(Enum):
     """Signal confidence levels"""
@@ -24,6 +24,7 @@ class TradingSignal:
     timeframe: str
     trend_timeframe: str
     regime_confidence: str
+    validation_details: Optional[str] = None  # JSON string of SignalValidationResult
     
     def to_dict(self) -> dict:
         return {
@@ -38,3 +39,11 @@ class TradingSignal:
             "trend_timeframe": self.trend_timeframe,
             "market_regime": self.market_regime
         }
+
+    def get_validation_result(self) -> Optional[SignalValidationResult]:
+        """Parse validation_details JSON back into SignalValidationResult object"""
+        if self.validation_details:
+            import json
+            data = json.loads(self.validation_details)
+            return SignalValidationResult.from_dict(data)
+        return None

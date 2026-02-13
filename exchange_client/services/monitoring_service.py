@@ -944,7 +944,8 @@ class MonitoringService:
                 quantity=str(quantity),  # Use profile's default order size
                 source=f"SIGNAL_{signal.strength.name}",
                 profile_name=profile.name,
-                reason_summary=signal.reasons
+                reason_summary=signal.reasons,
+                validation_summary=signal.validation_details
             )
             
             if result:

@@ -19,8 +19,6 @@ from models.trade import (
     OrderExecuteRequest, 
     OrderResponse, 
     OrderHistoryResponse,
-    OrderCancelRequest,
-    FillHistory,
     create_buy,
     create_sell
 )
@@ -28,7 +26,7 @@ from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
 from db.session import SessionLocal
-from db.crud import save_trade, open_position, close_position, save_order, save_limit_trade, update_order
+from db.crud import save_trade, open_position, close_position, save_order, save_limit_trade, update_order,add_validation_result
 from utils.position_calculator import PositionCalculator
 
 class TradingService:
@@ -412,12 +410,12 @@ class TradingService:
         quantize_str = "0." + "0" * decimals
         return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
-    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL", reason_summary: List[str] = None,**kwargs) -> OrderResponse:
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL", reason_summary: List[str] = None,validation_summary: str = None, **kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
-        return self.ProcessMarketOrder(order, source=source, reason_summary=reason_summary)
+        return self.ProcessMarketOrder(order, source=source, reason_summary=reason_summary, validation_summary=validation_summary)
 
     def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL",position_id: str =None, reason_summary: List[str] = None, **kwargs) -> OrderResponse:
         """Execute a market sell order"""
@@ -706,7 +704,7 @@ class TradingService:
             
         return None
 
-    def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None) -> OrderResponse:
+    def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None, validation_summary: str = None) -> OrderResponse:
         try:
             db = SessionLocal()
             #execute order
@@ -717,6 +715,9 @@ class TradingService:
             # If order was successful, save to DB
             saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary)
             self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
+            if validation_summary:
+                add_validation_result(db, saved_trade, validation_summary=validation_summary)
+
             # Open position if this is a BUY order
             if order_response.side.upper() == "BID":
                 # Calculate position prices based on profile settings

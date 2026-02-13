@@ -78,6 +78,7 @@ class MarketContext:
     regime: Dict[str, Any] = field(default_factory=dict)
     volume: Dict[str, Any] = field(default_factory=dict)
     volatility: Dict[str, Any] = field(default_factory=dict)
+    atr: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict:
         return asdict(self)

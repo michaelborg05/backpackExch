@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from db.models import Trade, Position, Order
 from models.trade import OrderResponse, OrderHistoryResponse
 from models.trading_profile import TradingProfile
-from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
+from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig, TradeValidationResults
 
 def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None) -> Trade:
     """Save a trade to the database"""
@@ -112,6 +112,23 @@ def open_position(
     db.commit()
     db.refresh(position)
     return position
+
+def add_validation_result(
+    db: Session, 
+    trade: Trade,  # Changed: accept Trade object, not OrderResponse
+    validation_summary: str = None
+):
+    """Add a validation result for a trade"""
+    validation_result = TradeValidationResults(
+        trade_id=trade.id,
+        profile_name=trade.profile_name,
+        symbol=trade.symbol,
+        validation_summary=validation_summary
+    )
+    db.add(validation_result)
+    db.commit()
+    db.refresh(validation_result)
+    return validation_result
 
 def update_position_trailing_stop(
     db: Session,
