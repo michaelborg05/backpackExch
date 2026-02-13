@@ -241,7 +241,7 @@ class TrendCache:
             - direction: "increasing", "decreasing", or "stable"
         """
         key = f"{symbol}_{timeframe}"
-        lookback = 3
+        lookback = 2
         if key not in self._rsi_history or len(self._rsi_history[key]) < lookback + 1:
             return None, None
         
