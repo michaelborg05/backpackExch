@@ -138,3 +138,9 @@ class TrendState(Enum):
     HEALTHY = "healthy"         # Trend stable
     DECAYING = "decaying"       # Trend weakening
     BROKEN = "broken"          # Trend failed
+
+class StrategyType(Enum):
+    """Trading strategy types"""
+    TREND_FOLLOWING = "trend_following"
+    MEAN_REVERSION = "mean_reversion"
+

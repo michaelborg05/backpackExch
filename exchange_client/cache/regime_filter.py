@@ -57,8 +57,8 @@ class RegimeFilter:
         self.atr_spike = 1.8                # Volatility explosion
         
         # 3. VOLUME QUALITY
-        self.min_volume_ratio = 0.6         # Below 0.6x = dead market
-        self.min_volume_ratio_confirm = 0.7  # NEW: Stricter for 15m        
+        self.min_volume_ratio = 0.4         # Below 0.4x = dead market
+        self.min_volume_ratio_confirm = 0.5  # NEW: Stricter for 15m
         self.distribution_volume = 1.5      # High volume + down = distribution
 
         # 4. WHIPSAW DETECTION

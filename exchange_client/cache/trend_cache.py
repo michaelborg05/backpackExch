@@ -1,6 +1,7 @@
 # cache/trend_cache.py - Enhanced with database persistence for cache warmup
 
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, List, Tuple, Optional, Any
+from models.signal_validation import IndicatorResult
 import time
 from utils.logging import log_manager
 from models.webhook import TrendData
@@ -282,8 +283,9 @@ class TrendCache:
         symbol: str,
         timeframe: str,
         indicators_config: List[Dict] = None,
-        min_indicators_required: int = 2
-    ) -> Tuple[bool, str]:
+        min_indicators_required: int = 2,
+        return_structured: bool = False
+    ):
         """
         ORIGINAL FUNCTION PRESERVED - Check if trend is bullish for a single timeframe
         
@@ -313,14 +315,17 @@ class TrendCache:
                 {"type": "rsi_threshold", "params": {"period": 14, "min_value": 50}},
                 {"type": "price_vs_vwap", "params": {}}
             ]
-
-        return self._validate_timeframe_indicators(
-            symbol,
-            timeframe,
-            trend,
-            indicators_config,
-            min_indicators_required
+        
+        is_bullish, summary, indicator_results = self._validate_timeframe_indicators(
+            symbol, timeframe, trend, indicators_config, min_indicators_required
         )
+        
+        if return_structured:
+            return is_bullish, summary, indicator_results
+        else:
+            # Backward compatible - return just bool and string
+            return is_bullish, summary
+
     
     def validate_multi_timeframe_trend(
         self,
@@ -397,7 +402,7 @@ class TrendCache:
         trend: TrendData,
         indicators: List[Dict],
         min_indicators_required: int
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, str, List[IndicatorResult]]:
         """
         Validate multiple indicators for a single timeframe.
         Returns True if at least min_indicators_required pass.
@@ -409,6 +414,8 @@ class TrendCache:
         """
         results = []
         hard_stop_failures = []
+        indicator_results = []
+
         from cache.price_cache import get_price_cache
         price_cache = get_price_cache()
         price = price_cache.get_price(symbol)
@@ -418,6 +425,9 @@ class TrendCache:
             indicator_type = indicator_config.get("type")
             params = indicator_config.get("params", {})
             hard_stop = params.get("hard_stop", False)  
+            is_bullish = False
+            msg = ""
+            values = {}
 
             # === BACKWARD COMPATIBILITY: ema_alignment → ema_cross ===
             if indicator_type == "ema_alignment":
@@ -429,6 +439,8 @@ class TrendCache:
                 # EMA20 must be above EMA50 (with optional slope check)
                 use_slope = params.get("use_slope", False)
                 min_slope_pct = params.get("min_slope_pct", 0.01)
+                values["ema20"] = trend.ema20
+                values["ema50"] = trend.ema50
                 
                 if use_slope:
                     # Check both cross and slope
@@ -438,61 +450,61 @@ class TrendCache:
                         is_bullish = trend.ema20 > trend.ema50
                         msg = f"EMA cross: {'✓' if is_bullish else '✗'} (no slope data)"
                     else:
+                        values["slope_pct"] = slope_pct
+                        values["slope_direction"] = slope_direction
                         is_bullish = (
                             trend.ema20 > trend.ema50 and 
-                            slope_pct > min_slope_pct
+                            slope_pct >= min_slope_pct
                         )
                         msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f} - slope: {slope_direction})"
                 else:
                     is_bullish = trend.ema20 > trend.ema50
                     msg = f"EMA cross: {'✓' if is_bullish else '✗'} ({trend.ema20:.2f} vs {trend.ema50:.2f})"
                 
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
-                
             elif indicator_type == "rsi_threshold":
-                # Get RSI momentum (from actual changes only)
-                rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
-                
                 # Enhanced RSI logic with momentum
                 min_rsi = params.get("min_value", 50)
                 use_momentum = params.get("use_momentum", True)
                 early_threshold = params.get("early_threshold", 40)
                 
-                if use_momentum and rsi_momentum is not None:
-                    # Bullish conditions:
-                    # 1. RSI > min_value (traditional - strong)
-                    # 2. RSI > early_threshold AND increasing (catching early momentum)
-                    is_bullish = (
-                        (trend.rsi > min_rsi and rsi_direction in ("increasing", "stable")) or 
-                        (trend.rsi > early_threshold and rsi_momentum > 2)
-                    )
+                rsi = trend.rsi
+                values["rsi"] = float(rsi)
+                values["threshold"] = min_rsi
+
+                if use_momentum:
+                    rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
+                    values["momentum"] = rsi_momentum
+                    values["direction"] = rsi_direction
                     
-                    # Build descriptive message
-                    if trend.rsi > min_rsi  and rsi_direction in ("increasing", "stable"):
-                        msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} > {min_rsi}) - {rsi_direction} momentum {rsi_momentum:+.1f}"
-                    elif trend.rsi > early_threshold and rsi_direction == "increasing":
-                        msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} {rsi_direction} momentum: {rsi_momentum:+.1f})"
+                    # Early entry logic
+                    if rsi >= early_threshold and rsi < min_rsi:
+                        if rsi_direction == "increasing" and rsi_momentum >= 1.0:
+                            is_bullish = True
+                            msg = f"RSI: ✓ {rsi:.1f} early entry (&gt; {early_threshold}  momentum +{rsi_momentum:.1f})"
+                        else:
+                            is_bullish = False
+                            msg = f"RSI: ✗ {rsi:.1f} below {min_rsi} (momentum {rsi_direction} {rsi_momentum:+.1f})"
+                    elif rsi >= min_rsi:
+                        if rsi_momentum:
+                            msg = f"RSI: ✓ {rsi:.1f} &gt; {min_rsi} - {rsi_direction} momentum {rsi_momentum:+.1f}"
+                        else:
+                            msg = f"RSI: ✓ {rsi:.1f} &gt; {min_rsi}"
+                        is_bullish = True
                     else:
-                        msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} {rsi_direction or 'no momentum'})"
+                        is_bullish = False
+                        msg = f"RSI: ✗ {rsi:.1f} &lt; {min_rsi} (no momentum)"
                 else:
-                    is_bullish = trend.rsi > min_rsi
-                    msg = f"RSI: {'✓' if is_bullish else '✗'} ({trend.rsi:.1f} vs {min_rsi})"
-                
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
+                    # Simple threshold check
+                    is_bullish = rsi >= min_rsi
+                    msg = f"RSI: {'✓' if is_bullish else '✗'} {rsi:.1f} {'&gt;' if is_bullish else '&lt;'} {min_rsi}"
 
             elif indicator_type == "price_vs_vwap":
                 # Uses latest price and VWAP (refreshed every update)
                 is_bullish = current_price > trend.vwap
+                values["price"] = float(current_price)
+                values["vwap"] = float(trend.vwap)
+
                 msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({current_price:.2f} vs {trend.vwap:.2f})"
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
-            
-            # === NEW INDICATORS ===
             
             elif indicator_type == "price_vs_ema":
                 # Check if price is above a specific EMA
@@ -503,18 +515,17 @@ class TrendCache:
 
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((current_price - ema_value) / ema_value) * 100
-                
+                values["ema_value"] = float(ema_value)
+                values["gap_pct"] = float(gap_pct)
+
                 is_bullish = gap_pct >= min_gap_pct
                 if max_gap_pct > 0:
                     is_bullish = is_bullish and gap_pct <= max_gap_pct
                 msg = f"Price vs EMA{ema_type}: {'✓' if is_bullish else '✗'} ({gap_pct:+.2f}% gap - min {min_gap_pct:+.2f}%" 
                 if max_gap_pct > 0:
-                    msg += f"/max {max_gap_pct:+.2f}%)"
+                    msg += f" - max {max_gap_pct:+.2f}%)"
                 else:
-                    msg += f"/no max limit)"
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
+                    msg += f" - no max limit)"
             
             elif indicator_type == "ema_slope":
                 # Check if EMA is rising/falling/flat
@@ -529,7 +540,10 @@ class TrendCache:
                 if slope_pct is None:
                     is_bullish = False
                     msg = f"EMA{ema_type} slope: ✗ (no data)"
+                    values["slope_pct"] = f"NA"
+
                 else:
+                    values["slope_pct"] = float(slope_pct)
                     if required_direction == "rising":
                         is_bullish = slope_pct > min_slope_pct
                         direction = "rising" if slope_pct > min_slope_pct else "flat/falling"
@@ -542,10 +556,6 @@ class TrendCache:
                     
                     msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction} {slope_pct:+.3f}%)"
                 
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
-            
             elif indicator_type == "rsi_range":
                 # Block if RSI is in a specific range (indecision zone)
                 # params: {min: 48, max: 52, invert: false}
@@ -556,8 +566,12 @@ class TrendCache:
                 invert = params.get("invert", False)
                 momentum_override = params.get('momentum_override_threshold', None)
                 rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
+                values["rsi_momentum"] = rsi_momentum
+                values["rsi_direction"] = rsi_direction
+                values["rsi"] = trend.rsi
 
                 in_range = min_rsi <= trend.rsi <= max_rsi
+                values["within_range"] = in_range
                 if invert:
                     is_bullish = in_range
                     msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'in' if in_range else 'outside'} {min_rsi}-{max_rsi})"
@@ -575,10 +589,6 @@ class TrendCache:
                             msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'outside' if is_bullish else 'in'} indecision {min_rsi}-{max_rsi})"
                     else: 
                         msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'outside' if is_bullish else 'in'} indecision {min_rsi}-{max_rsi})"
-
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
             
             elif indicator_type == "ema_gap":
                 # Check gap between EMA20 and EMA50
@@ -590,7 +600,10 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", 0.3)
                 
                 gap_pct = abs((trend.ema20 - trend.ema50) / trend.ema50) * 100
-                
+                values["ema20"] = trend.ema20
+                values["ema50"] = trend.ema50
+                values["gap_pct"] = gap_pct
+
                 if mode == "min":
                     is_bullish = gap_pct >= min_gap_pct
                     msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need >{min_gap_pct}%)"
@@ -598,10 +611,6 @@ class TrendCache:
                     is_bullish = gap_pct <= max_gap_pct
                     msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need <{max_gap_pct}%)"
 
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
-            
             elif indicator_type == "price_ema50_range":
                 # Check if price is oscillating around EMA50 (choppy)
                 # params: {max_gap_pct: 1.0}
@@ -609,12 +618,12 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", 1.0)
                 
                 gap_pct = abs((current_price - trend.ema50) / trend.ema50) * 100
+                values["price"] = current_price
+                values["ema50"] = trend.ema50
+                values["gap_pct"] = gap_pct
                 
                 is_bullish = gap_pct > max_gap_pct
                 msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50 - need >{max_gap_pct}%)"
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
 
             elif indicator_type == "rsi_oversold":
                 """
@@ -631,7 +640,8 @@ class TrendCache:
                 
                 # Check if oversold
                 is_oversold = trend.rsi < max_value
-                
+                values["rsi"] = trend.rsi
+
                 if require_rising:
                     rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
                     is_turning_up = (
@@ -639,7 +649,11 @@ class TrendCache:
                         rsi_direction == "increasing" and 
                         rsi_momentum >= min_momentum
                     )
-                    
+                    values["rsi_momentum"] = rsi_momentum
+                    values["rsi_direction"] = rsi_direction
+                    values["oversold"] = is_oversold
+                    values["is_turning_up"] = is_turning_up
+
                     is_bullish = is_oversold and is_turning_up
                     msg = (
                         f"RSI oversold: {'✓' if is_bullish else '✗'} "
@@ -649,12 +663,6 @@ class TrendCache:
                 else:
                     is_bullish = is_oversold
                     msg = f"RSI oversold: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} < {max_value})"
-                
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    #Only make it a hard stop if not turning up
-                    if not is_turning_up:
-                        hard_stop_failures.append(msg)
 
             elif indicator_type == "rsi_overbought":
                 """
@@ -665,9 +673,7 @@ class TrendCache:
                 is_overbought = trend.rsi > min_value
                 is_bullish = not is_overbought  # Bullish = NOT overbought
                 msg = f"RSI overbought check: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f})"
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
+                values["rsi"] = trend.rsi
 
             elif indicator_type == "price_below_vwap":
                 """
@@ -681,6 +687,9 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", -10.0)  # e.g., -10.0 = max 10% below
 
                 gap_pct = ((current_price - trend.vwap) / trend.vwap) * 100
+                values["price"] = current_price
+                values["vwap"] = trend.vwap
+                values["gap_pct"] = gap_pct
 
                 # Want price below VWAP but not TOO far below
                 is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
@@ -689,9 +698,6 @@ class TrendCache:
                     f"Price below VWAP: {'✓' if is_bullish else '✗'} "
                     f"({gap_pct:+.2f}% - need between {max_gap_pct:.1f}% and {min_gap_pct:.1f}%)"
                 )
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
 
             elif indicator_type == "price_extended_below_ema":
                 """
@@ -708,7 +714,10 @@ class TrendCache:
                 
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((current_price - ema_value) / ema_value) * 100
-                
+                values["price"] = current_price
+                values["ema"] = ema_value
+                values["gap_pct"] = gap_pct
+
                 # Want price below EMA (negative gap) but not too far
                 is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
                 
@@ -716,9 +725,6 @@ class TrendCache:
                     f"Price below EMA{ema_type}: {'✓' if is_bullish else '✗'} "
                     f"({gap_pct:+.2f}% - need between {max_gap_pct:.1f}% and {min_gap_pct:.1f}%)"
                 )
-                results.append((is_bullish, msg))
-                if hard_stop and not is_bullish:
-                    hard_stop_failures.append(msg)
 
             elif indicator_type == "bollinger_bands":
                 """
@@ -737,6 +743,9 @@ class TrendCache:
                 # Check if you have BB data
                 bb_lower = getattr(trend, 'bb_lower', None)
                 bb_upper = getattr(trend, 'bb_upper', None)
+                values["bb_lower"] = bb_lower
+                values["bb_upper"] = bb_upper
+                values["price"] = current_price
                 
                 if bb_lower is None:
                     is_bullish = False
@@ -748,6 +757,7 @@ class TrendCache:
                         if mode == "touch":
                             # Within tolerance of lower band
                             distance_pct = abs((current_price - target_band) / target_band) * 100
+                            values["distance_pct"] = distance_pct
                             is_bullish = distance_pct <= tolerance_pct
                             msg = (
                                 f"BB lower touch: {'✓' if is_bullish else '✗'} "
@@ -757,6 +767,7 @@ class TrendCache:
                             # Below lower band
                             is_bullish = current_price <= target_band
                             gap_pct = ((current_price - target_band) / target_band) * 100
+                            values["gap_pct"] = gap_pct
                             msg = (
                                 f"BB lower breach: {'✓' if is_bullish else '✗'} "
                                 f"(price {gap_pct:+.2f}% vs band)"
@@ -766,8 +777,6 @@ class TrendCache:
                         is_bullish = current_price < target_band  # Not above upper band
                         msg = f"BB upper check: {'✓' if is_bullish else '✗'}"
                 
-                results.append((is_bullish, msg))
-
             elif indicator_type == "volume_spike":
                 """
                 Bullish when volume spikes (selling climax/capitulation)
@@ -780,17 +789,17 @@ class TrendCache:
                 max_ratio = params.get("max_ratio", 10.0)
                 
                 if trend.volume_ratio is None:
+                    values["volume_ratio"] = None
                     is_bullish = False
                     msg = "Volume spike: ✗ (no volume data)"
                 else:
+                    values["volume_ratio"] = trend.volume_ratio
                     is_bullish = min_ratio <= trend.volume_ratio <= max_ratio
                     msg = (
                         f"Volume spike: {'✓' if is_bullish else '✗'} "
                         f"({trend.volume_ratio:.2f}x - need {min_ratio:.1f}x-{max_ratio:.1f}x)"
                     )
                 
-                results.append((is_bullish, msg))
-
             elif indicator_type == "reversal_candle":
                 """
                 Check for bullish reversal candle patterns
@@ -810,7 +819,9 @@ class TrendCache:
                 candle_high = getattr(trend, 'high', None)
                 candle_low = getattr(trend, 'low', None)
                 candle_close = trend.price  # Assuming close = price
-                
+
+                values["candle_close"] = candle_close
+
                 if candle_open is None:
                     is_bullish = False
                     msg = f"Reversal candle ({pattern}): ✗ (no OHLC data)"
@@ -823,6 +834,10 @@ class TrendCache:
                         total_range = candle_high - candle_low
                         lower_wick = min(candle_open, candle_close) - candle_low
                         upper_wick = candle_high - max(candle_open, candle_close)
+                        values["upper_wick"] = upper_wick
+                        values["lower_wick"] = lower_wick
+                        values["body_size"] = body_size
+                        values["total_range"] = total_range
                         
                         if total_range > 0:
                             is_hammer = (
@@ -838,25 +853,40 @@ class TrendCache:
                         is_bullish = False
                         msg = f"Reversal candle ({pattern}): ✗ (pattern not implemented)"
                 
-                results.append((is_bullish, msg))
+            results.append((is_bullish, msg))
+            if hard_stop and not is_bullish:
+                values["hard_stop"] = True
+                hard_stop_failures.append(msg)
+
+            result = IndicatorResult(
+                type=indicator_type,
+                is_bullish=is_bullish,
+                config=params,
+                values=values,
+                message=msg
+            )
+            indicator_results.append(result)
+        
 
         # NEW: Check for hard_stop failures FIRST (before scoring)
         if hard_stop_failures:
             details = ", ".join(msg for _, msg in results)
             failed_indicators = "; ".join(hard_stop_failures)
-            return False, f"🚫 HARD STOP: {failed_indicators} ({details})"   
+            return False, f"🚫 HARD STOP: {failed_indicators} ({details})", indicator_results   
              
         # Count bullish indicators
-        bullish_count = sum(1 for is_bullish, _ in results if is_bullish)
-        total_count = len(results)
+        bullish_count = sum(1 for r in indicator_results if r.is_bullish)
+        total_count = len(indicator_results)
         
         # Build detailed reason
-        details = ", ".join(msg for _, msg in results)
-        
+        details = ", ".join(r.message for r in indicator_results)
+
         if bullish_count >= min_indicators_required:
-            return True, f"{bullish_count}/{total_count} bullish ({details})"
+            summary = f"{bullish_count}/{total_count} bullish ({details})"
+            return True, summary, indicator_results
         else:
-            return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
+            summary = f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
+            return False, summary, indicator_results
     
     def get_cache_info(self) -> dict:
         """Get cache status with statistics including DB persistence stats"""
