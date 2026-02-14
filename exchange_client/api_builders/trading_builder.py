@@ -417,12 +417,12 @@ class TradingService:
         order = self._validate_market_rules(order)
         return self.ProcessMarketOrder(order, source=source, reason_summary=reason_summary, validation_summary=validation_summary)
 
-    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL",position_id: str =None, reason_summary: List[str] = None, **kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL",position_id: str =None, reason_summary: List[str] = None, validation_summary: str = None, **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
-        return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary) 
+        return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary, validation_summary=validation_summary)
 
 
     def get_open_orders(self, symbol: Optional[str] = None):

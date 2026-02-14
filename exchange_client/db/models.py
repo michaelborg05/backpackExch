@@ -283,8 +283,8 @@ class TradeValidationResults(Base):
     id = Column(Integer, primary_key=True)
     trade_id = Column(Integer, ForeignKey('trades.id'), nullable=False)
     profile_name = Column(String, nullable=False)
+    side = Column(String, nullable=False)
     symbol = Column(String, nullable=False)
-
     validation_summary = Column(String)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

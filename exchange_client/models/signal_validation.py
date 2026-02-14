@@ -8,7 +8,7 @@ all validation details while being easy for AI and humans to understand.
 
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field, asdict
-from utils.constants import StrategyType, MarketRegime, TrendState
+from utils.constants import StrategyType, MarketRegime, TrendState, OrderType
 from enum import Enum
 import json
 
@@ -98,6 +98,7 @@ class SignalValidationResult:
     # Metadata
     timestamp: float
     symbol: str
+    order_type: OrderType
     signal_timeframe: str
     strategy_type: str
     score: float
@@ -124,6 +125,7 @@ class SignalValidationResult:
                 "timestamp": self.timestamp,
                 "symbol": self.symbol,
                 "signal_timeframe": self.signal_timeframe,
+                "order_type": self.order_type,
                 "strategy_type": self.strategy_type,
                 "score": self.score,
                 "score_components": self.score_components
@@ -193,6 +195,7 @@ class SignalValidationResult:
             symbol=metadata.get("symbol", ""),
             signal_timeframe=metadata.get("signal_timeframe", ""),
             strategy_type=metadata.get("strategy_type", ""),
+            order_type=metadata.get("order_type", ""),
             score=metadata.get("score", 0),
             score_components=metadata.get("score_components", 0),
             market_context=market_ctx,
@@ -357,6 +360,7 @@ def build_validation_result_from_trend_cache(
     symbol: str,
     timeframe: str,
     strategy_type: str,
+    order_type: OrderType,
     trend_validation_enabled: bool,
     trend_timeframe: Optional[str],
     trend_indicators_config: Optional[List[Dict]],
@@ -497,6 +501,7 @@ def build_validation_result_from_trend_cache(
         symbol=symbol,
         signal_timeframe=timeframe,
         strategy_type=strategy_type,
+        order_type=order_type,
         score=score,
         score_components=3,  # Adjust based on actual components
         market_context=market_context,
@@ -530,6 +535,7 @@ if __name__ == "__main__":
         symbol="SOL_USDC",
         signal_timeframe="15m",
         strategy_type="trend_following",
+        order_type=OrderType.BUY,
         score=100.0,
         score_components=3,
         market_context=MarketContext(

@@ -4,6 +4,7 @@ from decimal import Decimal
 from enum import Enum
 import time
 from utils.logging import log_manager
+from utils.constants import TradeSide
 from cache.trend_cache import get_trend_cache
 from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
@@ -179,7 +180,7 @@ class SignalGenerator:
                 self.logger.debug(
                     f"{symbol}: Re-entry OK - {reentry_reason}"
                 )
-                        
+                       
         # Initialize scoring
         reasons = []
         indicators = {}
@@ -188,6 +189,7 @@ class SignalGenerator:
             symbol=symbol,
             signal_timeframe=self.trading_timeframe,
             strategy_type=self.strategy_type,
+            order_type=TradeSide.BUY,
             score=0.0,
             score_components=0,
             market_context=MarketContext(),
@@ -368,7 +370,7 @@ class SignalGenerator:
         # Create signal
         signal = TradingSignal(
             symbol=symbol,
-            action="BUY",
+            action=TradeSide.BUY,
             strength=strength,
             confidence=confidence_pct,
             timeframe=self.trading_timeframe,

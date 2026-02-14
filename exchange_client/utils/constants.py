@@ -7,6 +7,14 @@ class HttpMethod(str, Enum):
     DELETE = "DELETE"
 
 # Enums
+class TradeSide(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+class Side(str, Enum):
+    BID = "Bid"
+    ASK = "Ask"
+
 class Side(str, Enum):
     BID = "Bid"
     ASK = "Ask"

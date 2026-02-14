@@ -2,6 +2,7 @@ import json
 import time
 import threading
 from typing import List,  Dict,Optional
+from models.signal_validation import SignalValidationResult
 from services.position_manager import get_position_manager
 from utils.logging import log_manager
 from utils.config import Config
@@ -19,6 +20,7 @@ from cache.market_info_cache import get_market_info_cache
 from models.balance import BalanceReader
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal
+from models.trade import OrderResponse
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager
@@ -38,7 +40,8 @@ from db.crud import (
     update_high_low,
     get_active_symbols,
     get_active_orders,
-    update_order
+    update_order,
+    add_validation_result
 )
 
 class MonitoringService:
@@ -545,7 +548,11 @@ class MonitoringService:
             # Create TradingService instance for this profile
             trading = TradingService(profile)
             symbol = position.symbol
-            
+            validation_summary = ""
+            # If stop loss, analyse market conditions and record in db for review later
+            if reason=="STOP_LOSS":
+                validation_summary = self.record_market_validation_info(symbol, profile)
+
             quantity = str(position.remaining_quantity)
             
             self.logger.info(
@@ -561,6 +568,7 @@ class MonitoringService:
                 profile_name=profile.name,
                 position_id=str(position.id),
                 reason_summary=reason_summary,
+                validation_summary=validation_summary
             )
             
             if result:
@@ -589,7 +597,7 @@ class MonitoringService:
                     f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)",
                     MessagePriority.NORMAL
                 )
-                
+
                 # Note: Position will be closed automatically by TradingService.ExecuteOrder
                 # which calls close_position() for SELL orders
                 
@@ -664,6 +672,91 @@ class MonitoringService:
                 f"❌ Unexpected error closing position for {position.symbol} [{profile.name}]: {str(e)}",
                 MessagePriority.HIGH
             )
+
+    def record_market_validation_info(self, symbol: str, profile) -> str:
+        """
+        Record market validation information from the order response.
+        Add to db table with trend and entry info to understand more on why Stop loss was hit
+        """
+        from models.signal_validation import ValidationGroup, MarketContext
+        from utils.constants import TradeSide
+        from cache.trend_cache import get_trend_cache
+
+        validation = SignalValidationResult(
+            timestamp=time.time(),
+            symbol=symbol,
+            signal_timeframe="15",
+            strategy_type=profile.strategy_type,
+            order_type=TradeSide.SELL,
+            score=0.0,
+            score_components=0,
+            market_context=MarketContext(),
+            trend_validation=ValidationGroup(enabled=profile.use_trend_filter),
+            entry_validation=ValidationGroup(enabled=profile.use_entry_filter)
+        )
+        trend_cache = get_trend_cache()
+        
+        if profile.use_trend_filter:
+            indicators_config = getattr(profile, 'trend_indicators', None)
+            min_required = getattr(profile, 'min_indicators_required', 2)
+
+            is_bullish, trend_reason, indicator_results = trend_cache.is_bullish(
+                symbol=symbol,
+                timeframe="60",
+                indicators_config=indicators_config,
+                min_indicators_required=min_required,
+                return_structured=True
+            )
+
+            validation.trend_validation.timeframe = "60"
+            validation.trend_validation.passed = is_bullish
+            validation.trend_validation.indicators = indicator_results
+            validation.trend_validation.indicators_total = len(indicator_results)
+            validation.trend_validation.indicators_passed = sum(
+                1 for ind in indicator_results if ind.is_bullish
+            )
+            validation.trend_validation.summary = trend_reason
+
+        if profile.use_entry_filter:
+
+            entry_indicators_config = getattr(profile, 'entry_indicators', None)
+            min_required = getattr(profile, 'min_entry_indicators_required', 2)
+
+            if entry_indicators_config is not None:
+                is_bullish, entry_reason, entry_indicators = trend_cache.is_bullish(
+                    symbol=symbol,
+                    timeframe="15",
+                    indicators_config=entry_indicators_config,
+                    min_indicators_required=min_required,
+                    return_structured=True
+                )
+
+                validation.entry_validation.timeframe = profile.entry_timeframe
+                validation.entry_validation.passed = is_bullish
+                validation.entry_validation.indicators = entry_indicators
+                validation.entry_validation.indicators_total = len(entry_indicators)
+                validation.entry_validation.indicators_passed = sum(
+                    1 for ind in entry_indicators if ind.is_bullish
+                )
+                validation.entry_validation.summary = entry_reason
+
+        parts = []
+        if validation.trend_validation.enabled:
+            icon = "✅" if validation.trend_validation.passed else "❌"
+            parts.append(f"{icon} Trend ({validation.trend_validation.timeframe}m): "
+                        f"{validation.trend_validation.indicators_passed}/{validation.trend_validation.indicators_total}")
+        if validation.entry_validation.enabled:
+            icon = "✅" if validation.entry_validation.passed else "❌"
+            parts.append(f"{icon} Entry ({validation.entry_validation.timeframe}m): "
+                        f"{validation.entry_validation.indicators_passed}/{validation.entry_validation.indicators_total}")
+        
+        validation.human_readable = " | ".join(parts)
+        validation.overall_passed = True
+
+        validation_details=validation.to_json()
+
+        return validation_details
+
     def _monitor_atr(self):
         """Monitor ATR for all tickers"""
         try:

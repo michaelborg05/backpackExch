@@ -123,6 +123,7 @@ def add_validation_result(
         trade_id=trade.id,
         profile_name=trade.profile_name,
         symbol=trade.symbol,
+        side=trade.side,
         validation_summary=validation_summary
     )
     db.add(validation_result)
