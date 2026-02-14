@@ -111,7 +111,7 @@ profiles:
     use_market_regime_filter: true
 
     # Trend filter settings
-    use_trend_filter: true
+    use_trend_filter: false
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
       - type: "ema_cross"
