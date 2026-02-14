@@ -846,8 +846,10 @@ class TradingService:
         finally:
             db.close()
         
-        return order_response
-        
+        if order_response:
+            return order_response
+        else:
+            return None    
 
     def ExecuteOrder(self, order: OrderExecuteRequest) -> OrderResponse:
         url = APIEndpoints.backpack_ExecuteOrder()
