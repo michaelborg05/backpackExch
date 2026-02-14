@@ -4,8 +4,10 @@ TO DO
 # review choppy regime and also find out how to configure profiles to handle choppy and high risk if possible
 # move TP/SL limits to database
 # add indicator to close above the last 3 candle highs - close > highest(high, 3) for entry indicator default profile#Add sys param table to include things like system settings, defaults. Etc. Can make a profile Id 0 column and eventually add profile override option
-# Add a call on stop loss to run trend/entry rules and add to db 
 # add generic profile names and adda profile desc which shows on alerts and msgs so i can easily change what the profile is doing
+#telegram - show open positions with profit/loss on each
+#Fix up the summary to be more concise
+#clean up the trend cache to remove the unused reasons summaries. Add it to the validation and remove the column from trades table
 
 Improvement: The "Mean Reversion" Check
   Still need to add scoring to signal_generator for mean_reversion strategy
@@ -69,3 +71,4 @@ No need
 # change TP to a limit order . Need to track open orders and sell if it hits SL or goes above TP and doesnt trigger
 # Mean reversion profile for extreme RSI ranges
 #Figure out a way to make reason_summary in db more AI readable for analysis
+# Add a call on stop loss to run trend/entry rules and add to db 

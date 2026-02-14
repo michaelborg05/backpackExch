@@ -490,11 +490,11 @@ class TrendCache:
                             is_bullish = False
                             msg = f"RSI: ✗ {rsi:.1f} below {min_rsi} (momentum {rsi_direction} {rsi_momentum:+.1f})"
                     elif rsi >= min_rsi:
-                        if rsi_momentum:
-                            msg = f"RSI: ✓ {rsi:.1f} &gt; {min_rsi} - {rsi_direction} momentum {rsi_momentum:+.1f}"
+                        if rsi_momentum >= 0:
+                            is_bullish = True
                         else:
-                            msg = f"RSI: ✓ {rsi:.1f} &gt; {min_rsi}"
-                        is_bullish = True
+                            is_bullish = False
+                        msg = f"RSI: {'✓' if is_bullish else '✗'} {rsi:.1f} &gt; {min_rsi} - {rsi_direction} momentum {rsi_momentum:+.1f}"
                     else:
                         is_bullish = False
                         msg = f"RSI: ✗ {rsi:.1f} &lt; {min_rsi} (no momentum)"
