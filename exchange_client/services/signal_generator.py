@@ -52,6 +52,7 @@ class SignalGenerator:
         self.trend_timeframe = getattr(profile, 'trend_timeframe', '60')
         
         # Entry filter settings (for multi-TF validation)
+        self.use_trend_filter = getattr(profile, 'use_trend_filter', False)
         self.use_entry_filter = getattr(profile, 'use_entry_filter', False)
         self.entry_timeframe = getattr(profile, 'entry_timeframe', self.trading_timeframe)
         
@@ -71,8 +72,7 @@ class SignalGenerator:
         
         # Calculate max confidence based on enabled features
         # This ensures confidence scores are properly normalized
-        self.base_confidence = 100.0
-        self.trend_weight = 40.0  # Trend filter contributes 40%
+        self.trend_weight = 40.0  if self.use_trend_filter else 0.0 # Trend filter contributes 40%
         self.entry_weight = 35.0 if self.use_entry_filter else 0.0  # Entry filter 35%
         self.volume_weight = 15.0  # Volume contributes 15%
         self.safety_weight = 10.0  # Not overbought check 10%
@@ -222,7 +222,7 @@ class SignalGenerator:
             reasons.append(f"✅ Trend ({self.trend_timeframe}m): {trend_reason}")
             confidence_score += self.trend_weight
 
-        elif self.strategy_type == "trend_following":
+        else:
             reasons.append(f"✅ Trend filter not applied")
             confidence_score += self.trend_weight
 
@@ -241,10 +241,14 @@ class SignalGenerator:
             validation.entry_validation.summary = entry_reason
 
             if not entry_check:
-                self.logger.debug(
+                self.logger.info(
                     f"{symbol}: ❌ Entry filter failed ({self.entry_timeframe}m) - {entry_reason}"
                 )
                 return None
+            else:
+                self.logger.info(
+                    f"{symbol}: ✅ Entry filter passed ({self.entry_timeframe}m) - {entry_reason}"
+                )
             
             reasons.append(f"✅ Entry ({self.entry_timeframe}m): {entry_reason}")
             confidence_score += self.entry_weight
