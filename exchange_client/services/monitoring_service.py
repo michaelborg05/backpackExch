@@ -299,9 +299,9 @@ class MonitoringService:
                     trading = TradingService(profile)
                     order_response = trading.process_limit_order(order=order, position_id=order.position_id)
                     if order_response and order_response.status == OrderStatus.FILLED:
-                        icon = "🎯" if order.purpose == "TAKE_PROFIT" else "❌"
+                        icon = "🟢" if order.purpose == "TAKE_PROFIT" else "🛑"
                         self._send_telegram(
-                            f"{icon} Position Closed [{profile.name}]\n"
+                            f"{icon} Position Closed [{profile.display_name if profile.display_name else profile.name}]\n"
                             f"Symbol: {order_response.symbol}\n"
                             f"Reason: {order.purpose}\n"
                             f"Quantity: {order_response.executedQuantity:.4f}\n"
@@ -588,7 +588,7 @@ class MonitoringService:
                 
                 # Send detailed notification
                 self._send_telegram(
-                    f"{icon} Position Closed [{profile.name}]\n"
+                    f"{icon} Position Closed [{profile.display_name if profile.display_name else profile.name}]\n"
                     f"Symbol: {symbol}\n"
                     f"Reason: {reason}\n"
                     f"Entry: ${entry_price:.4f}\n"
@@ -604,7 +604,7 @@ class MonitoringService:
             else:
                 self.logger.error(f"Close order failed for {symbol} [{profile.name}]")
                 self._send_telegram(
-                    f"❌ Failed to close position for {symbol} [{profile.name}]",
+                    f"❌ Failed to close position for {symbol} [{profile.display_name if profile.display_name else profile.name}]",
                     MessagePriority.HIGH
                 )
 
@@ -623,14 +623,14 @@ class MonitoringService:
                 close_invalid_position(db, position.id, reason="INVALID_QUANTITY")
                 
                 self._send_telegram(
-                    f"⚠️ Closed invalid position for {position.symbol} [{profile.name}] - "
+                    f"⚠️ Closed invalid position for {position.symbol} [{profile.display_name if profile.display_name else profile.name}] - "
                     f"quantity too small or already sold",
                     MessagePriority.NORMAL
                 )
             else:
                 # Some other quantity issue
                 self._send_telegram(
-                    f"❌ Invalid quantity for {position.symbol} [{profile.name}]: {e.message}",
+                    f"❌ Invalid quantity for {position.symbol} [{profile.display_name if profile.display_name else profile.name}]: {e.message}",
                     MessagePriority.HIGH
                 )
         
@@ -645,7 +645,7 @@ class MonitoringService:
             close_invalid_position(db, position.id, reason="INSUFFICIENT_BALANCE")
             
             self._send_telegram(
-                f"⚠️ Closed invalid position for {position.symbol} [{profile.name}] - "
+                f"⚠️ Closed invalid position for {position.symbol} [{profile.display_name if profile.display_name else profile.name}] - "
                 f"insufficient balance (likely sold externally)",
                 MessagePriority.NORMAL
             )
@@ -658,7 +658,7 @@ class MonitoringService:
                 exc_info=True
             )
             self._send_telegram(
-                f"❌ Error closing position for {position.symbol} [{profile.name}]: {e.message}",
+                f"❌ Error closing position for {position.symbol} [{profile.display_name if profile.display_name else profile.name}]: {e.message}",
                 MessagePriority.HIGH
             )
         
@@ -669,7 +669,7 @@ class MonitoringService:
                 exc_info=True
             )
             self._send_telegram(
-                f"❌ Unexpected error closing position for {position.symbol} [{profile.name}]: {str(e)}",
+                f"❌ Unexpected error closing position for {position.symbol} [{profile.display_name if profile.display_name else profile.name}]: {str(e)}",
                 MessagePriority.HIGH
             )
 
@@ -1052,7 +1052,7 @@ class MonitoringService:
                 executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
                 
                 self._send_telegram(
-                    f"🎯 Signal Trade Executed [{profile.name}]\n"
+                    f"🎯 Signal Trade Executed [{profile.display_name if profile.display_name else profile.name}]\n"
                     f"Symbol: {signal.symbol}\n"
                     f"Strength: {signal.strength.name} ({signal.confidence:.0f}%)\n"
                     f"Price: ${executed_price:.4f}\n"
@@ -1068,7 +1068,7 @@ class MonitoringService:
             )
             
             self._send_telegram(
-                f"❌ Signal execution failed [{profile.name}]\n"
+                f"❌ Signal execution failed [{profile.display_name if profile.display_name else profile.name}]\n"
                 f"Symbol: {signal.symbol}\n"
                 f"Error: {str(e)}",
                 MessagePriority.HIGH
