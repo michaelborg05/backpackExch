@@ -68,7 +68,7 @@ class PositionManager:
     def _should_use_trend_exits(self, profile: TradingProfile) -> bool:
         """Check if profile uses trend invalidation exits"""
         return getattr(profile, 'use_trend_invalidation_exit', False)
-    
+
     def _should_use_time_exits(self, profile: TradingProfile) -> bool:
         """Check if profile uses time-based exits"""
         return getattr(profile, 'max_position_hours', None) is not None
@@ -88,82 +88,99 @@ class PositionManager:
         symbol = position.symbol
         
         # Don't check very new positions (let them develop)
-        min_age = getattr(profile, 'min_position_age_for_trend_check', 1)  # hours
-        position_age_hours = self._get_position_age_hours(position)
-        
-        if position_age_hours < min_age:
-            return False, f"Too young ({position_age_hours:.1f}h < {min_age}h)"
-        
-        # Get trend data
-        trend_timeframe = getattr(profile, 'trend_timeframe', '60')
-        trend = self.trend_cache.get(symbol, trend_timeframe)
-        
-        if trend is None:
-            return False, "No trend data"
-        
-        # Calculate position state
-        entry_price = float(position.entry_price)
-        profit_pct = ((current_price - entry_price) / entry_price) * 100
-        
-        # Exit scoring system (need 3+ points to exit)
-        exit_score = 0
-        reasons = []
-        
-        # 1. Trend turned bearish (STRONG signal - worth 3 points alone)
-        is_bullish, trend_reason = self.trend_cache.is_bullish(
-            symbol=symbol,
-            timeframe=trend_timeframe,
-            indicators_config=profile.trend_indicators,
-            min_indicators_required=profile.min_indicators_required
-        )
-        
+        min_age = getattr(profile, 'min_position_age_for_trend_check', 120)  # minutes
+        position_age_minutes = self._get_position_age_minutes(position)
+
+        if position_age_minutes < min_age:
+            return False, f"Too young ({position_age_minutes:.1f}m < {min_age}m)"
+
+        # Get entry data. If not found, use trend data
+        if getattr(profile, 'trend_invalidation_indicators', "entry") == "entry":
+            indicators_config = getattr(profile, 'entry_indicators', None)
+            min_required = getattr(profile, 'min_entry_indicators_required', 2) - 1 #Reduce min required by 1 for trend invalidation
+            indicator_timeframe = getattr(profile, 'entry_timeframe', '15')
+        elif profile.use_trend_filter:
+            indicators_config = getattr(profile, 'trend_indicators', None)
+            min_required = getattr(profile, 'min_indicators_required', 2)  - 1 #Reduce min required by 1 for trend invalidation
+            indicator_timeframe = getattr(profile, 'trend_timeframe', '15')
+
+        if indicators_config is not None:
+            is_bullish, reason = self.trend_cache.is_bullish(
+                symbol=symbol,
+                timeframe=indicator_timeframe,
+                indicators_config=indicators_config,
+                min_indicators_required=min_required,
+                return_structured=False,
+                use_hard_stops=False    #For trend invalidation, want to check all indicators, not reject on 1 failure
+            )
+
         if not is_bullish:
-            exit_score += 3
-            reasons.append(f"Trend bearish")
+            return True, f"TREND_INVALIDATION: {reason}"
+        else:
+            return False, f"Trend intact: {reason}"
+        
+        # # Calculate position state
+        # entry_price = float(position.entry_price)
+        # profit_pct = ((current_price - entry_price) / entry_price) * 100
+        
+        # # Exit scoring system (need 3+ points to exit)
+        # exit_score = 0
+        
+        # # 1. Trend turned bearish (STRONG signal - worth 3 points alone)
+        # is_bullish, trend_reason = self.trend_cache.is_bullish(
+        #     symbol=symbol,
+        #     timeframe=trend_timeframe,
+        #     indicators_config=profile.trend_indicators,
+        #     min_indicators_required=profile.min_indicators_required
+        # )
+        
+        # if not is_bullish:
+        #     exit_score += 3
+        #    reasons.append(f"Trend bearish")
         
         # 2. Price broke below EMA20 support
-        if current_price < trend.ema20:
-            distance_pct = ((current_price - trend.ema20) / trend.ema20) * 100
+        # if current_price < trend.ema20:
+        #     distance_pct = ((current_price - trend.ema20) / trend.ema20) * 100
             
-            if distance_pct < -1.5:  # Serious break
-                exit_score += 2
-                reasons.append(f"Price {abs(distance_pct):.1f}% below EMA20")
-            else:
-                exit_score += 1
-                reasons.append("Price below EMA20")
+        #     if distance_pct < -1.5:  # Serious break
+        #         exit_score += 2
+        #         reasons.append(f"Price {abs(distance_pct):.1f}% below EMA20")
+        #     else:
+        #         exit_score += 1
+        #         reasons.append("Price below EMA20")
         
         # 3. RSI weak (especially if in loss)
-        if trend.rsi < 40:
-            exit_score += 2
-            reasons.append(f"RSI oversold ({trend.rsi:.0f})")
-        elif trend.rsi < 45:
-            exit_score += 1
-            reasons.append(f"RSI weak ({trend.rsi:.0f})")
+        # if trend.rsi < 40:
+        #     exit_score += 2
+        #     reasons.append(f"RSI oversold ({trend.rsi:.0f})")
+        # elif trend.rsi < 45:
+        #     exit_score += 1
+        #     reasons.append(f"RSI weak ({trend.rsi:.0f})")
         
-        # 4. Small profit but momentum dying (take it and run)
-        if 0.2 < profit_pct < 0.8:  # Small profit range
-            rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
-                symbol, trend_timeframe
-            )
+        # # 4. Small profit but momentum dying (take it and run)
+        # if 0.2 < profit_pct < 0.8:  # Small profit range
+        #     rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
+        #         symbol, trend_timeframe
+        #     )
             
-            if rsi_direction == "decreasing":
-                exit_score += 1
-                reasons.append(f"Profit {profit_pct:.1f}% but fading")
+        #     if rsi_direction == "decreasing":
+        #         exit_score += 1
+        #         reasons.append(f"Profit {profit_pct:.1f}% but fading")
         
-        # 5. Price vs VWAP (institutional support broken)
-        if current_price < trend.vwap * 0.995:  # 0.5% below VWAP
-            exit_score += 1
-            reasons.append("Below VWAP support")
+        # # 5. Price vs VWAP (institutional support broken)
+        # if current_price < trend.vwap * 0.995:  # 0.5% below VWAP
+        #     exit_score += 1
+        #     reasons.append("Below VWAP support")
         
-        # Decision: Exit if score >= 3
-        should_exit = exit_score >= 3
+        # # Decision: Exit if score >= 3
+        # should_exit = exit_score >= 3
         
-        if should_exit:
-            reason = f"Score {exit_score} ({', '.join(reasons)})"
-        else:
-            reason = f"Holding (score {exit_score}, need 3+)"
+        # if should_exit:
+        #     reason = f"Score {exit_score} ({', '.join(reasons)})"
+        # else:
+        #     reason = f"Holding (score {exit_score}, need 3+)"
         
-        return should_exit, reason
+        # return should_exit, reason
     
     def _check_stale_position(
         self,
@@ -181,12 +198,12 @@ class PositionManager:
         This is the LAST RESORT exit, not primary strategy
         """
         max_hours = getattr(profile, 'max_position_hours', 24)
-        position_age_hours = self._get_position_age_hours(position)
+        position_age_minutes = self._get_position_age_minutes(position)
         
         # Not old enough yet
-        if position_age_hours < max_hours:
-            return False, f"Age {position_age_hours:.1f}h < {max_hours}h"
-        
+        if position_age_minutes < max_hours * 60:
+            return False, f"Age {position_age_minutes:.1f}m < {max_hours * 60}m"
+
         # Calculate progress toward TP
         entry_price = float(position.entry_price)
         current_profit_pct = ((current_price - entry_price) / entry_price) * 100
@@ -196,8 +213,8 @@ class PositionManager:
         
         # If making good progress (> 50% to TP), let it run
         if progress_pct > 50:
-            return False, f"Age {position_age_hours:.1f}h but {progress_pct:.0f}% to TP"
-        
+            return False, f"Age {position_age_minutes:.1f}m but {progress_pct:.0f}% to TP"
+
         # If in meaningful profit (> 0.5%), let it run
         #removed this. Would rather exit here
 #        if current_profit_pct > 0.5:
@@ -205,15 +222,15 @@ class PositionManager:
         
         # Position is old AND not progressing - exit
         return True, (
-            f"Stale: {position_age_hours:.1f}h old, "
+            f"Stale: {position_age_minutes:.1f}m old, "
             f"{current_profit_pct:+.2f}% profit, "
             f"only {progress_pct:.0f}% to TP"
         )
-    
-    def _get_position_age_hours(self, position: Position) -> float:
-        """Calculate position age in hours"""
+
+    def _get_position_age_minutes(self, position: Position) -> float:
+        """Calculate position age in minutes"""
         age = datetime.now(timezone.utc) - position.created_at
-        return age.total_seconds() / 3600
+        return age.total_seconds() / 60
 
 
 # Global instance

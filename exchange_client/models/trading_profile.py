@@ -52,7 +52,8 @@ class TradingProfile(BaseModel):
 
     # position exit logic 
     use_trend_invalidation_exit: Optional[bool] = False
-    min_position_age_for_trend_check: Optional[int] = 2  # hours
+    trend_invalidation_indicators: Optional[str] = "entry"  # trend or entry
+    min_position_age_for_trend_check: Optional[int] = 120  # minutes
     max_position_hours: Optional[int] = 18  # Force exit if stuck
 
     # Position sizing

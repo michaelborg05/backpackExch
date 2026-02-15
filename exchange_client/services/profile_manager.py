@@ -155,7 +155,8 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
 
         #Position exit logic
         use_trend_invalidation_exit = cfg.get("use_trend_invalidation_exit",False)
-        min_position_age_for_trend_check = cfg.get("min_position_age_for_trend_check",2)
+        trend_invalidation_indicators = cfg.get("trend_invalidation_indicators", "entry")
+        min_position_age_for_trend_check = cfg.get("min_position_age_for_trend_check",120)
         max_position_hours = cfg.get("max_position_hours",None)
 
 
@@ -203,6 +204,7 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             min_volume_ratio            = min_volume_ratio,
             #position logic
             use_trend_invalidation_exit = use_trend_invalidation_exit,
+            trend_invalidation_indicators = trend_invalidation_indicators,
             min_position_age_for_trend_check = min_position_age_for_trend_check,
             max_position_hours          = max_position_hours,
             use_market_regime_filter=use_market_regime_filter,

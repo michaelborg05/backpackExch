@@ -289,7 +289,8 @@ class TrendCache:
         timeframe: str,
         indicators_config: List[Dict] = None,
         min_indicators_required: int = 2,
-        return_structured: bool = False
+        return_structured: bool = False,
+        use_hard_stops: bool = True
     ):
         """
         ORIGINAL FUNCTION PRESERVED - Check if trend is bullish for a single timeframe
@@ -322,7 +323,7 @@ class TrendCache:
             ]
         
         is_bullish, summary, indicator_results = self._validate_timeframe_indicators(
-            symbol, timeframe, trend, indicators_config, min_indicators_required
+            symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops
         )
         
         if return_structured:
@@ -406,7 +407,8 @@ class TrendCache:
         timeframe: str,
         trend: TrendData,
         indicators: List[Dict],
-        min_indicators_required: int
+        min_indicators_required: int,
+        use_hard_stops: bool = True
     ) -> Tuple[bool, str, List[IndicatorResult]]:
         """
         Validate multiple indicators for a single timeframe.
@@ -873,8 +875,8 @@ class TrendCache:
             indicator_results.append(result)
         
 
-        # NEW: Check for hard_stop failures FIRST (before scoring)
-        if hard_stop_failures:
+        # NEW: Check for hard_stop failures FIRST (before scoring) - Skip if use_hard_stops is false (Mainly for trend invalidation checks)
+        if use_hard_stops and hard_stop_failures:
             details = ", ".join(msg for _, msg in results)
             failed_indicators = "; ".join(hard_stop_failures)
             return False, f"🚫 HARD STOP: {failed_indicators} ({details})", indicator_results   
