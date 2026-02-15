@@ -140,10 +140,10 @@ class PortfolioCache:
             "price_cache_info": self.price_cache.get_cache_info()
         }
 
-    def print_portfolio_summary(self, profile_name: str, quote_asset: str = "USDC") -> str:
+    def print_portfolio_summary(self, profile_name: str, quote_asset: str = "USDC", display_name: str = "") -> str:
         portfolio = self.get_portfolio_summary(profile_name, quote_asset)
 
-        result = f"\n<b>({profile_name}) Total: ${portfolio.get('total_value')}</b> {quote_asset}\n"
+        result = f"\n<b>({display_name}) Total: ${portfolio.get('total_value')}</b> {quote_asset}\n"
 
         for asset in portfolio.get("assets", []):
             result += (

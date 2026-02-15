@@ -1,5 +1,6 @@
 profiles:
   default:
+    display_name: "signal_trading_15m"
     enabled: true
     api_key_env: BACKPACK_API_KEY
     secret_env: SECRET
@@ -91,6 +92,7 @@ profiles:
     max_position_hours: 18  # Force exit if stuck
     
   15m_MB:
+    display_name: "tradingview_signals"
     enabled: true
     api_key_env: BP_API_KEY_15M
     secret_env: BP_SECRET_15M
@@ -134,6 +136,7 @@ profiles:
     use_atr_filter: false
 
   1hr_MB:
+    display_name: "signal_trading_1hr"
     enabled: false
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H
@@ -255,6 +258,7 @@ profiles:
     use_atr_filter: false
 
   15m_MB_ATR:
+    display_name: "mean_reversion_profile"
     enabled: true
     api_key_env: BP_API_KEY_1M_ATR
     secret_env: BP_SECRET_1M_ATR
@@ -341,6 +345,7 @@ profiles:
     max_position_hours: 8  # Force exit if stuck
 
   15m_no_trend:
+    display_name: "signals_no_1hrchecks"
     enabled: true
     api_key_env: BP_API_KEY_1H
     secret_env: BP_SECRET_1H

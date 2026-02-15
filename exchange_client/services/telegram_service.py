@@ -18,9 +18,10 @@ from telegram.ext import (
 from utils.logging import log_manager
 from utils.constants import MessagePriority
 from cache.portfolio_cache import get_portfolio_cache
+from cache.price_cache import get_price_cache
 from services.profile_manager import get_profile_manager
 from db.utils import get_db_session
-from db.crud import get_active_symbols
+from db.crud import get_active_symbols, get_open_positions
 
 
 class TelegramService:
@@ -265,11 +266,11 @@ class TelegramService:
                             
                             # Send each profile's balance
                             for profile in profiles:
-                                balances = cache.print_portfolio_summary(profile_name=profile.name)
+                                balances = cache.print_portfolio_summary(profile_name=profile.name, display_name=profile.display_name)
                                 balance_text = (
                                     f"💰 {balances}"
                                     if balances 
-                                    else f"❌ No balance for {profile.name}"
+                                    else f"❌ No balance for {profile.display_name}"
                                 )
                                 await bot.send_message(
                                     chat_id=chat_id,
@@ -296,7 +297,21 @@ class TelegramService:
                         text=f"🤖 Bot Mode: <b>{mode}</b>",
                         parse_mode="HTML"
                     )
-                            
+                case "positions" | "p":
+                    # Send "processing" message first
+                    processing_msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text="💰 Fetching positions..."
+                    )
+                    
+                    msg = self.get_position_data()
+                    await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=msg,
+                        parse_mode="HTML"
+                    )
+
                 case "summary" | "s":
                     # Send "processing" message first
                     processing_msg = await bot.send_message(
@@ -338,15 +353,15 @@ class TelegramService:
                                 limit_summary = circuit_breaker.get_daily_summary(profile.name)
 
                                 if not limit_summary:
-                                    msg = f"⚠️ {profile.name}: Circuit breaker cannot be retrieved"
+                                    msg = f"⚠️ {profile.display_name}: Circuit breaker cannot be retrieved"
                                 elif "error" in limit_summary:
-                                    msg = f"⚠️ {profile.name}: {limit_summary['error']}"
+                                    msg = f"⚠️ {profile.display_name}: {limit_summary['error']}"
                                 else:
                                     status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
-                                    msg = f"{profile.name} 💰 ${limit_summary['current_balance']}({limit_summary['daily_pnl_pct']}) | Status: {status}"
+                                    msg = f"{profile.display_name} 💰 ${limit_summary['current_balance']}({limit_summary['daily_pnl_pct']}) | Status: {status}"
 
                                 results.append({
-                                    "profile": profile.name,
+                                    "profile": profile.display_name,
                                     "type": "circuit_breaker",
                                     "msg": msg,
                                 })
@@ -463,7 +478,7 @@ class TelegramService:
                             # Send each profile's balance
                             for profile in profiles:                    
                                 summary = reentry_mgr.get_recent_exits_summary(profile.name, hours=24)
-                                summary_text = f"\n=== Recent Exits for {profile.name} (24h) ==="
+                                summary_text = f"\n=== Recent Exits for {profile.display_name} (24h) ==="
                                 summary_text += f"Total exits: {summary['total_exits']}"
                                 summary_text += f"\nBy reason:"
                                 for reason, count in summary['by_reason'].items():
@@ -667,6 +682,37 @@ class TelegramService:
             self.logger.error(f"Error in send_error_notification_sync: {e}")
             return False
 
+    def get_position_data(self):
+        """Fetch position data from the exchange."""
+        profiles = self.profile_manager.get_all_profiles()
+        msg = ""
+        try:
+            for profile in profiles:
+                msg += f"<b>[{profile.display_name}]</b>\n"
+                with get_db_session() as db:
+                    open_positions = get_open_positions(db, profile.name)
+                if open_positions is None or len(open_positions) == 0:
+                    msg += "No open positions found\n"
+                    continue
+                
+                for position in open_positions:
+                    symbol = position.symbol
+                    price_cache = get_price_cache()    # Get price cache instance
+                    price = price_cache.get_price(symbol)
+                    price = float(price)
+                    entry_price = float(position.entry_price)
+                    msg += f"{symbol}: ${entry_price}->${price}"
+                    # Calculate current profit percentage
+                    profit_pct = ((price - entry_price) / entry_price) * 100
+                    msg += f" ({profit_pct:.2f}%)\n"
+
+                msg += "\n"
+            return msg
+        except Exception as e:
+            self.logger.error(f"Error in get_position_data: {e}")
+            return "Error in get_position_data"
+        
+        return None
 # Global instance
 _telegram: Optional[TelegramService] = None
 

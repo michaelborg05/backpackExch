@@ -5,6 +5,7 @@ from decimal import Decimal
 
 class TradingProfile(BaseModel):
     name: str
+    display_name: str
     api_key: str
     secret: str    
     

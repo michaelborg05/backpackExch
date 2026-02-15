@@ -53,7 +53,8 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         if not cfg.get("enabled", False):
             skipped_profiles.append(name)
             continue
-            
+
+        display_name = cfg.get("display_name", name)
         api_key = os.getenv(cfg["api_key_env"])
         secret = os.getenv(cfg["secret_env"])
         strategy_type = cfg.get("strategy_type", "trend_following")  # Default to trend_following if not specified
@@ -160,6 +161,7 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
 
         profiles[name] = TradingProfile(
             name=name,
+            display_name=display_name,
             api_key=api_key,
             secret=secret,
 
