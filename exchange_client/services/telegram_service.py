@@ -541,6 +541,7 @@ class TelegramService:
             return True
         except Exception as e:
             self.logger.error(f"Failed to send message: {e}")
+            self.logger.error(f"Failed original message: {message}")
             return False
     
     async def send_order_notification(

@@ -1042,14 +1042,16 @@ class MonitoringService:
             )
             
             if result:
+
+                executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
+
                 self.logger.info(
                     f"[{profile.name}] ✅ Signal executed: {result.id}, "
                     f"Qty: {result.executed_quantity}, "
-                    f"Price: ${float(result.executed_quote_quantity)/float(result.executed_quantity):.4f}"
+                    f"Price: ${executed_price:.4f}"
                 )
                 
                 # Send Telegram notification
-                executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
                 
                 self._send_telegram(
                     f"🎯 Signal Trade Executed [{profile.display_name if profile.display_name else profile.name}]\n"
