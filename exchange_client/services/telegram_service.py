@@ -425,8 +425,11 @@ class TelegramService:
 
                                 # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
                                 if details.get('choppy'):
-                                    msg += f"\n🟡 choppy: {', '.join([i['symbol'] for i in details['choppy']])}\n"
-                                
+                                    msg += "\n🟡 choppy\n"
+                                    for item in details['choppy']:
+                                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
+                                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
+
                                 await bot.send_message(
                                     chat_id=chat_id,
                                     text=msg,
