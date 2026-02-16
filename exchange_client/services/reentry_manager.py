@@ -71,7 +71,11 @@ class ReEntryManager:
             close_reason = recent_exit.close_reason
             from cache.price_cache import get_price_cache
             price_cache = get_price_cache()
-            current_price = float(price_cache.get_price(symbol))
+            price = price_cache.get_price(symbol)
+            if price is None:
+                return False, "Price not available"
+            
+            current_price = float(price)
             
             # After profitable exit (TP/Trailing Stop), require momentum reset
             if close_reason in ["TAKE_PROFIT", "TRAILING_STOP"]:
