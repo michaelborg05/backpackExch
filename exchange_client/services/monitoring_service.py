@@ -166,6 +166,7 @@ class MonitoringService:
                 self._circuit_breaker_counter += 1 
                 self._dust_conversion_counter += 1
                 self._signal_check_counter += 1
+                self._trend_invalidation_counter += 1
                 self.logger.debug(f"Beginning loop #{self.call_count}")
                 
                 # Monitor prices for all tickers
