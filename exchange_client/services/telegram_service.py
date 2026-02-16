@@ -530,9 +530,12 @@ class TelegramService:
             return False
         
         try:
-            emoji = self._get_priority_emoji(priority)
-            formatted_message = f"{emoji} {message}"
+            import html
+            safe_text = html.escape(message)
             
+            emoji = self._get_priority_emoji(priority)
+            formatted_message = f"{emoji} {safe_text}"
+
             await self.bot.send_message(
                 chat_id=self.allowed_chat_id,
                 text=formatted_message,

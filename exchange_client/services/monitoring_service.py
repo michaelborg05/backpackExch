@@ -820,9 +820,12 @@ class MonitoringService:
                 self.logger.debug("Telegram not initialized - skipping message")
                 return
             
+            #fail safe to convert 
+            import html
+            safe_text = html.escape(message)
             # Use the thread-safe sync wrapper
-            success = telegram.send_message_sync(message, priority)
-            
+            success = telegram.send_message_sync(safe_text, priority)
+
             if not success:
                 # Only log if we're still running (not shutting down)
                 if self.is_running and telegram._initialized:

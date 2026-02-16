@@ -191,102 +191,102 @@ class CircuitBreakerService:
                     # Expired - handle expiration (which may reset baseline)
                     self._handle_breaker_expiration(db, active_breaker, profile_name)
             
-            # Get config
+            # Get config and snapshot
             config = get_circuit_breaker_config(db, profile_name)
             if not config:
                 return False, None
-
-            #Get current profile balance            
+            
+            snapshot = get_current_daily_snapshot(db, profile_name)
+            if not snapshot:
+                # No snapshot yet - won't check limits until we have baseline
+                return False, None
+            
+            # Get current balance
             portfolio = get_portfolio_cache()
             current_value = portfolio.get_total_value(profile_name, "USDC")
+            if current_value is None or current_value <= 0:
+                return False, "Current value not available or invalid"
 
-            # Get most recent snapshot 
-            snapshot = get_current_daily_snapshot(db, profile_name)
-            #If no snapshot for profile, create and return false
-            if not snapshot:
-                # Create initial snapshot
-                create_daily_snapshot(db, profile_name, current_value)
-                return False, None
-
-            if snapshot:
-                #If snapshot found, confirm age is within 24 hours
-                snapshot_age = (
-                    datetime.now(timezone.utc) - snapshot.snapshot_date
-                ).total_seconds() / 3600
-                
-                if snapshot_age >= 24:
-                    # Finalize old snapshot and create new one. Return false as pnl cannot be calculated on first entry of the day
-                    finalize_daily_snapshot(db, snapshot.id, current_value)
-                    
-                    # Create new snapshot
-                    create_daily_snapshot(db, profile_name, current_value)
-                    return False, None
-
-
-            # ⭐ KEY CHANGE: Use circuit_breaker_baseline if set, otherwise use the higher of starting_balance and highest_balance
-            # This allows profit limit resets without losing historical tracking, and ensures we only drop off the max of the day 
-            # (i.e. If we are up 4% , I want to use that as the baseline for working out loss %)
-            if snapshot.circuit_breaker_baseline:
-                cb_baseline = snapshot.circuit_breaker_baseline
-            else:
-                cb_baseline = max(snapshot.starting_balance, snapshot.highest_balance)
-
-            # Calculate PnL from circuit breaker baseline/highest_
-            cb_pnl_pct = ((current_value - cb_baseline) / cb_baseline) * 100
+            # Calculate daily PnL (from starting_balance - for reporting to user)
+            daily_pnl = current_value - snapshot.starting_balance
+            daily_pnl_pct = (daily_pnl / snapshot.starting_balance) * 100
             
-            # Also calculate actual daily PnL for logging (from starting_balance)
-            daily_pnl_pct = ((current_value - snapshot.starting_balance) / snapshot.starting_balance) * 100
+            # Circuit breaker baseline: Use explicit baseline if set (after profit limit reset),
+            # otherwise use the max of starting balance or highest balance reached
+            # This ensures loss limits trigger on drawdown from high water mark
+            if snapshot.circuit_breaker_baseline:
+                cb_baseline = snapshot.circuit_breaker_baseline 
+            else:
+                cb_baseline = snapshot.starting_balance
+            
+            # Calculate PnL from circuit breaker baseline (for triggering limits)
+            cb_pnl = current_value - cb_baseline
+            cb_pnl_pct = (cb_pnl / cb_baseline) * 100
             
             self.logger.debug(
                 f"[{profile_name}] CB PnL: {cb_pnl_pct:+.2f}% from ${cb_baseline:.2f} "
                 f"(Daily: {daily_pnl_pct:+.2f}% from ${snapshot.starting_balance:.2f})"
             )
-            
-            # For Profit limit check, compare to starting balance
-            if daily_pnl_pct >= float(config.max_daily_profit_pct):
+
+            # Check profit limit (use circuit breaker baseline)
+            if cb_pnl_pct >= float(config.max_daily_profit_pct):
                 reason = (
-                    f"Daily profit limit reached: {cb_pnl_pct:+.2f}% "
-                    f"(limit: +{config.max_daily_profit_pct}%)"
+                    f"Daily profit limit reached: "
+                    f"+{cb_pnl_pct:.2f}% (limit: +{config.max_daily_profit_pct}%)"
                 )
                 
+                # Create breaker event in DB
                 create_circuit_breaker_event(
-                    db,
+                    db=db,
                     profile_name=profile_name,
                     reason=reason,
-                    trigger_value_pct=Decimal(str(cb_pnl_pct)),
+                    trigger_value_pct=cb_pnl_pct,
                     balance_at_trigger=current_value,
                     daily_start_balance=cb_baseline,  # Store the baseline used for this trigger
-                    lock_hours=config.profit_lock_hours
+                    lock_hours=config.profit_lock_hours,
+                )
+                
+                self._send_telegram(
+                    f"🚨 CIRCUIT BREAKER TRIGGERED [{profile_name}]\n"
+                    f"Profit limit: +{cb_pnl_pct:.2f}%\n"
+                    f"Locked for: {config.profit_lock_hours}h\n"
+                    f"Balance: ${current_value:.2f}"
                 )
                 
                 self.logger.warning(
                     f"[{profile_name}] 🚨 CIRCUIT BREAKER TRIGGERED: {reason} "
-                    f"(locked for {config.profit_lock_hours}h) "
-                    f"[Actual daily PnL: {daily_pnl_pct:+.2f}%]"
+                    f"(locked for {config.profit_lock_hours}h)"
+                )
+                
+                return True, reason
+
+            #Instead of using baseline or starting balance, calculate drawdown from high water mark
+            drawdown_pnl = current_value - snapshot.highest_balance
+            drawdown_pnl_pct = (drawdown_pnl / snapshot.highest_balance) * 100
+
+            # Check loss limit (use circuit breaker baseline - triggers on drawdown from high)
+            if drawdown_pnl_pct <= -float(config.max_daily_loss_pct):
+                reason = (
+                    f"Daily loss limit reached: "
+                    f"{drawdown_pnl_pct:.2f}% (limit: -{config.max_daily_loss_pct}%)"
+                )
+                
+                # Create breaker event in DB
+                create_circuit_breaker_event(
+                    db=db,
+                    profile_name=profile_name,
+                    reason=reason,
+                    trigger_value_pct=cb_pnl_pct,
+                    balance_at_trigger=current_value,
+                    daily_start_balance=cb_baseline,
+                    lock_hours=config.loss_lock_hours,
                 )
                 
                 self._send_telegram(
-                    f"🚨 CIRCUIT BREAKER TRIGGERED: {reason} \n"
-                    f"locked for {config.profit_lock_hours}h) "
-                    f"daily PnL: {daily_pnl_pct:+.2f}%\n"
-                )
-                return True, reason
-            
-            #for loss percent, compare to baseline
-            if cb_pnl_pct <= -float(config.max_daily_loss_pct):
-                reason = (
-                    f"Daily loss limit reached: {cb_pnl_pct:+.2f}% "
-                    f"(limit: -{config.max_daily_loss_pct}%)"
-                )
-                
-                create_circuit_breaker_event(
-                    db,
-                    profile_name=profile_name,
-                    reason=reason,
-                    trigger_value_pct=Decimal(str(cb_pnl_pct)),
-                    balance_at_trigger=current_value,
-                    daily_start_balance=cb_baseline,
-                    lock_hours=config.loss_lock_hours
+                    f"🚨 CIRCUIT BREAKER TRIGGERED [{profile_name}]\n"
+                    f"Loss limit: {cb_pnl_pct:.2f}%\n"
+                    f"Locked for: {config.loss_lock_hours}h\n"
+                    f"Balance: ${current_value:.2f}"
                 )
                 
                 self.logger.warning(
@@ -303,11 +303,13 @@ class CircuitBreakerService:
             return False, None
     
     def _update_balance_snapshot(self, db, profile_name: str):
-        """Update current snapshot with latest balance"""
+        """Update current snapshot with latest balance, aligned to UTC midnight"""
         try:
             snapshot = get_current_daily_snapshot(db, profile_name)
             portfolio = get_portfolio_cache()
             current_value = portfolio.get_total_value(profile_name, "USDC")
+            
+            now_utc = datetime.now(timezone.utc)
             
             if not snapshot:
                 # Create initial snapshot
@@ -317,28 +319,36 @@ class CircuitBreakerService:
                 )
                 return
             
-            # Check if snapshot is older than 24 hours
-            snapshot_age = (
-                datetime.now(timezone.utc) - snapshot.snapshot_date
-            ).total_seconds() / 3600
+            # Get the UTC date of the snapshot (date only, no time)
+            snapshot_date = snapshot.snapshot_date.date()
+            current_date = now_utc.date()
             
-            if snapshot_age >= 24:
+            # Check if we've crossed into a new UTC day
+            if current_date > snapshot_date:
                 # Finalize old snapshot with ending values
                 finalize_daily_snapshot(db, snapshot.id, current_value)
-                                
-                # Create new snapshot for the next 24h period
+                
+                # Create new snapshot for the new UTC day
                 create_daily_snapshot(db, profile_name, current_value)
                 
                 self.logger.info(
-                    f"[{profile_name}] 🔄 Created new 24h snapshot: ${current_value:.2f}"
+                    f"[{profile_name}] 🔄 UTC date changed - created new snapshot: "
+                    f"${current_value:.2f} (Previous day: {snapshot_date})"
                 )
             else:
-                # Update existing snapshot (high/low tracking)
+                # Same UTC day - update existing snapshot (high/low tracking)
                 update_daily_snapshot(db, snapshot.id, current_value)
+                
+                # Calculate time until next UTC midnight for logging
+                next_midnight = datetime.combine(
+                    current_date + timedelta(days=1),
+                    datetime.min.time()
+                ).replace(tzinfo=timezone.utc)
+                hours_until_reset = (next_midnight - now_utc).total_seconds() / 3600
                 
                 self.logger.debug(
                     f"[{profile_name}] Updated snapshot "
-                    f"(Age: {snapshot_age:.1f}h, Current: ${current_value:.2f})"
+                    f"(Current: ${current_value:.2f}, Reset in: {hours_until_reset:.1f}h)"
                 )
                 
         except Exception as e:
@@ -401,24 +411,35 @@ class CircuitBreakerService:
             current_value = portfolio.get_total_value(profile_name, "USDC")
             
             if snapshot:
-                # Actual daily PnL (from starting_balance - never changes)
+                # Actual daily PnL (from starting_balance - never changes, for user reporting)
                 daily_pnl = current_value - snapshot.starting_balance
                 daily_pnl_pct = (daily_pnl / snapshot.starting_balance) * 100
                 
-                # Circuit breaker PnL (from circuit_breaker_baseline - may be reset)
-                cb_baseline = snapshot.circuit_breaker_baseline or snapshot.starting_balance
+                # Circuit breaker baseline: Use explicit baseline if set (after profit limit reset),
+                # otherwise use the max of starting balance or highest balance reached
+                if snapshot.circuit_breaker_baseline:
+                    cb_baseline = snapshot.circuit_breaker_baseline
+                else:
+                    cb_baseline = max(snapshot.starting_balance, snapshot.highest_balance)
+                
+                # Circuit breaker PnL (from cb_baseline - may trigger on drawdown from high)
                 cb_pnl = current_value - cb_baseline
                 cb_pnl_pct = (cb_pnl / cb_baseline) * 100
                 
-                snapshot_age = (
-                    datetime.now(timezone.utc) - snapshot.snapshot_date
-                ).total_seconds() / 3600
+                # Calculate time until next UTC midnight
+                now_utc = datetime.now(timezone.utc)
+                current_date = now_utc.date()
+                next_midnight = datetime.combine(
+                    current_date + timedelta(days=1),
+                    datetime.min.time()
+                ).replace(tzinfo=timezone.utc)
+                hours_until_reset = (next_midnight - now_utc).total_seconds() / 3600
             else:
                 daily_pnl = None
                 daily_pnl_pct = None
                 cb_pnl_pct = None
                 cb_baseline = None
-                snapshot_age = None
+                hours_until_reset = None
             
             if active_breaker is not None:
                 hours_remaining = (active_breaker.reset_at - datetime.now(timezone.utc)).total_seconds()/3600
@@ -433,7 +454,7 @@ class CircuitBreakerService:
                 "daily_pnl": str(daily_pnl) if daily_pnl else "N/A",
                 "daily_pnl_pct": f"{daily_pnl_pct:+.2f}%" if daily_pnl_pct else "N/A",
                 "cb_pnl_pct": f"{cb_pnl_pct:+.2f}%" if cb_pnl_pct is not None else "N/A",
-                "hours_elapsed": round(snapshot_age, 1) if snapshot_age else "N/A",
+                "hours_until_reset": round(hours_until_reset, 1) if hours_until_reset else "N/A",
                 "profit_limit": f"+{config.max_daily_profit_pct}%" if config else "N/A",
                 "loss_limit": f"-{config.max_daily_loss_pct}%" if config else "N/A",
                 "circuit_breaker_active": active_breaker is not None,
