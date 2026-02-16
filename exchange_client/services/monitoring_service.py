@@ -29,7 +29,7 @@ from utils.position_calculator import get_position_size_calculator
 from cache.trend_cache import initialize_trend_cache_with_db
 from cache.trend_cache_warmup import warmup_trend_cache
 import os
-
+from utils.settings_helper import get_settings_helper
 from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
@@ -47,15 +47,13 @@ from db.crud import (
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
     
-    def __init__(self, tickers: Optional[List[str]] = None):
+    def __init__(self):
         """
         Initialize monitoring service
-        
-        Args:
-            tickers: List of tickers to monitor (e.g., ["SOL_USDC", "BTC_USDC"])
         """
         self.config = Config()
         self.logger = log_manager.get_logger("MonitoringService")
+        self.settings = get_settings_helper()
         #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
         with get_db_session() as db:
                 db_tickers = get_active_symbols(db)
@@ -83,25 +81,19 @@ class MonitoringService:
 
         self.atr_calculator = get_atr_calculator()
         self._atr_update_counter = 0
-        self._atr_update_interval = 5  # Update ATR every 5 cycles (e.g., every 2.5 min if cycle is 30s)
 
         self.circuit_breaker = get_circuit_breaker()
         self._circuit_breaker_counter = 0
-        self._circuit_breaker_interval = 2  # Check every 2 cycles (e.g., every 60s if cycle is 30s)
 
         self.dust_converter = get_dust_converter()
         self._dust_conversion_counter = 0
-        self._dust_conversion_interval = 2880  # Convert dust every 2880 cycles (24 hours if cycle is 30s)
 
         self._signal_check_counter = 0
-        if self.config.debug_signals:
-            self._signal_check_interval = 1  # Check for signals every 1 cycle (30s if cycle is 30s)
-        else:
-            self._signal_check_interval = 10  # Check for signals every 10 cycles (5 min if cycle is 30s)
+
         self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
 
         self._trend_invalidation_counter = 0
-        self._trend_invalidation_interval = 10  # Update trend invalidation every 10 cycles (e.g., every 5 min if cycle is 30s)
+        self.position_validation_counter = 0
 
     def start(self):
         """Start the monitoring loop in a background thread"""
@@ -155,13 +147,11 @@ class MonitoringService:
         """Internal monitoring loop - runs in background thread"""
         self.logger.debug("Monitoring loop starting...")
         self.logger.debug(f"Log level set to {self.config.log_level}")
-        validation_counter = 0
-        validation_interval = 10  # Run validation every 10 cycles (e.g., every 5 min if cycle is 30s)
     
         try:
             while self.is_running:
                 self.call_count += 1
-                validation_counter += 1
+                self.position_validation_counter += 1
                 self._atr_update_counter += 1
                 self._circuit_breaker_counter += 1 
                 self._dust_conversion_counter += 1
@@ -175,7 +165,7 @@ class MonitoringService:
                 # Get account balances
                 self._monitor_balances()
 
-                if self._circuit_breaker_counter >= self._circuit_breaker_interval:
+                if self._circuit_breaker_counter >= self.settings.circuit_breaker_interval:
                     self._monitor_circuit_breakers()
                     self._circuit_breaker_counter = 0
 
@@ -186,21 +176,21 @@ class MonitoringService:
                 self._monitor_open_positions()
 
                 # Update ATR periodically (less frequently than prices)
-                if self._atr_update_counter >= self._atr_update_interval:
+                if self._atr_update_counter >= self.settings.atr_update_interval:
                     self._monitor_atr()
                     self._atr_update_counter = 0
 
                 # Validate positions periodically (less frequently)
-                if validation_counter >= validation_interval:
+                if self.position_validation_counter >= self.settings.position_validation_interval:
                     self.logger.info("Running position validation...")
                     self._validate_open_positions()
-                    validation_counter = 0
+                    self.position_validation_counter = 0
 
-                if self._dust_conversion_counter >= self._dust_conversion_interval:
+                if self._dust_conversion_counter >= self.settings.dust_conversion_interval:
                     self._convert_dust()
                     self._dust_conversion_counter = 0
 
-                if self._signal_check_counter >= self._signal_check_interval:
+                if self._signal_check_counter >= self.settings.signal_check_interval:
                     self._check_signals()
                     self._signal_check_counter = 0
 
@@ -446,7 +436,7 @@ class MonitoringService:
                             lowest_price=price,
                         )
 
-                    if self._trend_invalidation_counter >= self._trend_invalidation_interval:
+                    if self._trend_invalidation_counter >= self.settings.trend_invalidation_interval:
                         self._trend_invalidation_counter = 0
                         # Trend Invalidation Check for long running trades
                         should_exit, exit_reason = position_manager.should_exit_position(

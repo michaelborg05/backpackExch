@@ -301,3 +301,48 @@ class TradeValidationResults(Base):
             data = json.loads(self.validation_summary)
             return SignalValidationResult.from_dict(data)
         return None
+
+# Add this to db/models.py
+
+class Settings(Base):
+    """
+    Global and profile-specific settings storage.
+    Replaces hardcoded config values with database-driven settings.
+    
+    Key features:
+    - profile_name = '0' means applies to ALL profiles (global setting)
+    - profile_name = 'specific_profile' means applies to that profile only
+    - Settings can be updated without restarting the system (via cache refresh)
+    """
+    __tablename__ = "settings"
+    
+    id = Column(Integer, primary_key=True)
+    profile_name = Column(String, nullable=False, index=True, default='0')  # '0' = global, else specific profile
+    setting_name = Column(String, nullable=False, index=True)
+    value = Column(String, nullable=False)  # Store as string, parse on retrieval
+    
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        # Ensure unique setting per profile
+        UniqueConstraint('profile_name', 'setting_name', name='uq_settings_profile_name'),
+        
+    )
+    
+    def get_value_as_int(self) -> int:
+        """Parse value as integer"""
+        return int(self.value)
+    
+    def get_value_as_float(self) -> float:
+        """Parse value as float"""
+        return float(self.value)
+    
+    def get_value_as_bool(self) -> bool:
+        """Parse value as boolean"""
+        return self.value.lower() in ('true', '1', 'yes', 'on')
+    
+    def get_value_as_str(self) -> str:
+        """Return value as string"""
+        return self.value

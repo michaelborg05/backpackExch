@@ -13,6 +13,10 @@ from utils.logging import log_manager
 import yaml
 from db.crud import create_profile, create_daily_snapshot
 from models.trading_profile import TradingProfile
+from db.utils import get_db_session
+from db.crud_settings import initialize_default_settings, bulk_upsert_settings
+from utils.logging import log_manager
+
 
 
 logger = log_manager.get_logger("DatabaseManager")
@@ -360,6 +364,49 @@ def add_new_profile():
         db.close()
     print("\n✓ Profile setup complete")
 
+def populate_default_settings():
+    """Populate the settings table with initial default values"""
+    
+    try:
+        with get_db_session() as db:
+            # Initialize default settings
+            default_settings = {
+                # Monitoring intervals (in cycles)
+                'atr_update_interval': '5',  # Update ATR every 5 cycles
+                'circuit_breaker_interval': '2',  # Check circuit breakers every 2 cycles
+                'dust_conversion_interval': '2880',  # Convert dust every 2880 cycles (24h if cycle is 30s)
+                'signal_check_interval': '10',  # Check signals every 10 cycles (5 min if cycle is 30s)
+                'trend_invalidation_interval': '10',  # Update trend invalidation every 10 cycles
+                'position_validation_interval': '10',  # Run position validation every 10 cycles
+            }
+            
+            created = initialize_default_settings(db, default_settings=default_settings)
+            
+            print(f"✅ Successfully initialized {len(created)} default settings")
+            
+            # Print created settings
+            for setting in created:
+                print(
+                    f"  - {setting.profile_name}/{setting.setting_name} = {setting.value}"
+                )
+            
+            # Example: Add profile-specific settings
+            # Uncomment and modify as needed
+            """
+            profile_settings = {
+                'signal_check_interval': '5',  # Override for specific profile
+                'signal_cooldown_seconds': '180',  # 3 minutes for this profile
+            }
+            bulk_upsert_settings(db, profile_settings, profile_name='your_profile_name')
+            logger.info("✅ Successfully added profile-specific settings")
+            """
+            
+            return True
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to populate settings: {e}", exc_info=True)
+        return False
+
 
 # Update the commands dict:
 commands = {
@@ -370,7 +417,8 @@ commands = {
     "load-dummy": load_dummy_data,
     "migrate_circuit_breaker": migrate_circuit_breaker,
     "setup-symbols": setup_symbol_configs,
-    "add-profile": add_new_profile
+    "add-profile": add_new_profile,
+    "populate-settings": populate_default_settings,
 }
 
 if __name__ == "__main__":
@@ -387,6 +435,7 @@ if __name__ == "__main__":
          print("  migrate-circuit-breaker - Migrate circuit breaker configurations")
          print("  setup-symbols - Set up symbol-specific configurations")
          print("  add-profile - Add a new trading profile")
+         print("  populate-settings - Populate default settings in settings table")
          sys.exit(1)
     
     command = sys.argv[1]

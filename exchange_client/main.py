@@ -5,6 +5,7 @@ from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
 from services.profile_manager import load_profiles, set_profile_manager  
+from cache.settings_cache import initialize_settings_cache
 
 project_root = Path(__file__).parent
 config = Config()
@@ -14,6 +15,8 @@ main_logger = log_manager.get_logger("main")
 if __name__ == "__main__":
     main_logger.info("Starting application...")
 
+    main_logger.info("Loading settings cache...")
+    settings_cache = initialize_settings_cache(refresh_interval=900)
     # Load and set profile manager 
     main_logger.info("Loading trading profiles...")
     profile_manager = load_profiles()
