@@ -141,9 +141,16 @@ class PortfolioCache:
         }
 
     def print_portfolio_summary(self, profile_name: str, quote_asset: str = "USDC", display_name: str = "") -> str:
+        from services.circuit_breaker import get_circuit_breaker
         portfolio = self.get_portfolio_summary(profile_name, quote_asset)
+        circuit_breaker = get_circuit_breaker()
+        limit_summary = circuit_breaker.get_daily_summary(profile_name)
 
-        result = f"\n<b>({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')}</b> {quote_asset}\n"
+        if limit_summary:
+            status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
+            result = f"\n<b>({display_name if display_name else profile_name}) \nTotal: ${portfolio.get('total_value')}</b> ({limit_summary['daily_pnl_pct']}) {status}\n"
+        else:
+            result = f"\n<b>({display_name if display_name else profile_name}) \nTotal: ${portfolio.get('total_value')}</b> \n"
 
         for asset in portfolio.get("assets", []):
             result += (

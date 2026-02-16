@@ -240,55 +240,15 @@ class TelegramService:
                         text="💰 Fetching balances..."
                     )
                     
-                    try:
-                        cache = get_portfolio_cache()
-                        
-                        if not self.profile_manager:
-                            self.logger.warning("Profile manager not initialized")
-                            balances = cache.print_portfolio_summary(profile_name="default")
-                            balance_text = (
-                                f"💰 <b>Current Balances:</b>\n\n{balances}"
-                                if balances else "❌ No balance data available"
-                            )
-                            
-                            # Delete "processing" message and send result
-                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-                            await bot.send_message(
-                                chat_id=chat_id,
-                                text=balance_text,
-                                parse_mode="HTML"
-                            )
-                        else:
-                            profiles = self.profile_manager.get_all_profiles()
-                            
-                            # Delete "processing" message
-                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-                            
-                            # Send each profile's balance
-                            for profile in profiles:
-                                balances = cache.print_portfolio_summary(profile_name=profile.name, display_name=profile.display_name)
-                                balance_text = (
-                                    f"💰 {balances}"
-                                    if balances 
-                                    else f"❌ No balance for {profile.display_name}"
-                                )
-                                await bot.send_message(
-                                    chat_id=chat_id,
-                                    text=balance_text,
-                                    parse_mode="HTML"
-                                )
-                    
-                    except Exception as e:
-                        # Delete processing message and show error
-                        try:
-                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-                        except:
-                            pass
-                        
-                        await bot.send_message(
-                            chat_id=chat_id,
-                            text=f"❌ Error fetching balances: {str(e)}"
-                        )
+                    msg = self.get_balance_data()
+
+                    # Delete "processing" message and send result
+                    await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=msg,
+                        parse_mode="HTML"
+                    )
                 
                 case "mode":
                     mode = "Webhook" if self.use_webhook else "Polling (Local)"
@@ -318,135 +278,20 @@ class TelegramService:
                         chat_id=chat_id,
                         text="💰 Fetching summary..."
                     )
-                    
-                    try:
-                        from cache.trend_cache import get_trend_cache
-                        from cache.atr_cache import get_atr_cache
-                        from services.circuit_breaker import get_circuit_breaker
-                        from cache.regime_filter import get_regime_filter
-                        
-                        trend_cache = get_trend_cache()
-                        circuit_breaker = get_circuit_breaker()
-                        regime_filter = get_regime_filter()
+                    msg = self.get_summary_data()
+                    await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=msg,
+                        parse_mode="HTML"
+                    )
 
-                        if not self.profile_manager:
-                            self.logger.warning("Profile manager not initialized")
-                            msg_text = "Profile manager not initialized"
-                            
-                            # Delete "processing" message and send result
-                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-                            await bot.send_message(
-                                chat_id=chat_id,
-                                text=msg_text,
-                                parse_mode="HTML"
-                            )
-                        else:
-                            profiles = self.profile_manager.get_all_profiles()
-
-                            # Delete "processing" message
-                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-                            
-                            # Send each profile's balance
-                            for profile in profiles:
-                                results = []
-
-                                limit_summary = circuit_breaker.get_daily_summary(profile.name)
-
-                                if not limit_summary:
-                                    msg = f"⚠️ {profile.display_name}: Circuit breaker cannot be retrieved"
-                                elif "error" in limit_summary:
-                                    msg = f"⚠️ {profile.display_name}: {limit_summary['error']}"
-                                else:
-                                    status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
-                                    msg = f"{profile.display_name} 💰 ${limit_summary['current_balance']}({limit_summary['daily_pnl_pct']}) | Status: {status}"
-
-                                results.append({
-                                    "profile": profile.display_name,
-                                    "type": "circuit_breaker",
-                                    "msg": msg,
-                                })
-                                
-                                full_message = "\n\n".join([item['msg'] for item in results])
-                                await bot.send_message(
-                                    chat_id=chat_id,
-                                    text=full_message,
-                                    parse_mode="HTML"
-                                )
-                            
-                            # Loop through all Trend cache entries
-                            cached_keys = list(trend_cache._cache.keys())
-                            
-                            if not cached_keys:
-                                msg = "No cached trends available"
-                            else:
-                                msg = "📈 Current Trends:\n"
-                                for key in cached_keys:
-                                    # Split the key back into components
-                                    # Using rsplit allows for symbols with underscores if they exist
-                                    symbol, timeframe = key.rsplit('_', 1)
-                                    if timeframe=='240':
-                                        continue 
-                                    # Call your is_bullish method
-                                    # This will use your configured indicator logic (EMA, RSI, VWAP)
-                                    is_bullish, reason = trend_cache.is_bullish(symbol, timeframe)
-                                
-                                    status_emoji = "🟢" if is_bullish else "🔴"
-                                    msg += f"{status_emoji} {symbol} ({timeframe}): {reason} \n\n"
-
-                            await bot.send_message(
-                                chat_id=chat_id,
-                                text=msg,
-                                parse_mode="HTML"
-                            )
-
-                            with get_db_session() as db:
-                                db_tickers = get_active_symbols(db)
-                            if db_tickers:
-                                regime_summary = regime_filter.get_regime_summary(db_tickers)
-                                msg = f"📊 Regime Summary\n"
-                                msg = f"🌐 *Market Regime Report*\n"
-                                msg += f"✅ Safe: {regime_summary['safe']} | "
-                                msg += f"⚠️ choppy: {regime_summary['choppy']} | "
-                                msg += f"🚫 High Risk: {regime_summary['high_risk']}\n"
-                                msg += "─" * 15 + "\n"
-                                
-                                details = regime_summary.get('details', {})
-                                if details.get('safe'):
-                                    msg += "\n🟢 *TRADE READY (safe)*\n"
-                                    for item in details['safe']:
-                                        msg += f"• {item['symbol']}\n"
-
-                                # Show High Risk (Protection)
-                                if details.get('high_risk'):
-                                    msg += "\n🚫 *HALTED (High Risk)*\n"
-                                    for item in details['high_risk']:
-                                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
-                                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
-
-                                # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
-                                if details.get('choppy'):
-                                    msg += "\n🟡 choppy\n"
-                                    for item in details['choppy']:
-                                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
-                                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
-
-                                await bot.send_message(
-                                    chat_id=chat_id,
-                                    text=msg,
-                                    parse_mode="HTML"
-                                )
-                    
-                    except Exception as e:
-                        # Delete processing message and show error
-                        try:
-                            await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
-                        except:
-                            pass
-                        
-                        await bot.send_message(
-                            chat_id=chat_id,
-                            text=f"❌ Error fetching balances: {str(e)}"
-                        )
+                    msg = self.get_regime_data()
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=msg,
+                        parse_mode="HTML"
+                    )
                 
                 case "exits" | "e" :
                     from services.reentry_manager import get_reentry_manager
@@ -688,6 +533,114 @@ class TelegramService:
         except Exception as e:
             self.logger.error(f"Error in send_error_notification_sync: {e}")
             return False
+
+    def get_regime_data(self):
+        from cache.regime_filter import get_regime_filter
+        try:
+            regime_filter = get_regime_filter()
+            with get_db_session() as db:
+                db_tickers = get_active_symbols(db)
+            if db_tickers:
+                regime_summary = regime_filter.get_regime_summary(db_tickers)
+                msg = f"📊 Regime Summary\n"
+                msg = f"🌐 *Market Regime Report*\n"
+                msg += f"✅ Safe: {regime_summary['safe']} | "
+                msg += f"⚠️ choppy: {regime_summary['choppy']} | "
+                msg += f"🚫 High Risk: {regime_summary['high_risk']}\n"
+                msg += "─" * 15 + "\n"
+                
+                details = regime_summary.get('details', {})
+                if details.get('safe'):
+                    msg += "\n🟢 *TRADE READY (safe)*\n"
+                    for item in details['safe']:
+                        msg += f"• {item['symbol']}\n"
+
+                # Show High Risk (Protection)
+                if details.get('high_risk'):
+                    msg += "\n🚫 *HALTED (High Risk)*\n"
+                    for item in details['high_risk']:
+                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
+                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
+
+                # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
+                if details.get('choppy'):
+                    msg += "\n🟡 choppy\n"
+                    for item in details['choppy']:
+                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
+                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
+            else:
+                msg += "❌Unable to retrieve tickers from db"
+            return msg
+        
+        except Exception as e:
+            # Delete processing message and show error
+            return f"❌ Error fetching regime data: {str(e)}"
+            
+
+    def get_summary_data(self):
+        from cache.trend_cache import get_trend_cache
+        from cache.atr_cache import get_atr_cache
+        try:
+            
+            trend_cache = get_trend_cache()
+
+            # Loop through all Trend cache entries
+            cached_keys = list(trend_cache._cache.keys())
+            
+            if not cached_keys:
+                msg = "No cached trends available"
+            else:
+                msg = "📈 Current Trends:\n"
+                for key in cached_keys:
+                    # Split the key back into components
+                    # Using rsplit allows for symbols with underscores if they exist
+                    symbol, timeframe = key.rsplit('_', 1)
+                    if timeframe=='240':
+                        continue 
+                    # Call your is_bullish method
+                    # This will use your configured indicator logic (EMA, RSI, VWAP)
+                    is_bullish, reason = trend_cache.is_bullish(symbol, timeframe)
+                
+                    status_emoji = "🟢" if is_bullish else "🔴"
+                    msg += f"{status_emoji} {symbol} ({timeframe}): {reason} \n\n"
+
+            return msg
+
+        except Exception as e:
+            # Delete processing message and show error
+            return f"❌ Error fetching balances: {str(e)}"
+
+    def get_balance_data(self):
+        try:
+            cache = get_portfolio_cache()
+            balance_text = ""
+
+            if not self.profile_manager:
+                self.logger.warning("Profile manager not initialized")
+                balances = cache.print_portfolio_summary(profile_name="default")
+                balance_text = (
+                    f"💰 <b>Current Balances:</b>\n\n{balances}"
+                    if balances else "❌ No balance data available"
+                )
+                
+            else:
+                profiles = self.profile_manager.get_all_profiles()
+                
+                # Send each profile's balance
+                for profile in profiles:
+                    balances = cache.print_portfolio_summary(profile_name=profile.name, display_name=profile.display_name)
+
+                    balance_text += (
+                        f"💰 {balances}"
+                        if balances 
+                        else f"❌ No balance for {profile.display_name}"
+                    )
+        
+        except Exception as e:
+            # Delete processing message and show error
+            balance_text += f"❌ Error fetching balances: {str(e)}"
+
+        return balance_text
 
     def get_position_data(self):
         """Fetch position data from the exchange."""
