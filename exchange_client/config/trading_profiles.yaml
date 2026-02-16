@@ -189,26 +189,27 @@ profiles:
     min_position_age_for_trend_check: 30  # minutes
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 12  # Force exit if stuck
+ 
+  profile3:
+    display_name: "swing_4h1h_simple"
+    enabled: true
+    api_key_env: BP_API_KEY_1M
+    secret_env: BP_SECRET_1M
+    
+    strategy_type: trend_following
 
-    
-  1hr_MB:
-    display_name: "signal_trading_1hr"
-    enabled: false
-    api_key_env: BP_API_KEY_1H
-    secret_env: BP_SECRET_1H
-    
-    take_profit_pct: 3.2
-    stop_loss_pct: 1.8
-    trailing_stop_pct: 1.3
-    arm_trailing_stop_pct: 1.1
+    take_profit_pct: 5.0        # Target 8% gains on swings
+    stop_loss_pct: 4.0          # 4% initial stop (wider for volatility)
+    trailing_stop_pct: 3.5      # Trail with 3% buffer
+    arm_trailing_stop_pct: 3.0  # Arm TSL after 4% gain
     use_trailing_stop: true
 
     #position sizing
     default_order_size_usdc: 100.0      # Buy $100 per order
-    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
+    max_position_size_pct: 50.0         # Max 40% of portfolio per symbol
     
     # Risk management
-    max_open_positions: 3               # Max 5 concurrent positions
+    max_open_positions: 2               # Max 5 concurrent positions
     max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
     use_market_regime_filter: true
@@ -217,11 +218,11 @@ profiles:
     # MULTI-TIMEFRAME STRATEGY (4h + 1h)
     # ========================================
     # Signal generation on 1h bars
-    enable_signal_generation: false
+    enable_signal_generation: true
     signal_timeframe: "60"           # 1h execution timeframe
-    signal_cooldown_seconds: 1800    # 30min between signals
-    min_signal_confidence: 75.0      # Higher bar for 1h
-    min_volume_ratio: 1.1            # 10% above average
+    signal_cooldown_seconds: 3600    # 1h between signals
+    min_signal_confidence: 78.0      # Higher bar for 1h
+    min_volume_ratio: 1.3            # 10% above average
 
     # ========================================
     # 4H TREND AUTHORITY VALIDATION
@@ -231,51 +232,37 @@ profiles:
     trend_timeframe: "240"  # 4h bars
     
     trend_indicators:
-      # 1. EMA20 must be above EMA50 on 4h
-      - type: "ema_cross"
-        params: {fast: 20, slow: 50}
-      # 2. Price must be above EMA50 on 4h
-      - type: "price_vs_ema"
-        params: 
-          ema: 50              # Check vs EMA50
-          min_gap_pct: 1.0     # Must be at/above (1% gap required)
+      - type: "rsi_reversal_momentum"
+        params:
+          lookback_candles: 5        # Last 20 hours (5 x 4H)
+          oversold_threshold: 30      # Must have been <30
+          current_min: 35             # Current must be >35
+          min_jump: 5.0               # Must have jumped >5 at some point
+          require_sustained: true     # Must be rising for 2+ candles
+          hard_stop: true             # BLOCK if fails
       
-      # 3. EMA20 must be rising on 4h (NEW)
+      # 2. RSI NOT OVERBOUGHT (SAFETY)
+      - type: "rsi_overbought"
+        params:
+          min_value: 65
+          hard_stop: true
+      
+      # 3. VOLUME SPIKE (CAPITULATION CONFIRMATION)
+      # Higher threshold - need real spike, not just elevated
+      - type: "volume_spike"
+        params:
+          min_ratio: 2.0              # Raised from 1.5 (need bigger spike)
+          max_ratio: 10.0
+      
+      # 4. EMA20 STABILIZING
       - type: "ema_slope"
         params:
-          ema: 20              # Check EMA20 slope
-          direction: "rising"  # Must be rising
-          min_slope_pct: 0.01  # At least 0.01% increase
-      
-      # 4. RSI >= 52 on 4h with momentum
-      - type: "rsi_threshold"
-        params: 
-          period: 14
-          min_value: 54           # Higher threshold for 4h
-          use_momentum: true
-          early_threshold: 45     # Early momentum for 4h
-      
-      # 5. Block 4h RSI indecision zone 48-52 (NEW)
-      - type: "rsi_range"
-        params:
-          min: 48
-          max: 52
-          invert: false  # Block when IN this range
-          momentum_override_threshold: 1.5  # NEW: Allow if momentum > 2.0
-      
-      # 6. Prevent EMA20/EMA50 crossover on 4h (NEW)
-      # Blocks if EMAs are too close (within 0.3%)
-      - type: "ema_gap"
-        params:
-          min_gap_pct: 0.3  # EMAs must be >0.3% apart
-          mode: "min"       # Minimum gap required
-      
-      # 7. Price vs VWAP on 4h
-      - type: "price_vs_vwap"
-        params: {}
+          ema: 20
+          direction: "not_falling"
+          min_slope_pct: 0.05
     
-    # Require ALL indicators to pass (conservative for 4h)
-    min_indicators_required: 5
+    # STRICT: Need 3/4 (all except maybe EMA slope)
+    min_indicators_required: 3
     
     # ========================================
     # 1H EXECUTION VALIDATION (via entry_indicators)
@@ -286,32 +273,51 @@ profiles:
     entry_timeframe: "60"   # Same as signal_timeframe (1h)
     
     entry_indicators:
-      # 1. Price >= EMA20 on 1h (NEW)
+      - type: "rsi_reversal_momentum"
+        params:
+          lookback_candles: 5        # Last 5 hours
+          oversold_threshold: 35      # Less extreme on 1H
+          current_min: 40             # Current must be >40
+          min_jump: 3.0               # Smaller jump ok on 1H
+          require_sustained: true
+          hard_stop: true
+      
+      # 2. 1H RSI NOT TOO HOT
+      # Make sure we're not chasing
+      - type: "rsi_overbought"
+        params:
+          min_value: 60              # Block if already >60
+          hard_stop: true
+      
+      # 3. PRICE VS EMA20 (LESS RESTRICTIVE)
       - type: "price_vs_ema"
         params:
-          ema: 20              # Check vs EMA20
-          min_gap_pct: 0.0     # Must be at/above
+          ema: 20
+          min_gap_pct: -2.0
+          max_gap_pct: 5.0
       
-      # 2. EMA20 >= EMA50 on 1h
-      - type: "ema_cross"
-        params: {fast: 20, slow: 50, use_slope=true}
-      
-      # 3. RSI >= 50 on 1h
-      - type: "rsi_threshold"
+      # 4. EMA20 STABILIZING
+      - type: "ema_slope"
         params:
-          period: 14
-          min_value: 55
-          use_momentum: true
-          early_threshold: 42
+          ema: 20
+          direction: "not_falling"
+          min_slope_pct: 0.02
       
-      # 4. Price vs VWAP on 1h
-      - type: "price_vs_vwap"
-        params: {}
+      # 5. VOLUME CONFIRMATION
+      - type: "volume_spike"
+        params:
+          min_ratio: 1.2              # At least elevated
+          max_ratio: 5.0
     
-    # Require 3/4 entry indicators (slightly more lenient for execution)
-    min_entry_indicators_required: 3
+    # Need 4/5 (all except maybe one)
+    min_entry_indicators_required: 4
     
     use_atr_filter: false
+    use_trend_invalidation_exit: true
+    trend_invalidation_indicators: entry
+    min_position_age_for_trend_check: 240
+    
+    max_position_hours: 72
 
   15m_MB_ATR:
     display_name: "mean_reversion_profile"

@@ -231,7 +231,7 @@ class TrendCache:
     
 
     
-    def _get_rsi_momentum(self, symbol: str, timeframe: str) -> Tuple[Optional[float], Optional[str]]:
+    def _get_rsi_momentum(self, symbol: str, timeframe: str, lookback: int = 2) -> Tuple[Optional[float], Optional[str]]:
         """
         Calculate RSI momentum (rate of change)
         
@@ -241,7 +241,6 @@ class TrendCache:
             - direction: "increasing", "decreasing", or "stable"
         """
         key = f"{symbol}_{timeframe}"
-        lookback = 2
         if key not in self._rsi_history or len(self._rsi_history[key]) < lookback + 1:
             return None, None
         
@@ -859,7 +858,109 @@ class TrendCache:
                     else:
                         is_bullish = False
                         msg = f"Reversal candle ({pattern}): ✗ (pattern not implemented)"
+
+            elif indicator_type == "rsi_reversal_momentum":
+                # Parameters
+                lookback_candles = params.get("lookback_candles", 5)  # Check last 5 candles
+                oversold_threshold = params.get("oversold_threshold", 30)  # Must have been <30
+                current_min = params.get("current_min", 35)  # Current RSI must be >35
+                min_jump = params.get("min_jump", 5.0)  # Must have jumped >5 points
+                require_sustained = params.get("require_sustained", True)  # Rising for multiple candles
                 
+                # Get RSI history
+                key = f"{symbol}_{timeframe}"
+                rsi_history = self._rsi_history.get(key, [])
+                
+                if len(rsi_history) < lookback_candles:
+                    is_bullish = False
+                    msg = f"RSI Reversal Momentum: ✗ (insufficient history)"
+                    values["history_length"] = len(rsi_history)
+                else:
+                    current_rsi = trend.rsi
+                    recent_history = rsi_history[-lookback_candles:]
+                    
+                    # Check 1: Was RSI deeply oversold in lookback window?
+                    rsi_values = [rsi for _, rsi in recent_history]
+                    touched_oversold = any(rsi < oversold_threshold for rsi in rsi_values)
+                    min_rsi = min(rsi_values) if rsi_values else current_rsi
+                    
+                    values["touched_oversold"] = touched_oversold
+                    values["min_rsi"] = float(min_rsi)
+                    
+                    # Check 2: Did RSI jump sharply (>5 points) at some point?
+                    max_jump = 0.0
+                    jump_found = False
+                    
+                    min_rsi_found = False
+                    for i in range(1, len(rsi_values)):
+                        #only look at jumps AFTER min_rsi found
+                        if not min_rsi_found and rsi_values[i-1] == min_rsi:
+                            min_rsi_found = True
+                        if min_rsi_found: 
+                            jump = rsi_values[i] - rsi_values[i-1]
+                            if jump > max_jump:
+                                max_jump = jump
+                            if jump >= min_jump:
+                                jump_found = True
+                    
+                    values["max_jump"] = float(max_jump)
+                    values["jump_found"] = jump_found
+                    
+                    # Check 3: Current RSI above minimum?
+                    current_above_min = current_rsi >= current_min
+                    values["current_rsi"] = float(current_rsi)
+                    
+                    #check momentum
+                    rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    values["rsi_direction"] = rsi_direction
+                    values["rsi_momentum"] = float(rsi_momentum)
+
+                    #current rising is true if momentum above 3 and direction increasing.
+                    # Direction increasing only possible if recent candle is positive
+                    currently_rising = rsi_momentum > 3 and rsi_direction == "increasing"
+
+                    # Check 5 (optional): Sustained rise (rising for 2+ candles)?
+                    sustained_rise = True
+                    if require_sustained and len(rsi_history) >= 3:
+                        # Check last 3 candles show progression
+                        last_3 = [rsi for _, rsi in rsi_history[-3:]]
+                        sustained_rise = (last_3[1] > last_3[0]) and (last_3[2] > last_3[1])
+                        values["sustained_rise"] = sustained_rise
+                    
+                    # ALL conditions must pass
+                    is_bullish = (
+                        touched_oversold and 
+                        jump_found and 
+                        current_above_min and 
+                        currently_rising
+                    )
+                    
+                    if require_sustained:
+                        is_bullish = is_bullish and sustained_rise
+                    
+                    # Build message
+                    if is_bullish:
+                        msg = (
+                            f"RSI Reversal Momentum: ✓ "
+                            f"(RSI {min_rsi:.0f}→{current_rsi:.0f}, "
+                            f"max jump +{max_jump:.1f}, "
+                            f"momentum {rsi_momentum:+.1f})"
+                        )
+                    else:
+                        reasons = []
+                        if not touched_oversold:
+                            reasons.append(f"never <{oversold_threshold}")
+                        if not jump_found:
+                            reasons.append(f"no +{min_jump} jump")
+                        if not current_above_min:
+                            reasons.append(f"RSI {current_rsi:.0f}<{current_min}")
+                        if not currently_rising:
+                            reasons.append("falling")
+                        if require_sustained and not sustained_rise:
+                            reasons.append("not sustained")
+                        
+                        msg = f"RSI Reversal Momentum: ✗ ({', '.join(reasons)})"
+    
             results.append((is_bullish, msg))
             if hard_stop and not is_bullish:
                 values["hard_stop"] = True

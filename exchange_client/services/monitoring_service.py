@@ -100,6 +100,8 @@ class MonitoringService:
             self._signal_check_interval = 10  # Check for signals every 10 cycles (5 min if cycle is 30s)
         self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
 
+        self._trend_invalidation_counter = 0
+        self._trend_invalidation_interval = 10  # Update trend invalidation every 10 cycles (e.g., every 5 min if cycle is 30s)
 
     def start(self):
         """Start the monitoring loop in a background thread"""
@@ -443,30 +445,32 @@ class MonitoringService:
                             lowest_price=price,
                         )
 
-                    # Trend Invalidation Check for long running trades
-                    should_exit, exit_reason = position_manager.should_exit_position(
-                        position=position,
-                        profile=profile,
-                        current_price=price
-                    )
-                    
-                    if should_exit:
-                        self.logger.info(
-                            f"Position exit: {symbol} @ {price} "
-                            f"(profit: {profit_pct:+.2f}%) [{profile.name}] - {exit_reason}"
+                    if self._trend_invalidation_counter >= self._trend_invalidation_interval:
+                        self._trend_invalidation_counter = 0
+                        # Trend Invalidation Check for long running trades
+                        should_exit, exit_reason = position_manager.should_exit_position(
+                            position=position,
+                            profile=profile,
+                            current_price=price
                         )
                         
-                        # Extract reason type (TREND_INVALIDATION or STALE_POSITION)
-                        reason_type = exit_reason.split(':')[0]
-                        
-                        self._execute_close(
-                            db, 
-                            position, 
-                            profile, 
-                            reason=reason_type,
-                            reason_summary=[exit_reason],
-                        )
-                        continue
+                        if should_exit:
+                            self.logger.info(
+                                f"Position exit: {symbol} @ {price} "
+                                f"(profit: {profit_pct:+.2f}%) [{profile.name}] - {exit_reason}"
+                            )
+                            
+                            # Extract reason type (TREND_INVALIDATION or STALE_POSITION)
+                            reason_type = exit_reason.split(':')[0]
+                            
+                            self._execute_close(
+                                db, 
+                                position, 
+                                profile, 
+                                reason=reason_type,
+                                reason_summary=[exit_reason],
+                            )
+                            continue
 
             
     def _validate_open_positions(self):
