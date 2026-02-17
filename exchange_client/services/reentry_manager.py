@@ -24,7 +24,7 @@ class ReEntryManager:
         self._cooldown_periods = {
             "1": 300,      # 1m → 5 min cooldown
             "5": 600,      # 5m → 10 min cooldown
-            "15": 900,     # 15m → 15 min cooldown
+            "15": 2100,     # 15m → 15 min cooldown
             "60": 3600,    # 1h → 60 min cooldown
         }
     
