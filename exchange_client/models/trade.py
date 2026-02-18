@@ -260,4 +260,6 @@ class OrderHistoryResponse(BaseModel):
     slippageTolerance: Optional[Decimal] = None
     slippageToleranceType: Optional[SlippageToleranceType] = None
 
+    entry_price: Optional[str] = Field(None, alias="entry_price")
+    exit_price: Optional[str] = Field(None, alias="exit_price")
     profit: Optional[str] = Field(None, alias="profit")

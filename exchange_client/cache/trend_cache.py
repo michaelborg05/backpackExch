@@ -311,7 +311,7 @@ class TrendCache:
         trend = self.get(symbol, timeframe)
         
         if trend is None:
-            return False, f"No trend data for {symbol} {timeframe}"
+            return False, f"No trend data for {symbol} {timeframe}", []
         
         # Default to all 3 indicators if not specified
         if indicators_config is None:

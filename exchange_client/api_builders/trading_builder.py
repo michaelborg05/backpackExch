@@ -678,7 +678,8 @@ class TradingService:
                         f"Closed position {position_id}: {closed_position.symbol}, "
                         f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)"
                     )
-                    
+                    history_order.entry_price = entry_price
+                    history_order.exit_price = exit_price
                     history_order.profit = profit
 
                     # Update order status to match exchange

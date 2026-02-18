@@ -297,6 +297,8 @@ class MonitoringService:
                             f"{icon} Position Closed [{profile.display_name if profile.display_name else profile.name}]\n"
                             f"Symbol: {order_response.symbol}\n"
                             f"Reason: {order.purpose}\n"
+                            f"Entry: ${order.entry_price:.2f}\n"
+                            f"Exit: ${order.exi_price:.2f}\n"
                             f"Quantity: {order_response.executedQuantity:.4f}\n"
                             f"P/L: ${order_response.profit:.2f}",
                             MessagePriority.NORMAL
