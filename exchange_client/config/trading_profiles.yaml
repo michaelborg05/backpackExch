@@ -336,7 +336,7 @@ profiles:
     max_open_positions: 2               # Max concurrent positions per token
     max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
-    use_market_regime_filter: true
+    use_market_regime_filter: false
 
     # 🎯 SIGNAL GENERATION SETTINGS (NEW)
     enable_signal_generation: true    # Enable automated signal generation
