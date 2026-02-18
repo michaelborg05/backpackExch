@@ -8,7 +8,7 @@ profiles:
     strategy_type: trend_following
 
     take_profit_pct: 1.2
-    stop_loss_pct: 0.7
+    stop_loss_pct: 0.8
     trailing_stop_pct: 0.8
     arm_trailing_stop_pct: 0.7
     use_trailing_stop: true
@@ -34,11 +34,6 @@ profiles:
     use_trend_filter: true
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
-      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
-        params:
-          ema: 50
-          direction: "not_falling"
-          min_slope_pct: 0.01
       - type: "ema_slope"  # NEW: Ensure 60m trend is rising
         params:
           ema: 20
@@ -79,7 +74,7 @@ profiles:
       - type: "rsi_threshold"
         params:
           period: 14
-          min_value: 53
+          min_value: 58
           use_momentum: true
           early_threshold: 40
           hard_stop: true
@@ -94,9 +89,9 @@ profiles:
     # ATR filter (volatility)
     use_atr_filter: false
      # Trend-based exit (intelligent)
-    use_trend_invalidation_exit: false
+    use_trend_invalidation_exit: true
     trend_invalidation_indicators: entry #trend or entry
-    min_position_age_for_trend_check: 60  # minutes
+    min_position_age_for_trend_check: 30  # minutes
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 12  # Force exit if stuck
 
@@ -108,7 +103,7 @@ profiles:
 
     strategy_type: trend_following
 
-    take_profit_pct: 1
+    take_profit_pct: 1.1
     stop_loss_pct: 0.7
     trailing_stop_pct: 0.5
     arm_trailing_stop_pct: 0.4
@@ -186,7 +181,7 @@ profiles:
     # Trend-based exit (intelligent)
     use_trend_invalidation_exit: true
     trend_invalidation_indicators: entry #trend or entry
-    min_position_age_for_trend_check: 30  # minutes
+    min_position_age_for_trend_check: 20  # minutes
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 12  # Force exit if stuck
  
@@ -415,9 +410,9 @@ profiles:
 
     strategy_type: trend_following
 
-    take_profit_pct: 0.9
+    take_profit_pct: 0.8
     stop_loss_pct: 0.7
-    trailing_stop_pct: 0.4
+    trailing_stop_pct: 0.5
     arm_trailing_stop_pct: 0.4
     use_trailing_stop: true
 
@@ -492,7 +487,7 @@ profiles:
     # ATR filter (volatility)
     use_atr_filter: false
      # Trend-based exit (intelligent)
-    use_trend_invalidation_exit: true
+    use_trend_invalidation_exit: false
     trend_invalidation_indicators: entry #trend or entry
     min_position_age_for_trend_check: 360  # minutes
     # Time-based invalidation and max position backstop (last resort)
