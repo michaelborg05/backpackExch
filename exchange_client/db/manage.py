@@ -378,9 +378,17 @@ def populate_default_settings():
                 'signal_check_interval': '10',  # Check signals every 10 cycles (5 min if cycle is 30s)
                 'trend_invalidation_interval': '10',  # Update trend invalidation every 10 cycles
                 'position_validation_interval': '10',  # Run position validation every 10 cycles
+                'cooldown_take_profit_mins': '35',  # default cooldown after take profit
+                'cooldown_stop_loss_mins': '35',    # default cooldown after stop loss
+                'cooldown_default_mins': '15',      # default cooldown
             }
-            
-            created = initialize_default_settings(db, default_settings=default_settings)
+            new_settings = {
+                'cooldown_take_profit_mins': '35',  # default cooldown after take profit
+                'cooldown_stop_loss_mins': '35',    # default cooldown after stop loss
+                'cooldown_default_mins': '15',      # default cooldown
+
+            }
+            created = initialize_default_settings(db, default_settings=new_settings)
             
             print(f"✅ Successfully initialized {len(created)} default settings")
             

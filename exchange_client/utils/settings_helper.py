@@ -142,7 +142,22 @@ class SettingsHelper:
     def orderbook_depth(self) -> int:
         """Orderbook depth to fetch"""
         return self._get_int('orderbook_depth', 20)
+
+    @property
+    def cooldown_take_profit_mins(self) -> int:
+        """cooldown in minutes after take profit for same symbol"""
+        return self._get_int('cooldown_take_profit_mins', 35)
     
+    @property
+    def cooldown_stop_loss_mins(self) -> int:
+        """cooldown in minutes after stop loss for same symbol"""
+        return self._get_int('cooldown_stop_loss_mins', 35)
+
+    @property
+    def cooldown_default_mins(self) -> int:
+        """cooldown in minutes for same symbol"""
+        return self._get_int('cooldown_default_mins', 15)
+
     def get_custom(self, setting_name: str, default: Any = None) -> Any:
         """
         Get a custom setting not covered by properties

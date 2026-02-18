@@ -11,6 +11,14 @@ TO DO
 Improvement: The "Mean Reversion" Check
   Still need to add scoring to signal_generator for mean_reversion strategy
   Need to update the pine script to include new indicator info
+#Add profile param for how many indicators needed for trend invalidation
+#possibility - Add price momentum check to TI: If price drops below entry within first 10 minutes, treat as instant TI
+#anothr possible idea - Post-TP Re-Entry Protection - yaml# After TP exit, block re-entry on same symbol for 2 hours - post_tp_cooldown_seconds: 7200
+# If re-entering within 3 hours of TP, extra requirements:
+post_tp_reentry_rules:
+  time_window_seconds: 10800
+  require_price_below_previous_high: true  # Must enter BELOW previous TP high
+  min_volume_ratio_override: 1.5  # Higher volume requirement
 
 
 No need
@@ -72,3 +80,4 @@ No need
 #Figure out a way to make reason_summary in db more AI readable for analysis
 # Add a call on stop loss to run trend/entry rules and add to db 
 #telegram - show open positions with profit/loss on each
+#change cooldown logic. Maybe make it params in settings. Takeprofit cooldown 35mins, stop loss 35mins, others 15 or 20

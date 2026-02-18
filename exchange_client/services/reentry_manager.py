@@ -5,7 +5,8 @@ from db.utils import get_db_session
 from db.models import Position
 from models.webhook import TrendData
 from utils.logging import log_manager
-
+from utils.settings_helper import get_settings_helper
+from utils.constants import PositionCloseReason
 
 class ReEntryManager:
     """
@@ -19,15 +20,8 @@ class ReEntryManager:
     
     def __init__(self):
         self.logger = log_manager.get_logger("ReEntryManager")
-        
-        # Cooldown periods by timeframe (in seconds)
-        self._cooldown_periods = {
-            "1": 300,      # 1m → 5 min cooldown
-            "5": 600,      # 5m → 10 min cooldown
-            "15": 2100,     # 15m → 15 min cooldown
-            "60": 3600,    # 1h → 60 min cooldown
-        }
-    
+        self.settings = get_settings_helper()
+
     def can_reenter(
         self,
         symbol: str,
@@ -58,9 +52,17 @@ class ReEntryManager:
             # Calculate time since exit
             now = datetime.now(timezone.utc)
             time_since_exit = (now - recent_exit.closed_at).total_seconds()
+
+            #Get last exit reason
+            close_reason = recent_exit.close_reason
             
-            # Get cooldown period for this timeframe
-            cooldown = self._cooldown_periods.get(timeframe, 900)  # Default 15 min
+            # Get cooldown period based on last exit
+            if close_reason == PositionCloseReason.TAKE_PROFIT:
+                cooldown = self.settings.cooldown_take_profit_mins
+            elif close_reason == PositionCloseReason.STOP_LOSS:
+                cooldown = self.settings.cooldown_stop_loss_mins
+            else:
+                cooldown = self.settings.cooldown_default_mins
             
             # RULE 1: Minimum cooldown period (always enforced)
             if time_since_exit < cooldown:
@@ -68,7 +70,6 @@ class ReEntryManager:
                 return False, f"Cooldown: {remaining}s remaining (last exit: {recent_exit.close_reason})"
             
             # RULE 2: Exit-specific requirements
-            close_reason = recent_exit.close_reason
             from cache.price_cache import get_price_cache
             price_cache = get_price_cache()
             price = price_cache.get_price(symbol)
@@ -88,7 +89,7 @@ class ReEntryManager:
                 if not reset_ok:
                     return False, f"Profitable exit @ {recent_exit.closed_at.strftime('%H:%M')}: {reset_reason}"
                 else:
-                    return True, f"Momentum reset OK after {close_reason}"
+                    return True, f"Momentum reset OK after {close_reason} - {reset_reason}"
             
             # After stop loss, allow but log it (signal generator should be more cautious)
             elif close_reason == "STOP_LOSS":
