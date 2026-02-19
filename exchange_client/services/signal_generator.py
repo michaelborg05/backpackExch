@@ -188,7 +188,7 @@ class SignalGenerator:
             timestamp=time.time(),
             symbol=symbol,
             signal_timeframe=self.trading_timeframe,
-            strategy_type=self.strategy_type,
+            strategy_type=self.strategy_type.value,
             order_type=TradeSide.BUY,
             score=0.0,
             score_components=0,

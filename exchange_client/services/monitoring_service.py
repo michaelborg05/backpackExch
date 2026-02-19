@@ -291,14 +291,17 @@ class MonitoringService:
                 for order in open_orders:
                     trading = TradingService(profile)
                     order_response = trading.process_limit_order(order=order, position_id=order.position_id)
+                    entry_price= order_response.entry_price if order_response.entry_price  else  entry_price="N/A"
+                    exit_price= order_response.exit_price if order_response.exit_price  else  exit_price="N/A"
+                    
                     if order_response and order_response.status == OrderStatus.FILLED:
                         icon = "🟢" if order.purpose == "TAKE_PROFIT" else "🛑"
                         self._send_telegram(
                             f"{icon} Position Closed [{profile.display_name if profile.display_name else profile.name}]\n"
                             f"Symbol: {order_response.symbol}\n"
                             f"Reason: {order.purpose}\n"
-                            f"Entry: ${order.entry_price:.2f}\n"
-                            f"Exit: ${order.exi_price:.2f}\n"
+                            f"Entry: ${entry_price}\n"
+                            f"Exit: ${exit_price}\n"
                             f"Quantity: {order_response.executedQuantity:.4f}\n"
                             f"P/L: ${order_response.profit:.2f}",
                             MessagePriority.NORMAL
