@@ -58,11 +58,11 @@ class ReEntryManager:
             
             # Get cooldown period based on last exit
             if close_reason == PositionCloseReason.TAKE_PROFIT:
-                cooldown = self.settings.cooldown_take_profit_mins
+                cooldown = self.settings.cooldown_take_profit_mins * 60
             elif close_reason == PositionCloseReason.STOP_LOSS:
-                cooldown = self.settings.cooldown_stop_loss_mins
+                cooldown = self.settings.cooldown_stop_loss_mins * 60
             else:
-                cooldown = self.settings.cooldown_default_mins
+                cooldown = self.settings.cooldown_default_mins * 60
             
             # RULE 1: Minimum cooldown period (always enforced)
             if time_since_exit < cooldown:
