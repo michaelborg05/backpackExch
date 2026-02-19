@@ -291,8 +291,8 @@ class MonitoringService:
                 for order in open_orders:
                     trading = TradingService(profile)
                     order_response = trading.process_limit_order(order=order, position_id=order.position_id)
-                    entry_price= order_response.entry_price if order_response.entry_price  else  entry_price="N/A"
-                    exit_price= order_response.exit_price if order_response.exit_price  else  exit_price="N/A"
+                    entry_price = order_response.entry_price if order_response.entry_price  else "N/A"
+                    exit_price = order_response.exit_price if order_response.exit_price  else  "N/A"
                     
                     if order_response and order_response.status == OrderStatus.FILLED:
                         icon = "🟢" if order.purpose == "TAKE_PROFIT" else "🛑"
