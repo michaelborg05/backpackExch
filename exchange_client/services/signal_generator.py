@@ -57,7 +57,7 @@ class SignalGenerator:
         self.entry_timeframe = getattr(profile, 'entry_timeframe', self.trading_timeframe)
         
         # NEW: Determine regime filter timeframes based on strategy
-        if self.strategy_type == "mean_reversion":
+        if self.strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion: regime checks execution timeframe (where entry logic lives)
             self.regime_primary_tf = self.entry_timeframe    # 15m
             self.regime_confirm_tf = self.entry_timeframe    # 15m
@@ -84,7 +84,7 @@ class SignalGenerator:
         )
         
         log_msg = (
-            f"✨ Initialized SignalGenerator [{self.strategy_type}]: "
+            f"✨ Initialized SignalGenerator [{self.strategy_type.value}]: "
             f"trading_tf={self.trading_timeframe}m, "
             f"trend_tf={self.trend_timeframe}m"
         )
@@ -274,21 +274,27 @@ class SignalGenerator:
         if self.profile.use_atr_filter:
             atr_check, atr_reason = self._check_atr(symbol)
             indicators['atr'] = atr_check
-            validation.market_context.atr = {
-                "is_valid"   : atr_check['is_valid'],
-                "is_volatile": atr_check['is_volatile'],
-                "ratio": float(atr_check['ratio']),
-                "message": f"{atr_check['ratio']:.1f}x average ({self.profile.atr_threshold}x - {self.profile.atr_filter_mode})"
-            }        
+            if atr_check['is_valid'] == False:
+                validation.market_context.atr = {
+                    "is_valid"   : atr_check['is_valid'],
+                    "message": f"{atr_reason}"
+                }        
+            else: 
+                validation.market_context.atr = {
+                    "is_valid"   : atr_check['is_valid'],
+                    "is_volatile": atr_check['is_volatile'],
+                    "ratio": float(atr_check['ratio']),
+                    "message": f"{atr_check['ratio']:.1f}x average ({self.profile.atr_threshold}x - {self.profile.atr_filter_mode})"
+                }        
 
             if not atr_check['is_valid']:
                 self.logger.debug(f"{symbol}: ❌ ATR check failed - {atr_reason}")
-                return None
+                #return None
             
             reasons.append(f"✅ ATR: {atr_reason}")
         
         # 8. NOT OVERBOUGHT (safety check - different for each strategy)
-        if self.strategy_type == "trend_following":
+        if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
             overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
             indicators['overbought'] = overbought_check
             ob_check = IndicatorResult(
@@ -317,7 +323,7 @@ class SignalGenerator:
             confidence_score += self.safety_weight
         
         # NEW: Calculate confidence based on strategy type
-        if self.strategy_type == "mean_reversion":
+        if self.strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion has different confidence factors
             confidence_pct = self._mean_reversion_confidence_score(
                 symbol, 
@@ -325,10 +331,18 @@ class SignalGenerator:
                 base_score=confidence_score,
                 max_score=self.max_confidence
             )
+        elif self.strategy_type == StrategyType.RANGE_TRADING:
+            confidence_pct = self._range_trading_confidence_score(
+                symbol,
+                self.entry_timeframe,
+                trend_timeframe=self.trend_timeframe,
+                base_score=confidence_score,
+                max_score=self.max_confidence
+            )
         else:
             # Trend following uses standard normalization
             confidence_pct = (confidence_score / self.max_confidence) * 100
-        
+
         validation.score = confidence_pct
         validation.score_components = 3  # trend, entry, volume
 
@@ -618,6 +632,196 @@ class SignalGenerator:
             f"VWAP:{vwap_gap_pct:+.1f}%, EMA20:{ema20_gap_pct:+.1f}%)"
         )
         
+        return confidence_pct
+
+    def _range_trading_confidence_score(
+        self,
+        symbol: str,
+        timeframe: str,
+        trend_timeframe: str,
+        base_score: float,
+        max_score: float
+    ) -> float:
+        """
+        Calculate confidence for range/oscillation trading setups.
+
+        Range trading is the INVERSE of trend following — we WANT:
+        - Flat, compressed EMAs (no directional bias)
+        - RSI cycling in the mid-band (40–60), not trending
+        - Price near the lower portion of the range (VWAP / EMA proximity)
+        - Low-to-moderate ATR (contained volatility, range intact)
+        - RSI just starting to turn up from a dip (timing the bounce)
+
+        Bonus factors (max +20 points total):
+        1. 60m EMA compression     — flat HTF confirms we're ranging   (+5)
+        2. RSI mid-band position   — not trending, cycling              (+5)
+        3. RSI momentum turn       — dipping then turning up            (+5)
+        4. VWAP proximity          — price near but below VWAP          (+3)
+        5. Low ATR                 — range is intact, not breaking      (+2)
+
+        Args:
+            symbol:           Trading symbol
+            timeframe:        Entry timeframe (15m)
+            trend_timeframe:  Higher timeframe used for range confirmation (60m)
+            base_score:       Points accumulated from indicator pass/fail checks
+            max_score:        Maximum points possible from those checks
+
+        Returns:
+            Confidence percentage (0–100)
+        """
+        entry_trend = self.trend_cache.get(symbol, timeframe)
+        htf_trend = self.trend_cache.get(symbol, trend_timeframe)
+
+        # If we have no data at all, fall back to base score normalisation
+        if entry_trend is None:
+            return (base_score / max_score) * 100
+
+        bonus_points = 0.0
+        max_bonus = 20.0
+
+        # ------------------------------------------------------------------
+        # FACTOR 1: 60m EMA Compression (+5 points)
+        # Tight EMA spread on the higher timeframe means no trend is forming.
+        # The tighter the spread, the more confident we are in the range.
+        # ------------------------------------------------------------------
+        if htf_trend is not None:
+            ema_diff_pct = abs(
+                ((htf_trend.ema20 - htf_trend.ema50) / htf_trend.ema50) * 100
+            )
+            if ema_diff_pct < 0.1:
+                bonus_points += 5.0   # Very tight — strong range confirmation
+            elif ema_diff_pct < 0.25:
+                bonus_points += 4.0   # Tight
+            elif ema_diff_pct < 0.5:
+                bonus_points += 2.5   # Moderate compression
+            elif ema_diff_pct < 0.8:
+                bonus_points += 1.0   # Slight compression — range may be early/late
+            # > 0.8% spread = trending, no bonus (trend followers would catch this)
+
+            self.logger.debug(
+                f"{symbol} Range Score | "
+                f"60m EMA spread: {ema_diff_pct:.3f}% → bonus +{bonus_points:.1f}"
+            )
+
+        # ------------------------------------------------------------------
+        # FACTOR 2: RSI Mid-Band Position (+5 points)
+        # We want RSI cycling in the 40–60 zone on the entry TF.
+        # Entering when RSI has dipped toward the lower half (40–50) gives the
+        # best risk/reward for a bounce back to the midpoint.
+        # ------------------------------------------------------------------
+        rsi = entry_trend.rsi
+        rsi_bonus = 0.0
+
+        if 42 <= rsi <= 50:
+            rsi_bonus = 5.0   # Sweet spot: dipped low in range, primed to bounce
+        elif 50 < rsi <= 55:
+            rsi_bonus = 3.0   # Acceptable — mid-range, can still bounce to VWAP
+        elif 38 <= rsi < 42:
+            rsi_bonus = 2.0   # Getting deeper — valid but approaching MR territory
+        elif 55 < rsi <= 60:
+            rsi_bonus = 1.0   # Too close to range top — lower confidence entry
+        # RSI < 38 or > 60: no bonus — either too oversold or too close to top
+
+        bonus_points += rsi_bonus
+        self.logger.debug(
+            f"{symbol} Range Score | "
+            f"15m RSI: {rsi:.1f} → bonus +{rsi_bonus:.1f}"
+        )
+
+        # ------------------------------------------------------------------
+        # FACTOR 3: RSI Momentum Turn (+5 points)
+        # We want RSI to have recently dipped and now be turning back up.
+        # This confirms we're catching the bounce, not a continuing decline.
+        # ------------------------------------------------------------------
+        rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
+            symbol, timeframe, lookback=2
+        )
+
+        momentum_bonus = 0.0
+        if rsi_momentum is not None and rsi_direction == "increasing":
+            if rsi_momentum >= 3.0:
+                momentum_bonus = 5.0   # Strong turn — high conviction
+            elif rsi_momentum >= 2.0:
+                momentum_bonus = 4.0   # Good turn
+            elif rsi_momentum >= 1.0:
+                momentum_bonus = 3.0   # Moderate — turning but gently
+            elif rsi_momentum >= 0.5:
+                momentum_bonus = 1.5   # Early signs — lower confidence
+        elif rsi_direction == "stable":
+            momentum_bonus = 1.0       # Flat is ok — not falling further
+
+        bonus_points += momentum_bonus
+        self.logger.debug(
+            f"{symbol} Range Score | "
+            f"RSI momentum: {rsi_momentum:+.1f} ({rsi_direction}) → bonus +{momentum_bonus:.1f}"
+        )
+
+        # ------------------------------------------------------------------
+        # FACTOR 4: VWAP Proximity (+3 points)
+        # On a range day VWAP acts as the midpoint / fair value.
+        # We want price slightly below VWAP (buying discount toward fair value),
+        # but not so far below that it's a trending/breakdown move.
+        # ------------------------------------------------------------------
+        vwap_bonus = 0.0
+        if entry_trend.vwap and entry_trend.vwap > 0:
+            vwap_gap_pct = ((entry_trend.price - entry_trend.vwap) / entry_trend.vwap) * 100
+
+            if -0.5 <= vwap_gap_pct < -0.05:
+                vwap_bonus = 3.0   # Just below VWAP — ideal range dip entry
+            elif -1.0 <= vwap_gap_pct < -0.5:
+                vwap_bonus = 2.0   # Slightly more extended — still valid
+            elif vwap_gap_pct >= -0.05:
+                vwap_bonus = 1.0   # At or just above VWAP — tight but acceptable
+            # < -1.0%: no bonus — too extended for a range play, MR profile is better
+
+            bonus_points += vwap_bonus
+            self.logger.debug(
+                f"{symbol} Range Score | "
+                f"VWAP gap: {vwap_gap_pct:+.2f}% → bonus +{vwap_bonus:.1f}"
+            )
+
+        # ------------------------------------------------------------------
+        # FACTOR 5: ATR Containment (+2 points)
+        # Low ATR means the range is intact. If ATR is spiking, the range is
+        # likely breaking and we should have less confidence.
+        # Note: ATR filter in the profile will hard-block if ratio > threshold,
+        # but here we reward for being well within that limit.
+        # ------------------------------------------------------------------
+        atr_bonus = 0.0
+        atr_data = self.atr_cache.get(symbol, self.profile.atr_timeframe
+                                    if hasattr(self.profile, 'atr_timeframe') else timeframe)
+        if atr_data is not None:
+            atr_ratio = float(atr_data.get_ratio())
+            if atr_ratio < 0.8:
+                atr_bonus = 2.0   # Very low volatility — strong range containment
+            elif atr_ratio < 1.0:
+                atr_bonus = 1.5   # Below average — range solid
+            elif atr_ratio < 1.2:
+                atr_bonus = 0.5   # Slightly elevated — range may be testing edges
+
+            bonus_points += atr_bonus
+            self.logger.debug(
+                f"{symbol} Range Score | "
+                f"ATR ratio: {atr_ratio:.2f}x → bonus +{atr_bonus:.1f}"
+            )
+
+        # ------------------------------------------------------------------
+        # Final calculation
+        # ------------------------------------------------------------------
+        bonus_points = min(bonus_points, max_bonus)
+        total_score = base_score + bonus_points
+        confidence_pct = (total_score / (max_score + max_bonus)) * 100
+
+        self.logger.debug(
+            f"{symbol} Range Trading Confidence: "
+            f"Base {base_score:.1f} + Bonus {bonus_points:.1f} = "
+            f"{total_score:.1f}/{max_score + max_bonus:.1f} = {confidence_pct:.1f}% "
+            f"(RSI:{rsi:.1f}, "
+            f"VWAP:{vwap_gap_pct:+.2f}% " if (entry_trend.vwap and entry_trend.vwap > 0) else
+            f"(RSI:{rsi:.1f}, VWAP:N/A "
+            f"Momentum:{rsi_momentum:+.1f} [{rsi_direction}])"
+        )
+
         return confidence_pct
     
     def scan_symbols(self, symbols: List[str]) -> List[TradingSignal]:

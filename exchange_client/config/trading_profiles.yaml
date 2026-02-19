@@ -396,7 +396,7 @@ profiles:
 
   15m_MB:
     display_name: "range_trading"
-    enabled: false
+    enabled: true
     api_key_env: BP_API_KEY_15M
     secret_env: BP_SECRET_15M
 
@@ -431,7 +431,7 @@ profiles:
       - type: "ema_slope"  # NEW: Ensure 60m trend is rising
         params:
           ema: 20
-          direction: " not_falling"
+          direction: "not_falling"
           min_slope_pct: 0.01
       - type: "rsi_threshold"
         params: 
@@ -478,7 +478,7 @@ profiles:
     min_entry_indicators_required: 4
 
     # ATR filter (volatility)
-    use_atr_filter: true
+    use_atr_filter: false
     atr_timeframe: "15m"
     atr_threshold: 1.5
     atr_filter_mode: "require_low"
