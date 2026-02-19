@@ -114,14 +114,14 @@ class TrendData(BaseModel):
     # NEW: Optional fields for advanced indicators
     bb_lower: Optional[float] = None      # Bollinger lower band
     bb_upper: Optional[float] = None      # Bollinger upper band
-    bb_middle: Optional[float] = None     # Bollinger middle (SMA)
+    bb_basis: Optional[float] = None     # Bollinger middle (SMA)
     
     # NEW: OHLC for candle patterns
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
-    
+    prev_open:  Optional[float] = None
+    prev_high:  Optional[float] = None
+    prev_low:   Optional[float] = None
+    prev_close: Optional[float] = None    
+
     def is_bullish(self, min_rsi: float = 50) -> bool:
         """Quick check if trend is bullish"""
         return (
@@ -129,6 +129,40 @@ class TrendData(BaseModel):
             self.rsi > min_rsi and 
             self.price > self.vwap
         )
+
+    @property
+    def bb_pct_b(self) -> Optional[float]:
+        """
+        Bollinger Band %B — where price sits within the bands.
+        0.0 = at lower band, 0.5 = at midline (basis), 1.0 = at upper band.
+        Values < 0 mean price is below the lower band (breach).
+        Values > 1 mean price is above the upper band.
+        
+        Used by range_trading confidence scorer and bollinger_bands indicator.
+        """
+        if self.bb_upper is None or self.bb_lower is None:
+            return None
+        band_width = self.bb_upper - self.bb_lower
+        if band_width == 0:
+            return None
+        return (self.price - self.bb_lower) / band_width
+
+    @property
+    def bb_width(self) -> Optional[float]:
+        """
+        Bollinger Band Width — normalised band width relative to the midline.
+        Formula: (upper - lower) / basis
+        
+        Low value (e.g. < 0.03) = bands are compressed = ranging / low volatility.
+        High value (e.g. > 0.08) = bands are wide = trending / high volatility.
+        
+        Used by range_trading confidence scorer and regime filter.
+        """
+        if self.bb_upper is None or self.bb_lower is None or self.bb_basis is None:
+            return None
+        if self.bb_basis == 0:
+            return None
+        return (self.bb_upper - self.bb_lower) / self.bb_basis
 
 class TrendUpdateAlert(BaseModel):
     """Alert from TradingView trend monitor"""
