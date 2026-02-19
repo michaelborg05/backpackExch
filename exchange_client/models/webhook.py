@@ -93,6 +93,24 @@ class WebhookResponse(BaseModel):
     results: List[dict] = Field(default_factory=list, description="Results per profile")
     details: Optional[dict] = None
 
+class ChangeDetails(BaseModel):
+    ema20_changed: Optional[bool] = False
+    ema50_changed: Optional[bool] = False
+    rsi_changed: Optional[bool] = False
+
+
+class PrevCandle(BaseModel):
+    prev_open:  Optional[float] = None
+    prev_high:  Optional[float] = None
+    prev_low:   Optional[float] = None
+    prev_close: Optional[float] = None    
+
+
+class BollingerBands(BaseModel):
+    bb_lower: Optional[float] = None      # Bollinger lower band
+    bb_upper: Optional[float] = None      # Bollinger upper band
+    bb_basis: Optional[float] = None     # Bollinger middle (SMA)
+
 class TrendData(BaseModel):
     """Trend indicator data from TradingView"""
     symbol: str
@@ -102,25 +120,17 @@ class TrendData(BaseModel):
     rsi: float
     vwap: float
     price: float
+
     timestamp: Optional[float] = None
     volume: Optional[float] = None
     volume_sma: Optional[float] = None  # 20-period average
     volume_ratio: Optional[float] = None  # current / average
-    indicators_changed: Optional[bool] = Field(False)
-    ema20_changed: Optional[bool] = Field(False)
-    ema50_changed: Optional[bool] = Field(False)
-    rsi_changed: Optional[bool] = Field(False)
-
-    # NEW: Optional fields for advanced indicators
-    bb_lower: Optional[float] = None      # Bollinger lower band
-    bb_upper: Optional[float] = None      # Bollinger upper band
-    bb_basis: Optional[float] = None     # Bollinger middle (SMA)
     
-    # NEW: OHLC for candle patterns
-    prev_open:  Optional[float] = None
-    prev_high:  Optional[float] = None
-    prev_low:   Optional[float] = None
-    prev_close: Optional[float] = None    
+    indicators_changed: Optional[bool] = Field(False)
+    
+    change_details: Optional[ChangeDetails] = None
+    prev_candle: Optional[PrevCandle] = None
+    bb: Optional[BollingerBands] = None
 
     def is_bullish(self, min_rsi: float = 50) -> bool:
         """Quick check if trend is bullish"""
