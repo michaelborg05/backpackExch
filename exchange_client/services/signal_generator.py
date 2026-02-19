@@ -579,7 +579,11 @@ class SignalGenerator:
         
         # FACTOR 3: Price Extension Below VWAP (max +5 points)
         # Further below VWAP = more stretched = higher bounce potential
-        vwap_gap_pct = ((trend.price - trend.vwap) / trend.vwap) * 100
+        try:
+            vwap_gap_pct = ((trend.price - trend.vwap) / trend.vwap) * 100
+        except:
+            vwap_gap_pct = 0
+        
         if vwap_gap_pct < -4.0:
             bonus_points += 5.0   # Very extended
         elif vwap_gap_pct < -3.0:

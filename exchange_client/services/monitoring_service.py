@@ -686,7 +686,7 @@ class MonitoringService:
             timestamp=time.time(),
             symbol=symbol,
             signal_timeframe="15",
-            strategy_type=profile.strategy_type,
+            strategy_type=profile.strategy_type.value,
             order_type=TradeSide.SELL,
             score=0.0,
             score_components=0,
