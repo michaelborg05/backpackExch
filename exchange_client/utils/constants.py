@@ -139,6 +139,7 @@ class MarketRegime(Enum):
     CHOPPY = "choppy"           # ⚠️ Whipsaw risk - wait for clarity
     HIGH_RISK = "high_risk"     # 🚫 Dangerous - don't trade
     EXPANDING = "expanding"     # 🚀 Strong momentum - best entries
+    UNKNOWN =  "unknown"        # Unable to assess
 
 class TrendState(Enum):
     """Trend health state for each timeframe"""
@@ -151,4 +152,6 @@ class StrategyType(Enum):
     """Trading strategy types"""
     TREND_FOLLOWING = "trend_following"
     MEAN_REVERSION = "mean_reversion"
+    RANGE_TRADING = "range_trading"
+
 

@@ -3,7 +3,7 @@ import os
 import yaml
 from typing import Dict, List, Optional
 from models.trading_profile import TradingProfile
-
+from utils.constants import StrategyType
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_PROFILE_PATH = BASE_DIR / "config" / "trading_profiles.yaml"
@@ -57,7 +57,10 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
         display_name = cfg.get("display_name", name)
         api_key = os.getenv(cfg["api_key_env"])
         secret = os.getenv(cfg["secret_env"])
-        strategy_type = cfg.get("strategy_type", "trend_following")  # Default to trend_following if not specified
+        try:
+            strategy_type = StrategyType(cfg.get("strategy_type", "trend_following"))  # Default to trend_following if not specified
+        except:
+            raise RuntimeError(f"Invalid Strategy Type {cfg.get("strategy_type", "trend_following")}")
         
         if not api_key or not secret:
             raise RuntimeError(f"Missing env vars for profile '{name}'")
@@ -165,7 +168,6 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             display_name=display_name,
             api_key=api_key,
             secret=secret,
-
             strategy_type=strategy_type,
             # Position sizing
             default_order_size_usdc=float(cfg.get("default_order_size_usdc", 100)), # Default order size in USDC (fixed amount)

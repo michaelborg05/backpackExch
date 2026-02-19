@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import Enum
 import time
 from utils.logging import log_manager
-from utils.constants import TradeSide
+from utils.constants import TradeSide, StrategyType
 from cache.trend_cache import get_trend_cache
 from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
@@ -45,7 +45,7 @@ class SignalGenerator:
         self.regime_filter = get_regime_filter()
 
         # NEW: Strategy type detection
-        self.strategy_type = getattr(profile, 'strategy_type', 'trend_following')
+        self.strategy_type = getattr(profile, 'strategy_type', StrategyType.TREND_FOLLOWING)
 
         # Signal generation settings from profile
         self.trading_timeframe = getattr(profile, 'signal_timeframe', '15')

@@ -476,7 +476,8 @@ async def tradingview_webhook(
                         symbol=alert.symbol,
                         profile_name=profile.name,
                     primary_timeframe=trend_timeframe,  # Uses your 60m timeframe
-                    confirm_timeframe=trading_timeframe  # Uses your 15m timeframe
+                    confirm_timeframe=trading_timeframe,  # Uses your 15m timeframe
+                    strategy_type=profile.strategy_type
                     )
                 
                     if not can_trade:

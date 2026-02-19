@@ -18,16 +18,10 @@ PERMISSIVE BY DEFAULT: Only blocks genuinely dangerous conditions
 from typing import Optional, Tuple, Dict
 from enum import Enum
 import time
+from utils.constants import StrategyType, MarketRegime
 from utils.logging import log_manager
 from cache.trend_cache import get_trend_cache
 from cache.atr_cache import get_atr_cache
-
-
-class MarketRegime(Enum):
-    """Market regime classification based on RISK, not trend"""
-    SAFE = "safe"               # ✅ Safe to trade - trust your trend signals
-    CHOPPY = "choppy"           # ⚠️ Whipsaw risk - wait for clarity
-    HIGH_RISK = "high_risk"     # 🚫 Dangerous - don't trade
 
 
 class RegimeFilter:
@@ -67,7 +61,7 @@ class RegimeFilter:
             
         # Cache results
         self._regime_cache: Dict[str, Tuple[MarketRegime, str, float]] = {}
-        self._cache_ttl = 60
+        self._cache_ttl = 240
         
         self.logger.info("RegimeFilter initialized - RISK-FOCUSED MODE")
     
@@ -76,7 +70,7 @@ class RegimeFilter:
         symbol: str,
         primary_timeframe: str = "60",
         confirm_timeframe: str = "15",
-        strategy_type: str = "trend_following"
+        strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
     ) -> Tuple[MarketRegime, str]:
         """
         Determine if market environment is SAFE for trading
@@ -85,17 +79,20 @@ class RegimeFilter:
         Returns:
             (regime, reason) where regime is SAFE, CHOPPY, or HIGH_RISK
         """
-        cache_key = f"{symbol}_{primary_timeframe}_{confirm_timeframe}"
+
+        cache_key = f"{symbol}_{primary_timeframe}_{confirm_timeframe}_{strategy_type.value}"
         if cache_key in self._regime_cache:
             regime, reason, timestamp = self._regime_cache[cache_key]
             if time.time() - timestamp < self._cache_ttl:
+                
+                
                 return regime, reason
         
         primary_trend = self.trend_cache.get(symbol, primary_timeframe)
         confirm_trend = self.trend_cache.get(symbol, confirm_timeframe)
         
         if primary_trend is None:
-            return MarketRegime.CHOPPY, f"No {primary_timeframe}m data - cannot assess risk"
+            return MarketRegime.UNKNOWN, f"No {primary_timeframe}m data - cannot assess risk"
         
         # PRIORITY 1: Check for HIGH RISK (blocks everything)
         high_risk, risk_reason = self._check_high_risk(
@@ -114,14 +111,14 @@ class RegimeFilter:
         )
         if is_choppy:
             regime = MarketRegime.CHOPPY
-            reason = f"⚠️ {chop_reason}"
+            reason = f"{"✅ - Good for Range Trading profile - " if strategy_type == StrategyType.RANGE_TRADING else "⚠️"} {chop_reason}"
             self._regime_cache[cache_key] = (regime, reason, time.time())
             self.logger.info(f"{symbol}: {reason}")
             return regime, reason
         
         # DEFAULT: SAFE - trust your trend signals
         regime = MarketRegime.SAFE
-        reason = "✅ Market conditions safe - trust trend signals"
+        reason = f"{"⚠️ - not good for Range Trading profile - " if strategy_type == StrategyType.RANGE_TRADING else "✅ Market conditions safe - trust trend signals"}"
         self._regime_cache[cache_key] = (regime, reason, time.time())
         return regime, reason
     
@@ -131,7 +128,7 @@ class RegimeFilter:
         primary_trend,
         confirm_trend,
         primary_timeframe: str,
-        strategy_type: str = "trend_following"
+        strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
     ) -> Tuple[bool, Optional[str]]:
         """
         Detect HIGH RISK conditions that invalidate ALL setups
@@ -141,12 +138,12 @@ class RegimeFilter:
         rsi = primary_trend.rsi
 
         #1. Panic zone
-        if strategy_type == "trend_following":
+        if strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
             # Original logic - block extreme panic
             if rsi < self.rsi_panic:  # 30
                 return True, f"Panic zone - RSI {rsi:.0f} indicates distribution"
         
-        elif strategy_type == "mean_reversion":
+        elif strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion LOVES oversold, but not EXTREME panic
             # Only block if RSI < 20 (true panic) or dropping very fast
             rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
@@ -184,7 +181,23 @@ class RegimeFilter:
         # - Block: Strong bullish HTF + bearish LTF reversal (uptrend breaking)
         # - Allow: Bearish HTF + bullish LTF recovery (downtrend recovering - GOOD!)
 
-        if strategy_type == "trend_following":
+        if strategy_type == StrategyType.MEAN_REVERSION:
+            # Mean reversion LIKES volatility and reversals
+            # Only block if BOTH timeframes are in free fall
+            if confirm_trend is not None:
+                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
+                
+                # Only block if BOTH very bearish (coordinated crash)
+                if primary_diff_pct < -2.0 and confirm_diff_pct < -2.0:
+                    return True, (
+                        f"Coordinated crash - both timeframes very bearish "
+                        f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
+                    )
+
+        else:
+            #strategy_type in (StrategyType.TREND_FOLLOWING,StrategyType.RANGE_TRADING):
+
             # ... existing whipsaw logic ...
             if confirm_trend is not None:
                 primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
@@ -199,19 +212,6 @@ class RegimeFilter:
                             f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
                         )
         
-        elif strategy_type == "mean_reversion":
-            # Mean reversion LIKES volatility and reversals
-            # Only block if BOTH timeframes are in free fall
-            if confirm_trend is not None:
-                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
-                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                
-                # Only block if BOTH very bearish (coordinated crash)
-                if primary_diff_pct < -2.0 and confirm_diff_pct < -2.0:
-                    return True, (
-                        f"Coordinated crash - both timeframes very bearish "
-                        f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
-                    )
         
          
         # 5. DISTRIBUTION PATTERN - High volume selling
@@ -317,7 +317,7 @@ class RegimeFilter:
         profile_name: str,
         primary_timeframe: str = "60",
         confirm_timeframe: str = "15",
-        strategy_type: str = "trend_following"
+        strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
     ) -> Tuple[bool, str]:
         """
         Simple yes/no: Is the market SAFE enough to trade?
@@ -335,27 +335,36 @@ class RegimeFilter:
             confirm_timeframe, 
             strategy_type=strategy_type
         )
-        
-        if regime == MarketRegime.SAFE:
-            # Market is safe - now use your trend logic to find entries
-            return True, reason
-        
-        elif regime == MarketRegime.HIGH_RISK:
-            # Dangerous conditions - block all trading
-            self.logger.warning(f"[{profile_name}] {symbol}: BLOCKED - {reason}")
-            return False, reason
-        
-        else:  # CHOPPY
-            # Wait for cleaner setup - not worth the risk
-            self.logger.info(f"[{profile_name}] {symbol}: WAIT - {reason}")
-            return False, reason
+        match strategy_type:
+            case StrategyType.RANGE_TRADING:
+                if regime == MarketRegime.CHOPPY:
+                    self.logger.info(f"[{profile_name}] {symbol}: Regime: {regime} - good for range trading - {reason}")
+                    return True, reason
+                else:
+                    self.logger.warning(f"[{profile_name}] {symbol}: Regime: {regime} - BLOCKED- {reason}")
+                    return False, reason
+            case _: #mean reversion and trend following can default to original logic
+                if regime == MarketRegime.SAFE:
+                    # Market is safe - now use your trend logic to find entries
+                    return True, reason
+                
+                elif regime == MarketRegime.HIGH_RISK:
+                    # Dangerous conditions - block all trading
+                    self.logger.warning(f"[{profile_name}] {symbol}: BLOCKED - {reason}")
+                    return False, reason
+                else:  # CHOPPY
+                    # Wait for cleaner setup - not worth the risk
+                    self.logger.info(f"[{profile_name}] {symbol}: WAIT - {reason}")
+                    return False, reason
+
     
     def get_regime_summary(self, symbols: list) -> dict:
         """Get regime classification for multiple symbols"""
         regimes = {
             MarketRegime.SAFE: [],
             MarketRegime.CHOPPY: [],
-            MarketRegime.HIGH_RISK: []
+            MarketRegime.HIGH_RISK: [],
+            MarketRegime.UNKNOWN: []
         }
         
         for symbol in symbols:
@@ -366,6 +375,7 @@ class RegimeFilter:
             "safe": len(regimes[MarketRegime.SAFE]),
             "choppy": len(regimes[MarketRegime.CHOPPY]),
             "high_risk": len(regimes[MarketRegime.HIGH_RISK]),
+            "unknown": len(regimes[MarketRegime.UNKNOWN]),
             "details": {
                 "safe": regimes[MarketRegime.SAFE],
                 "choppy": regimes[MarketRegime.CHOPPY],

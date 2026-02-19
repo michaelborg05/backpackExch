@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
+from utils.constants import StrategyType
 
 class TradingProfile(BaseModel):
     name: str
@@ -9,7 +10,7 @@ class TradingProfile(BaseModel):
     api_key: str
     secret: str    
     
-    strategy_type: str = Field("trend_following", description="Type of strategy (e.g., 'trend_following', 'mean_reversion')")
+    strategy_type: StrategyType = Field(StrategyType.TREND_FOLLOWING, description="Type of strategy (e.g., 'trend_following', 'mean_reversion')")
 
     # Position management settings (as percentages)
     take_profit_pct: Optional[Decimal] = Field(None, description="Take profit percentage (e.g., 5.0 for 5%)")
