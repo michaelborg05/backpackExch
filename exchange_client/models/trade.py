@@ -122,6 +122,8 @@ class OrderResponse(BaseModel):
     slippage_tolerance: Optional[str] = Field(None, alias="slippageTolerance")
     slippage_tolerance_type: Optional[SlippageToleranceType] = Field(None, alias="slippageToleranceType")
 
+    entry_price: Optional[str] = Field(None, alias="entry_price")
+    exit_price: Optional[str] = Field(None, alias="exit_price")
     profit: Optional[str] = Field(None, alias="profit")
 
     class Config:
