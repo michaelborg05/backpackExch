@@ -394,7 +394,7 @@ profiles:
 
   15m_MB:
     display_name: "range_trading"
-    enabled: true
+    enabled: false
     api_key_env: BP_API_KEY_15M
     secret_env: BP_SECRET_15M
 
