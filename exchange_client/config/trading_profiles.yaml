@@ -250,11 +250,13 @@ profiles:
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
     entry_indicators:
       # 1. RSI oversold and turning up
-      - type: "rsi_oversold"
+      - type: "rsi_reversal_momentum"
         params:
-          max_value: 42
-          require_rising: true
-          min_momentum: 2
+          lookback_candles: 3        # Last X candles
+          oversold_threshold: 32      # was below this in past X candles
+          current_min: 38             # Currently above this 
+          min_jump: 3.0               # Jumped by at least this much in 1 candle
+          require_sustained: true     # Last 2 candles have risen
           hard_stop: true
 
       # 2. Price below VWAP (stretched)
