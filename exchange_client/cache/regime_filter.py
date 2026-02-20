@@ -118,7 +118,7 @@ class RegimeFilter:
         
         # DEFAULT: SAFE - trust your trend signals
         regime = MarketRegime.SAFE
-        reason = f"{"⚠️ - not good for Range Trading profile - " if strategy_type == StrategyType.RANGE_TRADING else "✅ Market conditions safe - trust trend signals"}"
+        reason = "✅ Market conditions safe - trust trend signals"
         self._regime_cache[cache_key] = (regime, reason, time.time())
         return regime, reason
     
@@ -194,6 +194,18 @@ class RegimeFilter:
                         f"Coordinated crash - both timeframes very bearish "
                         f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
                     )
+        elif strategy_type == StrategyType.RANGE_TRADING:
+            # Range trading WANTS a strong 60m trend + 15m pullback — that IS
+            # the setup. The whipsaw check would fire on exactly the best range
+            # trade conditions, so we skip it entirely.
+            #
+            # Range trading is still protected by:
+            #   - Panic zone RSI check (above)
+            #   - Euphoria zone RSI check (above)
+            #   - ATR volatility spike check (above)
+            #   - Distribution pattern check (below)
+            #   - Profile's own trend_indicators (60m BB upper hard_stop etc.)
+            pass  # No whipsaw check for range trading
 
         else:
             #strategy_type in (StrategyType.TREND_FOLLOWING,StrategyType.RANGE_TRADING):
@@ -337,13 +349,33 @@ class RegimeFilter:
         )
         match strategy_type:
             case StrategyType.RANGE_TRADING:
-                if regime == MarketRegime.CHOPPY:
-                    self.logger.info(f"[{profile_name}] {symbol}: Regime: {regime} - good for range trading - {reason}")
-                    return True, reason
-                else:
-                    self.logger.warning(f"[{profile_name}] {symbol}: Regime: {regime} - BLOCKED- {reason}")
+                if regime == MarketRegime.HIGH_RISK:
+                    # Panic, volatility spike, distribution — dangerous for everyone
+                    self.logger.warning(
+                        f"[{profile_name}] {symbol}: RANGE BLOCKED (high risk) - {reason}"
+                    )
                     return False, reason
-            case _: #mean reversion and trend following can default to original logic
+
+                elif regime == MarketRegime.CHOPPY:
+                    # Ideal range trading conditions — compressed EMAs, neutral RSI,
+                    # price oscillating. Pass through and let confidence scorer
+                    # reward this via _range_trading_confidence_score().
+                    self.logger.info(
+                        f"[{profile_name}] {symbol}: RANGE ✅ CHOPPY (ideal) - {reason}"
+                    )
+                    return True, reason
+
+                else:  # SAFE
+                    # Normal trending market — not ideal but not dangerous.
+                    # Entry indicators (BB pct_b, RSI dip, VWAP) are already
+                    # doing the work of finding the dip. Let them decide.
+                    # Confidence scorer gives lower bonus for SAFE vs CHOPPY.
+                    self.logger.info(
+                        f"[{profile_name}] {symbol}: RANGE ✅ SAFE (acceptable) - {reason}"
+                    )
+                    return True, reason
+
+            case _:  # TREND_FOLLOWING and MEAN_REVERSION — original logic unchanged
                 if regime == MarketRegime.SAFE:
                     # Market is safe - now use your trend logic to find entries
                     return True, reason

@@ -222,7 +222,7 @@ profiles:
 
     take_profit_pct: 1
     stop_loss_pct: 1
-    trailing_stop_pct: 0.4
+    trailing_stop_pct: 0.5
     arm_trailing_stop_pct: 0.5
     use_trailing_stop: true
 
@@ -279,17 +279,26 @@ profiles:
           max_ratio: 5.0
       
       # 5. Bollinger Band touch (if you implement it)
-      # - type: "bollinger_bands"
-      #   params:
-      #     band: "lower"
-      #     mode: "touch"
-      #     tolerance_pct: 0.5
+      - type: "bollinger_bands"
+        params:
+          band: "lower"
+          mode: "breach"
       
       # 6. NOT overbought on higher timeframe (sanity check)
       - type: "rsi_overbought"
         params:
           min_value: 65  # Fail if RSI > 70 (don't buy tops)
-    
+
+      # 7. NEW: Reversal candle — hammer pattern confirms buyer absorption
+      #    Long lower wick = sellers tried to push lower, buyers rejected it.
+      #    Timing signal: we're not catching a knife, the candle shows the turn.
+      #    min_body_pct: 0.08 allows small-body hammers (common in crypto)
+      #    Not a hard_stop — adds confidence when present, doesn't block when absent.
+      - type: "reversal_candle"
+        params:
+          pattern: "hammer"
+          min_body_pct: 0.08    
+
     min_entry_indicators_required: 4  # Need 4/5 or 4/6
     # ATR filter (volatility)
     use_atr_filter: false
@@ -443,6 +452,16 @@ profiles:
         params:
           min_value: 62
           hard_stop: true
+      # 4. NEW: 60m BB upper — block if 60m price is near the upper band
+      #    If the 60m is pressing against its BB upper, the range may be
+      #    breaking out and this isn't a range trading environment.
+      #    pct_b > 0.80 on the 60m = price in top 20% of HTF band = caution.
+      - type: "bollinger_bands"
+        params:
+          band: "upper"
+          mode: "pct_b"
+          min_pct_b: 0.80    # Block if 60m price already in top 20% of its band
+          hard_stop: true
     min_indicators_required: 3
 
     use_entry_filter: true
@@ -458,20 +477,32 @@ profiles:
         params:
           min_gap_pct: -0.15
           max_gap_pct: -2.0
-      - type: "price_extended_below_ema"
+      # 3. REPLACED price_extended_below_ema with BB
+      #    BB %B — price in lower portion of the Bollinger Band
+      #    On a range day, %B < 0.25 means price is in the bottom quarter
+      #    of the band, which IS the bottom of the range. Much more precise
+      #    than a fixed EMA distance check.
+      - type: "bollinger_bands"
         params:
-          ema: 20
-          min_gap_pct: -0.1
-          max_gap_pct: -3.0
-      - type: "ema_slope"
-        params:
-          ema: 20
-          direction: "not_falling"
-          min_slope_pct: 0.005
+          band: "lower"
+          mode: "pct_b"
+          max_pct_b: 0.30    # Price in lower 30% of the band
+
       - type: "volume_spike"
         params:
           min_ratio: 1.0
           max_ratio: 4.0
+
+      # 5. REPLACED ema_slope not_falling:
+      #    Reversal candle at the dip — doji or hammer signals indecision/rejection
+      #    at the range low. On flat range days, dojis are more common than
+      #    hammers as the signal for "this dip is done".
+      #    Not a hard_stop — adds timing confidence without blocking every entry.
+      - type: "reversal_candle"
+        params:
+          pattern: "doji"
+          max_body_pct: 0.25   # Body must be <= 25% of candle range
+
       - type: "rsi_overbought"
         params:
           min_value: 58

@@ -164,33 +164,9 @@ def get_all_symbols_with_history(db: Session) -> List[Dict[str, str]]:
 def load_trend_data_from_history(history_entry: TrendHistory) -> TrendData:
     """
     Convert a TrendHistory database record back into a TrendData object.
-    
-    Args:
-        history_entry: TrendHistory record from database
-        
-    Returns:
-        TrendData object suitable for cache update
     """
-    # Create TrendData from stored JSON
-    trend_dict = history_entry.trend_data
-    
-    trend_data = TrendData(
-        symbol=trend_dict['symbol'],
-        timeframe=trend_dict['timeframe'],
-        price=trend_dict['price'],
-        rsi=trend_dict['rsi'],
-        ema20=trend_dict['ema20'],
-        ema50=trend_dict['ema50'],
-        vwap=trend_dict.get('vwap'),
-        volume_ratio=trend_dict.get('volume_ratio')
-    )
-    
-    # Restore metadata
-    trend_data.timestamp = trend_dict.get('timestamp', history_entry.data_timestamp.timestamp())
-    trend_data.indicators_changed = trend_dict.get('indicators_changed', True)
-    
-    return trend_data
-
+    # Use the unpacking operator (**) to feed the dict directly into the model
+    return TrendData(**history_entry.trend_data)
 
 def get_latest_trend_snapshot(
     db: Session,

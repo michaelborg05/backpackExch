@@ -338,7 +338,8 @@ class SignalGenerator:
                 self.entry_timeframe,
                 trend_timeframe=self.trend_timeframe,
                 base_score=confidence_score,
-                max_score=self.max_confidence
+                max_score=self.max_confidence,
+                regime_reason=regime_reason
             )
         else:
             # Trend following uses standard normalization
@@ -645,7 +646,8 @@ class SignalGenerator:
         timeframe: str,
         trend_timeframe: str,
         base_score: float,
-        max_score: float
+        max_score: float,
+        regime_reason: str = None
     ) -> float:
         """
         Calculate confidence for range/oscillation trading setups.
@@ -680,6 +682,25 @@ class SignalGenerator:
         # If we have no data at all, fall back to base score normalisation
         if entry_trend is None:
             return (base_score / max_score) * 100
+
+        # ── FACTOR 0: Regime bonus ────────────────────────────────────────────
+        # Choppy regime = ideal range conditions = reward with extra confidence.
+        # SAFE regime = acceptable but not optimal = no bonus.
+        # The regime_reason string is passed in from generate_signal()
+        regime_bonus = 0.0
+        if regime_reason and "CHOPPY" in regime_reason.upper():
+            regime_bonus = 5.0   # Confirmed choppy day — high confidence this is a range
+            self.logger.debug(
+                f"{symbol} Range Score | Regime: CHOPPY → bonus +{regime_bonus:.1f}"
+            )
+        # SAFE regime gets no bonus — entry indicators carry the weight
+
+        bonus_points += regime_bonus
+
+        # Note: also update max_bonus from 20.0 to 25.0 if you add this,
+        # to keep the normalisation correct.
+
+
 
         bonus_points = 0.0
         max_bonus = 20.0
