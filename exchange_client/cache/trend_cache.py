@@ -734,54 +734,96 @@ class TrendCache:
 
             elif indicator_type == "bollinger_bands":
                 """
-                Check if price is near/below lower Bollinger Band
-                
+                Check price position relative to Bollinger Bands.
+
+                Modes:
+                  "touch"   — price is within tolerance_pct of a band edge
+                  "breach"  — price has crossed outside a band
+                  "pct_b"   — price position within the band as 0.0–1.0
+                              0.0 = at lower band, 1.0 = at upper band
+                              Best mode for range trading entry timing
+
                 params: {
-                    band: "lower",          # Which band to check
-                    mode: "touch",          # "touch" or "breach"
-                    tolerance_pct: 0.5      # Within 0.5% of band = touch
+                    band:          "lower" | "upper"   default "lower"
+                    mode:          "touch" | "breach" | "pct_b"   default "touch"
+                    tolerance_pct: 0.5     # for "touch" mode: within 0.5% of band
+                    max_pct_b:     0.25    # for "pct_b" mode: price in lower 25% of band
+                    min_pct_b:     0.75    # for "pct_b" mode (upper band): price in upper 25%
                 }
                 """
-                band = params.get("band", "lower")
-                mode = params.get("mode", "touch")
+                band          = params.get("band", "lower")
+                mode          = params.get("mode", "touch")
                 tolerance_pct = params.get("tolerance_pct", 0.5)
-                
-                # Check if you have BB data
-                bb_lower = getattr(trend, 'bb_lower', None)
-                bb_upper = getattr(trend, 'bb_upper', None)
+                max_pct_b     = params.get("max_pct_b", 0.25)   # for pct_b lower mode
+                min_pct_b     = params.get("min_pct_b", 0.75)   # for pct_b upper mode
+
+                bb_lower = trend.bb_lower
+                bb_upper = trend.bb_upper
+                bb_basis = trend.bb_basis
+
                 values["bb_lower"] = bb_lower
                 values["bb_upper"] = bb_upper
-                values["price"] = current_price
-                
-                if bb_lower is None:
+                values["bb_basis"] = bb_basis
+                values["price"]    = current_price
+
+                if bb_lower is None or bb_upper is None:
                     is_bullish = False
-                    msg = "Bollinger Bands: ✗ (no BB data available)"
+                    msg = "Bollinger Bands: ✗ (no BB data — check Pine script is sending bb fields)"
                 else:
-                    if band == "lower":
-                        target_band = bb_lower
-                        
-                        if mode == "touch":
-                            # Within tolerance of lower band
-                            distance_pct = abs((current_price - target_band) / target_band) * 100
-                            values["distance_pct"] = distance_pct
-                            is_bullish = distance_pct <= tolerance_pct
+                    band_width = bb_upper - bb_lower
+                    pct_b = (current_price - bb_lower) / band_width if band_width > 0 else None
+                    bb_width_norm = (band_width / bb_basis) if bb_basis and bb_basis > 0 else None
+
+                    values["pct_b"]    = round(pct_b, 4) if pct_b is not None else None
+                    values["bb_width"] = round(bb_width_norm, 5) if bb_width_norm is not None else None
+
+                    if mode == "pct_b":
+                        # Most useful for range trading — where in the band is price?
+                        if pct_b is None:
+                            is_bullish = False
+                            msg = "BB %B: ✗ (band width is zero)"
+                        elif band == "lower":
+                            # Bullish = price in lower portion of band (near lower band)
+                            is_bullish = pct_b <= max_pct_b
                             msg = (
-                                f"BB lower touch: {'✓' if is_bullish else '✗'} "
-                                f"(price {distance_pct:.2f}% from band)"
+                                f"BB %B lower: {'✓' if is_bullish else '✗'} "
+                                f"(%B={pct_b:.2f} - need <={max_pct_b:.2f})"
                             )
-                        else:  # "breach"
-                            # Below lower band
-                            is_bullish = current_price <= target_band
-                            gap_pct = ((current_price - target_band) / target_band) * 100
-                            values["gap_pct"] = gap_pct
+                        else:  # upper — avoid entries near top of band
+                            is_bullish = pct_b < min_pct_b
+                            msg = (
+                                f"BB %B upper check: {'✓' if is_bullish else '✗'} "
+                                f"(%B={pct_b:.2f} - need <{min_pct_b:.2f})"
+                            )
+
+                    elif mode == "touch":
+                        target_band = bb_lower if band == "lower" else bb_upper
+                        distance_pct = abs((current_price - target_band) / target_band) * 100
+                        values["distance_pct"] = round(distance_pct, 4)
+                        is_bullish = distance_pct <= tolerance_pct
+                        msg = (
+                            f"BB {band} touch: {'✓' if is_bullish else '✗'} "
+                            f"(price {distance_pct:.2f}% from {band} band, "
+                            f"need <={tolerance_pct:.2f}%)"
+                        )
+
+                    else:  # "breach"
+                        if band == "lower":
+                            is_bullish = current_price <= bb_lower
+                            gap_pct = ((current_price - bb_lower) / bb_lower) * 100
+                            values["gap_pct"] = round(gap_pct, 4)
                             msg = (
                                 f"BB lower breach: {'✓' if is_bullish else '✗'} "
-                                f"(price {gap_pct:+.2f}% vs band)"
+                                f"(price {gap_pct:+.2f}% vs lower band)"
                             )
-                    else:  # upper band (for avoiding overbought)
-                        target_band = bb_upper
-                        is_bullish = current_price < target_band  # Not above upper band
-                        msg = f"BB upper check: {'✓' if is_bullish else '✗'}"
+                        else:  # upper
+                            is_bullish = current_price < bb_upper
+                            gap_pct = ((current_price - bb_upper) / bb_upper) * 100
+                            values["gap_pct"] = round(gap_pct, 4)
+                            msg = (
+                                f"BB upper breach check: {'✓' if is_bullish else '✗'} "
+                                f"(price {gap_pct:+.2f}% vs upper band)"
+                            )
                 
             elif indicator_type == "volume_spike":
                 """
@@ -808,62 +850,150 @@ class TrendCache:
                 
             elif indicator_type == "reversal_candle":
                 """
-                Check for bullish reversal candle patterns
-                
-                NOTE: Requires adding candle data to TrendData:
-                - open, high, low, close (you probably have close as 'price')
-                
+                Check for bullish reversal candle patterns using the previous
+                closed candle's OHLC data (prev_open/high/low/close from Pine).
+
+                Patterns:
+                  "hammer"     — small body at top, long lower wick (>=2x body),
+                                 tiny upper wick (<=0.3x body). Bullish reversal.
+                  "engulfing"  — current candle's body fully engulfs previous
+                                 candle's body AND current is bullish (close > open).
+                                 Requires 2 candles worth of data — uses prev_close
+                                 as current close and current_price as live price.
+                  "doji"       — open ≈ close (body < min_body_pct of total range).
+                                 Signals indecision / potential reversal.
+
                 params: {
-                    pattern: "hammer",      # "hammer", "engulfing", "doji"
-                    min_body_pct: 0.3       # Minimum body size (% of range)
+                    pattern:       "hammer"   # "hammer" | "engulfing" | "doji"
+                    min_body_pct:  0.1        # Min body as % of candle range (hammer/engulfing)
+                    max_body_pct:  0.3        # Max body as % of range for doji
                 }
                 """
-                pattern = params.get("pattern", "hammer")
-                
-                # Check if you have OHLC data
-                candle_open = getattr(trend, 'open', None)
-                candle_high = getattr(trend, 'high', None)
-                candle_low = getattr(trend, 'low', None)
-                candle_close = trend.price  # Assuming close = price
+                pattern      = params.get("pattern", "hammer")
+                min_body_pct = params.get("min_body_pct", 0.1)
+                max_body_pct = params.get("max_body_pct", 0.3)
 
+                # ── Correctly read prev_candle fields ────────────────────────
+                # Pine sends the previous CLOSED candle's OHLC as:
+                #   prev_open, prev_high, prev_low, prev_close
+                # trend.price is the LIVE price — not the closed candle close.
+                candle_open  = trend.prev_open
+                candle_high  = trend.prev_high
+                candle_low   = trend.prev_low
+                candle_close = trend.prev_close   # ← was incorrectly trend.price
+
+                values["candle_open"]  = candle_open
+                values["candle_high"]  = candle_high
+                values["candle_low"]   = candle_low
                 values["candle_close"] = candle_close
+                values["pattern"]      = pattern
 
-                if candle_open is None:
+                if candle_open is None or candle_high is None or candle_low is None or candle_close is None:
                     is_bullish = False
-                    msg = f"Reversal candle ({pattern}): ✗ (no OHLC data)"
+                    msg = (
+                        f"Reversal candle ({pattern}): ✗ "
+                        f"(no prev_candle OHLC data — check Pine script is sending prev_candle fields)"
+                    )
                 else:
-                    # Implement pattern detection
-                    # (This is complex - start with simpler patterns)
-                    if pattern == "hammer":
-                        # Hammer: small body at top, long lower wick
-                        body_size = abs(candle_close - candle_open)
-                        total_range = candle_high - candle_low
-                        lower_wick = min(candle_open, candle_close) - candle_low
-                        upper_wick = candle_high - max(candle_open, candle_close)
-                        values["upper_wick"] = upper_wick
-                        values["lower_wick"] = lower_wick
-                        values["body_size"] = body_size
-                        values["total_range"] = total_range
-                        
-                        if total_range > 0:
-                            is_hammer = (
-                                lower_wick > body_size * 2 and  # Long lower wick
-                                upper_wick < body_size * 0.3     # Small upper wick
-                            )
-                            is_bullish = is_hammer
-                            msg = f"Hammer pattern: {'✓' if is_bullish else '✗'}"
-                        else:
-                            is_bullish = False
-                            msg = "Hammer pattern: ✗ (doji - no range)"
+                    total_range  = candle_high - candle_low
+                    body_size    = abs(candle_close - candle_open)
+                    lower_wick   = min(candle_open, candle_close) - candle_low
+                    upper_wick   = candle_high - max(candle_open, candle_close)
+                    is_bull_candle = candle_close > candle_open
+
+                    values["total_range"]    = round(total_range, 6)
+                    values["body_size"]      = round(body_size, 6)
+                    values["lower_wick"]     = round(lower_wick, 6)
+                    values["upper_wick"]     = round(upper_wick, 6)
+                    values["is_bull_candle"] = is_bull_candle
+
+                    if total_range == 0:
+                        is_bullish = False
+                        msg = f"Reversal candle ({pattern}): ✗ (zero range candle — doji)"
+                    
+                    elif pattern == "hammer":
+                        # Hammer criteria:
+                        #   1. Long lower wick (>= 2x body size)
+                        #   2. Small upper wick (<= 0.3x body size)
+                        #   3. Body is at least min_body_pct of total range
+                        #      (avoids gravestone doji being called a hammer)
+                        body_pct = body_size / total_range
+                        lower_wick_ratio = lower_wick / body_size if body_size > 0 else 0
+                        upper_wick_ratio = upper_wick / body_size if body_size > 0 else 999
+
+                        values["body_pct"]          = round(body_pct, 4)
+                        values["lower_wick_ratio"]  = round(lower_wick_ratio, 4)
+                        values["upper_wick_ratio"]  = round(upper_wick_ratio, 4)
+
+                        is_bullish = (
+                            lower_wick_ratio >= 2.0 and    # long lower wick
+                            upper_wick_ratio <= 0.3 and    # small upper wick
+                            body_pct >= min_body_pct       # has a real body
+                        )
+                        msg = (
+                            f"Hammer: {'✓' if is_bullish else '✗'} "
+                            f"(lower_wick={lower_wick_ratio:.1f}x body, "
+                            f"upper_wick={upper_wick_ratio:.1f}x body, "
+                            f"body={body_pct:.1%} of range)"
+                        )
+
+                    elif pattern == "engulfing":
+                        # Bullish engulfing criteria:
+                        #   1. Current candle is bullish (close > open)
+                        #   2. Current body fully contains previous candle's body
+                        #   3. Previous candle was bearish (open > close)
+                        # We use prev_candle as the "previous" candle and
+                        # current_price + prev_close as the "current" candle.
+                        # Since we only have one candle of history from Pine,
+                        # we approximate: prev candle = prev_open/close,
+                        # current candle = prev_close (open) → current_price (close)
+                        curr_open  = candle_close   # current candle opened at prev close
+                        curr_close = current_price  # current candle's live close
+                        prev_open  = candle_open
+                        prev_close = candle_close
+
+                        curr_bull = curr_close > curr_open
+                        prev_bear = prev_close < prev_open
+                        curr_body_low  = min(curr_open, curr_close)
+                        curr_body_high = max(curr_open, curr_close)
+                        prev_body_low  = min(prev_open, prev_close)
+                        prev_body_high = max(prev_open, prev_close)
+
+                        engulfs = curr_body_low <= prev_body_low and curr_body_high >= prev_body_high
+
+                        values["curr_bull"]   = curr_bull
+                        values["prev_bear"]   = prev_bear
+                        values["engulfs"]     = engulfs
+
+                        is_bullish = curr_bull and prev_bear and engulfs
+                        msg = (
+                            f"Bullish engulfing: {'✓' if is_bullish else '✗'} "
+                            f"(curr_bull={curr_bull}, prev_bear={prev_bear}, engulfs={engulfs})"
+                        )
+
+                    elif pattern == "doji":
+                        # Doji criteria: body is very small relative to total range
+                        # Signals indecision — potential reversal when at range extremes
+                        body_pct = body_size / total_range
+                        values["body_pct"] = round(body_pct, 4)
+
+                        is_bullish = body_pct <= max_body_pct
+                        msg = (
+                            f"Doji: {'✓' if is_bullish else '✗'} "
+                            f"(body={body_pct:.1%} of range, max={max_body_pct:.1%})"
+                        )
+
                     else:
                         is_bullish = False
-                        msg = f"Reversal candle ({pattern}): ✗ (pattern not implemented)"
+                        msg = f"Reversal candle: ✗ (unknown pattern '{pattern}' — use hammer/engulfing/doji)"
+
 
             elif indicator_type == "rsi_reversal_momentum":
                 # Parameters
                 lookback_candles = params.get("lookback_candles", 5)  # Check last 5 candles
                 oversold_threshold = params.get("oversold_threshold", 30)  # Must have been <30
                 current_min = params.get("current_min", 35)  # Current RSI must be >35
+                jump_required = params.get("jump_required", True)  #Requires a jump in RSI. Disabled on trend invalidation checks
                 min_jump = params.get("min_jump", 5.0)  # Must have jumped >5 points
                 require_sustained = params.get("require_sustained", True)  # Rising for multiple candles
                 
@@ -888,24 +1018,28 @@ class TrendCache:
                     values["min_rsi"] = float(min_rsi)
                     
                     # Check 2: Did RSI jump sharply (>5 points) at some point?
-                    max_jump = 0.0
-                    jump_found = False
-                    
-                    min_rsi_found = False
-                    for i in range(1, len(rsi_values)):
-                        #only look at jumps AFTER min_rsi found
-                        if not min_rsi_found and rsi_values[i-1] == min_rsi:
-                            min_rsi_found = True
-                        if min_rsi_found: 
-                            jump = rsi_values[i] - rsi_values[i-1]
-                            if jump > max_jump:
-                                max_jump = jump
-                            if jump >= min_jump:
-                                jump_found = True
-                    
-                    values["max_jump"] = float(max_jump)
-                    values["jump_found"] = jump_found
-                    
+                    if jump_required:
+                        max_jump = 0.0
+                        jump_found = False
+                        
+                        min_rsi_found = False
+                        for i in range(1, len(rsi_values)):
+                            #only look at jumps AFTER min_rsi found
+                            if not min_rsi_found and rsi_values[i-1] == min_rsi:
+                                min_rsi_found = True
+                            if min_rsi_found: 
+                                jump = rsi_values[i] - rsi_values[i-1]
+                                if jump > max_jump:
+                                    max_jump = jump
+                                if jump >= min_jump:
+                                    jump_found = True
+                        
+                        values["max_jump"] = float(max_jump)
+                        values["jump_found"] = jump_found
+                    else:
+                        jump_found = True
+                        max_jump = 0
+
                     # Check 3: Current RSI above minimum?
                     current_above_min = current_rsi >= current_min
                     values["current_rsi"] = float(current_rsi)
@@ -915,9 +1049,13 @@ class TrendCache:
                     values["rsi_direction"] = rsi_direction
                     values["rsi_momentum"] = float(rsi_momentum)
 
-                    #current rising is true if momentum above 3 and direction increasing.
+                    #current rising is true if momentum above 2 and direction increasing.
                     # Direction increasing only possible if recent candle is positive
-                    currently_rising = rsi_momentum > 3 and rsi_direction == "increasing"
+                    if jump_required:
+                        currently_rising = rsi_momentum > 2 and rsi_direction == "increasing"
+                    else:
+                        #In trend invalidation check, we set jump_required to false so don't need to check for increase. 
+                        currently_rising = True
 
                     # Check 5 (optional): Sustained rise (rising for 2+ candles)?
                     sustained_rise = True

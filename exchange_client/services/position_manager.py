@@ -7,6 +7,7 @@ from utils.logging import log_manager
 from cache.trend_cache import get_trend_cache
 from models.trading_profile import TradingProfile
 from db.models import Position
+from utils.settings_helper import get_settings_helper
 
 
 class PositionManager:
@@ -29,6 +30,7 @@ class PositionManager:
     def __init__(self):
         self.logger = log_manager.get_logger("PositionManager")
         self.trend_cache = get_trend_cache()
+        self.settings = get_settings_helper()
     
     def should_exit_position(
         self,
@@ -99,6 +101,23 @@ class PositionManager:
             indicators_config = getattr(profile, 'entry_indicators', None)
             min_required = getattr(profile, 'min_entry_indicators_required', 2) - 1 #Reduce min required by 1 for trend invalidation
             indicator_timeframe = getattr(profile, 'entry_timeframe', '15')
+        
+        elif getattr(profile, 'trend_invalidation_indicators', "entry") == "mean_reversion":
+            lookback_candles = self.settings.mean_rever_rsi_lookback_candles
+            min_rsi = self.settings.mean_rever_rsi_inval_threshold
+            #try to use custom rsi_reversal_momentum logic for mean reversion strategy. 
+            # Set oversold_threshold high as we dont need this limit in this check
+
+            indicators_config = [
+                {"type": "rsi_reversal_momentum", "params": 
+                 {"lookback_candles": lookback_candles, "oversold_threshold": 60, 
+                  "current_min": min_rsi,"min_jump":1, "require_sustained":False,
+                  "jump_required": False
+                 }}
+            ]
+            min_required = 1
+            indicator_timeframe = getattr(profile, 'entry_timeframe', '15')
+        
         elif profile.use_trend_filter:
             indicators_config = getattr(profile, 'trend_indicators', None)
             min_required = getattr(profile, 'min_indicators_required', 2)  - 1 #Reduce min required by 1 for trend invalidation

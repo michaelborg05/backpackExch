@@ -297,8 +297,9 @@ profiles:
     atr_threshold: 1.15
     atr_filter_mode: "require_low"
     # Trend-based exit (intelligent)
-    use_trend_invalidation_exit: false
-    trend_invalidation_indicators: trend #trend or entry
+    use_trend_invalidation_exit: true
+    trend_invalidation_indicators: mean_reversion #trend or entry
+    min_position_age_for_trend_check: 20
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 8  # Force exit if stuck
 
@@ -486,3 +487,46 @@ profiles:
      # Trend-based exit (intelligent)
     use_trend_invalidation_exit: false
     max_position_hours: 2  # Force exit if stuck
+
+
+
+# =============================================================================
+# SUMMARY OF YAML CONFIGS THAT NOW WORK CORRECTLY
+# =============================================================================
+#
+# Bollinger Bands — pct_b mode (best for range trading):
+#
+#   - type: "bollinger_bands"
+#     params:
+#       band: "lower"
+#       mode: "pct_b"
+#       max_pct_b: 0.25    # Price in lower 25% of band = near lower band
+#
+#   - type: "bollinger_bands"
+#     params:
+#       band: "upper"
+#       mode: "pct_b"
+#       min_pct_b: 0.75    # Block if price already in upper 25% of band
+#       hard_stop: true
+#
+# Bollinger Bands — touch mode:
+#
+#   - type: "bollinger_bands"
+#     params:
+#       band: "lower"
+#       mode: "touch"
+#       tolerance_pct: 0.3   # Within 0.3% of lower band
+#
+# Reversal candle — hammer:
+#
+#   - type: "reversal_candle"
+#     params:
+#       pattern: "hammer"
+#       min_body_pct: 0.1    # Body must be at least 10% of total candle range
+#
+# Reversal candle — doji (useful for range trading — indecision at range low):
+#
+#   - type: "reversal_candle"
+#     params:
+#       pattern: "doji"
+#       max_body_pct: 0.2    # Body must be <= 20% of range to qualify as doji

@@ -158,6 +158,16 @@ class SettingsHelper:
         """cooldown in minutes for same symbol"""
         return self._get_int('cooldown_default_mins', 15)
 
+    @property
+    def mean_rever_rsi_inval_threshold(self) -> int:
+        """cooldown in minutes for same symbol"""
+        return self._get_int('mean_rever_rsi_inval_threshold', 36)
+
+    @property
+    def mean_rever_rsi_lookback_candles(self) -> int:
+        """cooldown in minutes for same symbol"""
+        return self._get_int('mean_rever_rsi_lookback_candles', 2)
+
     def get_custom(self, setting_name: str, default: Any = None) -> Any:
         """
         Get a custom setting not covered by properties

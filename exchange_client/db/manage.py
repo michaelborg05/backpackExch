@@ -381,11 +381,12 @@ def populate_default_settings():
                 'cooldown_take_profit_mins': '35',  # default cooldown after take profit
                 'cooldown_stop_loss_mins': '35',    # default cooldown after stop loss
                 'cooldown_default_mins': '15',      # default cooldown
+                'mean_rever_rsi_inval_threshold': '36',  # default cooldown after take profit
+                'mean_rever_rsi_lookback_candles': '35',    # default cooldown after stop loss
             }
             new_settings = {
-                'cooldown_take_profit_mins': '35',  # default cooldown after take profit
-                'cooldown_stop_loss_mins': '35',    # default cooldown after stop loss
-                'cooldown_default_mins': '15',      # default cooldown
+                'mean_rever_rsi_inval_threshold': '36',  # default cooldown after take profit
+                'mean_rever_rsi_lookback_candles': '2',    # default cooldown after stop loss
 
             }
             created = initialize_default_settings(db, default_settings=new_settings)
