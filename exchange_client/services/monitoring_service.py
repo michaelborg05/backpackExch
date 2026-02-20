@@ -816,10 +816,9 @@ class MonitoringService:
                 return
             
             #fail safe to convert 
-            import html
-            safe_text = html.escape(message)
+            safe_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             # Use the thread-safe sync wrapper
-            success = telegram.send_message_sync(safe_text, priority)
+            success = telegram.send_message_sync(safe_msg, priority)
 
             if not success:
                 # Only log if we're still running (not shutting down)

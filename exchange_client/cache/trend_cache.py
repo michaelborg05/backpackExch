@@ -486,7 +486,7 @@ class TrendCache:
                     if rsi >= early_threshold and rsi < min_rsi:
                         if rsi_direction == "increasing" and rsi_momentum >= 1.0:
                             is_bullish = True
-                            msg = f"RSI: ✓ {rsi:.1f} early entry (&gt; {early_threshold}  momentum +{rsi_momentum:.1f})"
+                            msg = f"RSI: ✓ {rsi:.1f} early entry (> {early_threshold}  momentum +{rsi_momentum:.1f})"
                         else:
                             is_bullish = False
                             msg = f"RSI: ✗ {rsi:.1f} below {min_rsi} (momentum {rsi_direction} {rsi_momentum:+.1f})"
@@ -495,14 +495,14 @@ class TrendCache:
                             is_bullish = True
                         else:
                             is_bullish = False
-                        msg = f"RSI: {'✓' if is_bullish else '✗'} {rsi:.1f} &gt; {min_rsi} - {rsi_direction} momentum {rsi_momentum:+.1f}"
+                        msg = f"RSI: {'✓' if is_bullish else '✗'} {rsi:.1f} > {min_rsi} - {rsi_direction} momentum {rsi_momentum:+.1f}"
                     else:
                         is_bullish = False
-                        msg = f"RSI: ✗ {rsi:.1f} &lt; {min_rsi} (no momentum)"
+                        msg = f"RSI: ✗ {rsi:.1f} < {min_rsi} (no momentum)"
                 else:
                     # Simple threshold check
                     is_bullish = rsi >= min_rsi
-                    msg = f"RSI: {'✓' if is_bullish else '✗'} {rsi:.1f} {'&gt;' if is_bullish else '&lt;'} {min_rsi}"
+                    msg = f"RSI: {'✓' if is_bullish else '✗'} {rsi:.1f} {'>' if is_bullish else '<'} {min_rsi}"
 
             elif indicator_type == "price_vs_vwap":
                 # Uses latest price and VWAP (refreshed every update)
