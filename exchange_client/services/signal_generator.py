@@ -168,7 +168,8 @@ class SignalGenerator:
                 symbol=symbol,
                 profile_name=self.profile.name,
                 timeframe=self.trading_timeframe,
-                current_trend=trend
+                current_trend=trend,
+                strategy_type=self.strategy_type
             )
             
             if not can_enter:

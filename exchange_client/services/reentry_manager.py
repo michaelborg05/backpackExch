@@ -6,7 +6,7 @@ from db.models import Position
 from models.webhook import TrendData
 from utils.logging import log_manager
 from utils.settings_helper import get_settings_helper
-from utils.constants import PositionCloseReason
+from utils.constants import PositionCloseReason,StrategyType
 
 class ReEntryManager:
     """
@@ -27,7 +27,8 @@ class ReEntryManager:
         symbol: str,
         profile_name: str,
         timeframe: str,     #Uses Trading timeframe
-        current_trend: TrendData  # Your TrendData from trend_cache - Trading timeframe
+        current_trend: TrendData,  # Your TrendData from trend_cache - Trading timeframe
+        strategy_type: StrategyType
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if re-entry is allowed based on recent DB exits
@@ -56,7 +57,7 @@ class ReEntryManager:
             #Get last exit reason
             close_reason = recent_exit.close_reason
             
-            # Get cooldown period based on last exit
+            # Get cooldown period based on last exit - convert minutes to seconds
             if close_reason == PositionCloseReason.TAKE_PROFIT:
                 cooldown = self.settings.cooldown_take_profit_mins * 60
             elif close_reason == PositionCloseReason.STOP_LOSS:
@@ -68,6 +69,10 @@ class ReEntryManager:
             if time_since_exit < cooldown:
                 remaining = int(cooldown - time_since_exit)
                 return False, f"Cooldown: {remaining}s remaining (last exit: {recent_exit.close_reason})"
+            
+            #If not Trend following strategy, can exit re-entry here as true. If trend following, continue
+            if strategy_type != StrategyType.TREND_FOLLOWING:
+                return True, f"Cooldown passed after {close_reason}"
             
             # RULE 2: Exit-specific requirements
             from cache.price_cache import get_price_cache
