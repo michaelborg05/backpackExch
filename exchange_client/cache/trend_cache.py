@@ -757,9 +757,9 @@ class TrendCache:
                 max_pct_b     = params.get("max_pct_b", 0.25)   # for pct_b lower mode
                 min_pct_b     = params.get("min_pct_b", 0.75)   # for pct_b upper mode
 
-                bb_lower = trend.bb_lower
-                bb_upper = trend.bb_upper
-                bb_basis = trend.bb_basis
+                bb_lower = trend.bb.bb_lower
+                bb_upper = trend.bb.bb_upper
+                bb_basis = trend.bb.bb_basis
 
                 values["bb_lower"] = bb_lower
                 values["bb_upper"] = bb_upper
@@ -877,10 +877,10 @@ class TrendCache:
                 # Pine sends the previous CLOSED candle's OHLC as:
                 #   prev_open, prev_high, prev_low, prev_close
                 # trend.price is the LIVE price — not the closed candle close.
-                candle_open  = trend.prev_open
-                candle_high  = trend.prev_high
-                candle_low   = trend.prev_low
-                candle_close = trend.prev_close   # ← was incorrectly trend.price
+                candle_open  = trend.prev_candle.prev_open
+                candle_high  = trend.prev_candle.prev_high
+                candle_low   = trend.prev_candle.prev_low
+                candle_close = trend.prev_candle.prev_close   # ← was incorrectly trend.price
 
                 values["candle_open"]  = candle_open
                 values["candle_high"]  = candle_high

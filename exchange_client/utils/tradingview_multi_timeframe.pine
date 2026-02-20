@@ -49,10 +49,11 @@ get_trend_data(tf) =>
     // We send upper, lower, and basis (midline = SMA of close).
     // %B and width are calculated Python-side from these three values, keeping
     // the payload simple and letting Python do the maths it needs per strategy.
-    [bb_upper_raw, bb_basis_raw, bb_lower_raw] = ta.bb(close, bb_length, bb_mult)
-    htf_bb_upper = request.security(syminfo.tickerid, tf, bb_upper_raw[1], lookahead=barmerge.lookahead_off)
-    htf_bb_basis = request.security(syminfo.tickerid, tf, bb_basis_raw[1], lookahead=barmerge.lookahead_off)
-    htf_bb_lower = request.security(syminfo.tickerid, tf, bb_lower_raw[1], lookahead=barmerge.lookahead_off)
+    bb_sma_raw   = ta.sma(close, bb_length)
+    bb_std_raw   = ta.stdev(close, bb_length)
+    htf_bb_basis = request.security(syminfo.tickerid, tf, bb_sma_raw[1],                      lookahead=barmerge.lookahead_off)
+    htf_bb_upper = request.security(syminfo.tickerid, tf, bb_sma_raw[1] + bb_mult * bb_std_raw[1], lookahead=barmerge.lookahead_off)
+    htf_bb_lower = request.security(syminfo.tickerid, tf, bb_sma_raw[1] - bb_mult * bb_std_raw[1], lookahead=barmerge.lookahead_off)
 
     // ── Volume ratio ─────────────────────────────────────────────────────────
     volume_ratio = htf_volume_sma != 0 ? htf_volume / htf_volume_sma : na
@@ -190,15 +191,15 @@ build_trend_json(symb, prc, tf,ema20, ema50, rsi, vwap, vol, vol_sma, vol_ratio,
       '        "rsi_changed": ' + (rsi_chg ? "true" : "false") + '\n' +
       '      },\n' +
       '      "prev_candle": {\n' +
-      '        "open": '  + (na(prev_open)  ? "null" : str.tostring(prev_open,  '#.######')) + ',\n' +
-      '        "high": '  + (na(prev_high)  ? "null" : str.tostring(prev_high,  '#.######')) + ',\n' +
-      '        "low": '   + (na(prev_low)   ? "null" : str.tostring(prev_low,   '#.######')) + ',\n' +
-      '        "close": ' + (na(prev_close) ? "null" : str.tostring(prev_close, '#.######')) + '\n' +
+      '        "prev_open": '  + (na(prev_open)  ? "null" : str.tostring(prev_open,  '#.######')) + ',\n' +
+      '        "prev_high": '  + (na(prev_high)  ? "null" : str.tostring(prev_high,  '#.######')) + ',\n' +
+      '        "prev_low": '   + (na(prev_low)   ? "null" : str.tostring(prev_low,   '#.######')) + ',\n' +
+      '        "prev_close": ' + (na(prev_close) ? "null" : str.tostring(prev_close, '#.######')) + '\n' +
       '      },\n' +
       '      "bb": {\n' +
-      '        "upper": ' + (na(bb_upper) ? "null" : str.tostring(bb_upper, '#.######')) + ',\n' +
-      '        "basis": ' + (na(bb_basis) ? "null" : str.tostring(bb_basis, '#.######')) + ',\n' +
-      '        "lower": ' + (na(bb_lower) ? "null" : str.tostring(bb_lower, '#.######')) + '\n' +
+      '        "bb_upper": ' + (na(bb_upper) ? "null" : str.tostring(bb_upper, '#.######')) + ',\n' +
+      '        "bb_basis": ' + (na(bb_basis) ? "null" : str.tostring(bb_basis, '#.######')) + ',\n' +
+      '        "bb_lower": ' + (na(bb_lower) ? "null" : str.tostring(bb_lower, '#.######')) + '\n' +
       '      }\n' +
       '    }'
 
@@ -301,6 +302,31 @@ else
     bgcolor_color := na
 
 bgcolor(bgcolor_color)
+
+// ============================================================================
+// BOLLINGER BANDS - Show only for the current chart timeframe
+//
+// Same pattern as bgcolor: tf_now selects which set of BB values to plot.
+// Upper/lower use a semi-transparent fill between them so the band is
+// visible without dominating the chart. Basis (midline) is plotted as a
+// dotted line — useful for spotting mean reversion entries at the midpoint.
+//
+// On any timeframe other than 15/60/240, lines render as na (invisible).
+// ============================================================================
+
+bb_upper_plot = tf_now == "15"  ? bb_upper_15m  : tf_now == "60"  ? bb_upper_60m  : tf_now == "240" ? bb_upper_240m : na
+
+bb_basis_plot = tf_now == "15"  ? bb_basis_15m  : tf_now == "60"  ? bb_basis_60m  : tf_now == "240" ? bb_basis_240m : na
+
+bb_lower_plot = tf_now == "15"  ? bb_lower_15m  : tf_now == "60"  ? bb_lower_60m  : tf_now == "240" ? bb_lower_240m : na
+
+bb_upper_line = plot(bb_upper_plot, "BB Upper", color=color.new(color.purple, 50), linewidth=1)
+bb_basis_line = plot(bb_basis_plot, "BB Basis", color=color.new(color.purple, 65), linewidth=1, style=plot.style_circles)
+bb_lower_line = plot(bb_lower_plot, "BB Lower", color=color.new(color.purple, 50), linewidth=1)
+
+// Shaded fill between the bands
+fill(bb_upper_line, bb_lower_line, color=color.new(color.purple, 92))
+
 
 // ============================================================================
 // INFO TABLE
