@@ -481,13 +481,12 @@ class CircuitBreakerService:
             
             if not success:
                 # Only log if we're still running (not shutting down)
-                if self.is_running and telegram._initialized:
+                if telegram._initialized:
                     self.logger.debug(f"Failed to send Telegram message (may be shutting down)")
                     
         except Exception as e:
             # Catch any unexpected errors
-            if self.is_running:
-                self.logger.debug(f"Could not send Telegram message: {e}")
+            self.logger.debug(f"Could not send Telegram message: {e}")
 
 
 # Global instance

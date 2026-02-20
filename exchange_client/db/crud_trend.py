@@ -33,18 +33,7 @@ def save_trend_snapshot(
         Created TrendHistory record
     """
     # Convert TrendData to JSON-serializable dict
-    trend_dict = {
-        'symbol': trend_data.symbol,
-        'timeframe': trend_data.timeframe,
-        'price': float(trend_data.price),
-        'rsi': float(trend_data.rsi),
-        'ema20': float(trend_data.ema20),
-        'ema50': float(trend_data.ema50),
-        'vwap': float(trend_data.vwap) if trend_data.vwap else None,
-        'volume_ratio': float(trend_data.volume_ratio) if trend_data.volume_ratio else None,
-        'indicators_changed': getattr(trend_data, 'indicators_changed', True),
-        'timestamp': getattr(trend_data, 'timestamp', datetime.now(timezone.utc).timestamp())
-    }
+    trend_dict = trend_data.model_dump()
     
     # Create record
     history_entry = TrendHistory(
