@@ -683,6 +683,9 @@ class SignalGenerator:
         if entry_trend is None:
             return (base_score / max_score) * 100
 
+        bonus_points = 0.0
+        max_bonus = 20.0
+
         # ── FACTOR 0: Regime bonus ────────────────────────────────────────────
         # Choppy regime = ideal range conditions = reward with extra confidence.
         # SAFE regime = acceptable but not optimal = no bonus.
@@ -699,11 +702,6 @@ class SignalGenerator:
 
         # Note: also update max_bonus from 20.0 to 25.0 if you add this,
         # to keep the normalisation correct.
-
-
-
-        bonus_points = 0.0
-        max_bonus = 20.0
 
         # ------------------------------------------------------------------
         # FACTOR 1: 60m EMA Compression (+5 points)
