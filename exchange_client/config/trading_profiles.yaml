@@ -68,7 +68,7 @@ profiles:
           hard_stop: true
       - type: "rsi_overbought"
         params:
-          min_value: 70
+          min_value: 63
           hard_stop: true
       - type: "price_vs_vwap"
         params: {}
@@ -380,7 +380,7 @@ profiles:
           hard_stop: true
       - type: "rsi_overbought"
         params:
-          min_value: 70
+          min_value: 63
           hard_stop: true
       - type: "price_vs_vwap"
         params: {}
