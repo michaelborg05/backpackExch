@@ -79,7 +79,7 @@ profiles:
      # Trend-based exit (intelligent)
     use_trend_invalidation_exit: true
     trend_invalidation_indicators: entry #trend or entry
-    min_position_age_for_trend_check: 20  # minutes
+    min_position_age_for_trend_check: 60  # minutes
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 12  # Force exit if stuck
 
