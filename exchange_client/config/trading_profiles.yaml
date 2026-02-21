@@ -18,7 +18,7 @@ profiles:
     max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
     
     # Risk management
-    max_open_positions: 2               # Max concurrent positions per token
+    max_open_positions: 1               # Max concurrent positions per token
     max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
     use_market_regime_filter: true
@@ -102,7 +102,7 @@ profiles:
     max_position_size_pct: 50.0         # Max 40% of portfolio per symbol
     
     # Risk management
-    max_open_positions: 2               # Max 5 concurrent positions
+    max_open_positions: 1               # Max 5 concurrent positions
     max_portfolio_exposure_pct: 100.0    # Max 80% in positions total
 
     use_market_regime_filter: true
@@ -231,7 +231,7 @@ profiles:
     max_position_size_pct: 30.0         # Max 30% of portfolio per symbol
 
     # Risk management
-    max_open_positions: 2               # Max concurrent positions per token
+    max_open_positions: 1               # Max concurrent positions per token
     max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
     use_market_regime_filter: false
@@ -331,7 +331,7 @@ profiles:
     max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
     
     # Risk management
-    max_open_positions: 2               # Max concurrent positions per token
+    max_open_positions: 1               # Max concurrent positions per token
     max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
     use_market_regime_filter: true
@@ -422,7 +422,7 @@ profiles:
     default_order_size_usdc: 100.0      # Buy $100 per order
     max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
     # Risk management
-    max_open_positions: 2               # Max concurrent positions per token
+    max_open_positions: 1               # Max concurrent positions per token
     max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
 
     use_market_regime_filter: true
