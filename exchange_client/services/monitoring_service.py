@@ -550,8 +550,8 @@ class MonitoringService:
             symbol = position.symbol
             validation_summary = ""
             # If stop loss, analyse market conditions and record in db for review later
-            if reason=="STOP_LOSS":
-                validation_summary = self.record_market_validation_info(symbol, profile)
+#            if reason=="STOP_LOSS":
+            validation_summary = self.record_market_validation_info(symbol, profile)
 
             quantity = str(position.remaining_quantity)
             
