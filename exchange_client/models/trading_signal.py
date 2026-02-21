@@ -23,7 +23,8 @@ class TradingSignal:
     trend_timeframe: str
     regime_confidence: str
     validation_details: Optional[str] = None  # JSON string of SignalValidationResult
-    
+    position_size_scalar: float
+
     def to_dict(self) -> dict:
         return {
             "symbol": self.symbol,
@@ -35,6 +36,7 @@ class TradingSignal:
             "timestamp": self.timestamp,
             "timeframe": self.timeframe,
             "trend_timeframe": self.trend_timeframe,
+            "position_size_scalar": self.position_size_scalar,
             "market_regime": self.market_regime
         }
 

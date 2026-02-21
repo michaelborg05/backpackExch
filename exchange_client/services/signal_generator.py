@@ -38,7 +38,7 @@ class SignalGenerator:
     
     def __init__(self, profile: TradingProfile):
         self.profile = profile
-        self.logger = log_manager.get_logger(f"SignalGenerator[{profile.name}]")
+        self.logger = log_manager.get_logger(f"SignalGenerator[{profile.display_name}]")
         self.trend_cache = get_trend_cache()
         self.atr_cache = get_atr_cache()
         self.price_cache = get_price_cache()
@@ -122,6 +122,11 @@ class SignalGenerator:
         
         # Create trading service
         trading = TradingService(self.profile)
+        # Get current price
+        current_price = self.price_cache.get_price(symbol)
+        if current_price is None or current_price <= 0:
+            self.logger.warning(f"{symbol}: No valid price data")
+            return None
 
         # 1. BALANCE CHECK
         is_valid, balance_error = trading.validate_balance_for_trade(
@@ -322,7 +327,20 @@ class SignalGenerator:
             # But entry indicators already check rsi_oversold, so we skip this
             reasons.append(f"✅ RSI: Mean reversion (oversold check in entry)")
             confidence_score += self.safety_weight
-        
+
+        #calculate bollinger band location        
+        pct_b = self._get_bb_position(symbol, self.entry_timeframe, price=float(current_price))
+        #Bullish if pct_b below 0.5 - in bottom half of bollinger
+        bb_bullish= pct_b is not None and pct_b < 0.5
+            
+        bb_check = IndicatorResult(
+            type="bb_band",
+            is_bullish=bb_bullish,
+            config={"below": 0.5},
+            values={"pct_b": round(pct_b, 4) if pct_b is not None else None},
+            message=f"%B={pct_b:.2f}" if pct_b is not None else "BB data unavailable"
+        )
+
         # NEW: Calculate confidence based on strategy type
         if self.strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion has different confidence factors
@@ -342,9 +360,19 @@ class SignalGenerator:
                 regime_reason=regime_reason
             )
         else:
-            # Trend following uses standard normalization
+            # Trend following: standard normalization + BB position penalty
             confidence_pct = (confidence_score / self.max_confidence) * 100
+            bb_penalty, bb_reason = self._get_bb_confidence_penalty(symbol, self.entry_timeframe, pct_b=pct_b)
+            if bb_penalty != 0.0:
+                confidence_pct = max(0.0, confidence_pct + bb_penalty)
+                reasons.append(bb_reason)
+                bb_check.message = bb_reason
+                bb_check.values.update({
+                    "confidence_pct": round(confidence_pct, 2),
+                    "bb_penalty": bb_penalty
+                })
 
+        validation.additional_checks.append(bb_check)
         validation.score = confidence_pct
         validation.score_components = 3  # trend, entry, volume
 
@@ -381,12 +409,15 @@ class SignalGenerator:
 
         reasons.append(f"Score {confidence_pct:.1f}% ({strength.value})")
 
-        # Get current price
-        current_price = self.price_cache.get_price(symbol)
-        if current_price is None or current_price <= 0:
-            self.logger.warning(f"{symbol}: No valid price data")
-            return None
-        
+        # BB-based position size scalar (trend-following only)
+        # Reduces order size when buying high in the band, allows full/larger size lower in band.
+        # Mean reversion / range trading manage this via their own entry indicators.
+        position_size_scalar = 1.0
+        if self.strategy_type == StrategyType.TREND_FOLLOWING:
+            position_size_scalar, scalar_reason = self._get_bb_position_scalar(symbol, self.entry_timeframe,pct_b=pct_b)
+            if position_size_scalar != 1.0:
+                reasons.append(scalar_reason)
+
         # Create signal
         signal = TradingSignal(
             symbol=symbol,
@@ -399,13 +430,15 @@ class SignalGenerator:
             timestamp=time.time(),
             reasons=reasons,
             validation_details=validation.to_json(),
-            regime_confidence=regime_reason
+            regime_confidence=regime_reason,
+            position_size_scalar=position_size_scalar
         )
 
         self.logger.info(
             f"🎯 SIGNAL GENERATED [{self.strategy_type}]: {symbol} | "
             f"Strength: {strength.value} | "
-            f"Confidence: {confidence_pct:.1f}%"
+            f"Confidence: {confidence_pct:.1f}% | "
+            f"Size scalar: {position_size_scalar:.2f}x"
         )
         
         return signal
@@ -848,6 +881,112 @@ class SignalGenerator:
 
         return confidence_pct
     
+    def _get_bb_position(self, symbol: str, timeframe: str, price: float = None) -> Optional[float]:
+        """
+        Return the current BB %B for symbol/timeframe, or None if BB data unavailable.
+        
+        %B = (price - bb_lower) / (bb_upper - bb_lower)
+          0.0 = price at lower band
+          0.5 = price at midpoint (basis)
+          1.0 = price at upper band
+          >1.0 = price above upper band (spike / breakout bar)
+        """
+        trend = self.trend_cache.get(symbol, timeframe)
+        if trend is None or not hasattr(trend, 'bb') or trend.bb is None:
+            return None
+        
+        bb_upper = trend.bb.bb_upper
+        bb_lower = trend.bb.bb_lower
+        if bb_upper is None or bb_lower is None:
+            return None
+        
+        band_width = bb_upper - bb_lower
+        if band_width <= 0:
+            return None
+        
+        #If price supplied, use that. Otherwise use price in trend
+        if price:
+            bb_pos = (price - bb_lower) / band_width
+        else: 
+            bb_pos = (trend.price - bb_lower) / band_width
+        return bb_pos
+
+    def _get_bb_confidence_penalty(self, symbol: str, timeframe: str, pct_b: float = None) -> Tuple[float, str]:
+        """
+        Apply a confidence penalty for trend-following entries that are high in the BB.
+        
+        Buying near or above the upper band increases stop-loss risk — the band hasn't
+        had time to expand to contain the move, meaning any pullback can look like
+        a reversal. We don't block entries (band may be legitimately expanding in a
+        strong trend), but we penalise confidence so borderline signals don't fire.
+
+        Penalty table:
+          %B < 0.50  →   0% penalty  (lower half, favourable risk/reward)
+          %B 0.50–0.65 → -3% penalty  (mid-upper half, slight caution)
+          %B 0.65–0.80 → -8% penalty  (upper quadrant — your HYPE examples)
+          %B 0.80–1.00 → -15% penalty (near upper band — high risk entry)
+          %B > 1.00   → -25% penalty (above upper band — spike/chase entry, SOL example)
+        
+        Returns:
+            (penalty_float, reason_str)  — penalty is negative or 0.0
+        """
+        if pct_b is None:
+            pct_b = self._get_bb_position(symbol, timeframe)
+        
+        if pct_b is None:
+            return 0.0, ""
+        
+        if pct_b > 1.0:
+            return -25.0, f"⚠️  BB: Price above upper band (%B={pct_b:.2f}) — spike entry, -25% confidence"
+        elif pct_b >= 0.80:
+            return -15.0, f"⚠️  BB: Near upper band (%B={pct_b:.2f}) — extended entry, -15% confidence"
+        elif pct_b >= 0.65:
+            return -8.0, f"⚠️  BB: Upper quadrant (%B={pct_b:.2f}) — elevated risk, -8% confidence"
+        elif pct_b >= 0.50:
+            return -3.0, f"ℹ️  BB: Mid-upper band (%B={pct_b:.2f}) — slight caution, -3% confidence"
+        else:
+            return 0.0, ""
+
+    def _get_bb_position_scalar(self, symbol: str, timeframe: str, pct_b: float = None) -> Tuple[float, str]:
+        """
+        Return a position size multiplier (0.4–1.0) based on BB %B for trend-following.
+        
+        Lower in the band → more room to run → full or slightly larger allocation.
+        Higher in the band → more extended → reduced allocation to limit stop-loss exposure.
+        
+        The scalar is applied to default_order_size_usdc in the order executor:
+            actual_order_size = default_order_size_usdc * position_size_scalar
+        
+        Scale table:
+          %B < 0.30   → 1.00x  (near lower band — maximum allocation)
+          %B 0.30–0.50 → 0.90x  (lower half — strong allocation)
+          %B 0.50–0.65 → 0.80x  (mid band — moderate reduction)
+          %B 0.65–0.80 → 0.65x  (upper quadrant — meaningfully reduced)
+          %B 0.80–1.00 → 0.50x  (near upper band — half size)
+          %B > 1.00   → 0.40x  (above upper band — minimum size)
+        
+        Returns:
+            (scalar_float, reason_str)
+        """
+        if pct_b is None:
+            pct_b = self._get_bb_position(symbol, timeframe)
+        
+        if pct_b is None:
+            return 1.0, "BB data unavailable — using full size"
+        
+        if pct_b > 1.0:
+            return 0.40, f"📉 BB size: %B={pct_b:.2f} (above upper band) → 40% size"
+        elif pct_b >= 0.80:
+            return 0.50, f"📉 BB size: %B={pct_b:.2f} (near upper band) → 50% size"
+        elif pct_b >= 0.65:
+            return 0.65, f"📉 BB size: %B={pct_b:.2f} (upper quadrant) → 65% size"
+        elif pct_b >= 0.50:
+            return 0.80, f"📊 BB size: %B={pct_b:.2f} (mid band) → 80% size"
+        elif pct_b >= 0.30:
+            return 0.90, f"📈 BB size: %B={pct_b:.2f} (lower half) → 90% size"
+        else:
+            return 1.00, f"📈 BB size: %B={pct_b:.2f} (near lower band) → 100% size"
+
     def scan_symbols(self, symbols: List[str]) -> List[TradingSignal]:
         """
         Scan multiple symbols for signals
