@@ -22,6 +22,7 @@ class TradingSignal:
     timeframe: str
     trend_timeframe: str
     regime_confidence: str
+    # Optional fields with defaults must come last
     validation_details: Optional[str] = None  # JSON string of SignalValidationResult
     position_size_scalar: float = 1.0          # BB position scalar (1.0 = full size)
 
@@ -36,8 +37,8 @@ class TradingSignal:
             "timestamp": self.timestamp,
             "timeframe": self.timeframe,
             "trend_timeframe": self.trend_timeframe,
+            "regime_confidence": self.regime_confidence,
             "position_size_scalar": self.position_size_scalar,
-            "market_regime": self.market_regime
         }
 
     def get_validation_result(self) -> Optional[SignalValidationResult]:
