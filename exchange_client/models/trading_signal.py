@@ -23,7 +23,7 @@ class TradingSignal:
     trend_timeframe: str
     regime_confidence: str
     validation_details: Optional[str] = None  # JSON string of SignalValidationResult
-    position_size_scalar: float
+    position_size_scalar: float = 1.0          # BB position scalar (1.0 = full size)
 
     def to_dict(self) -> dict:
         return {
