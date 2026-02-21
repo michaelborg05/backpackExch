@@ -82,9 +82,12 @@ class ReEntryManager:
                 return False, "Price not available"
             
             current_price = float(price)
+            # Don't re-enter at higher price after stop - Adjusted 21st Feb to do this check for ALL positions , not just stop loss            
+            if current_price > recent_exit.exit_price:
+                return False, f"Re-entry rejected. Price higher than exit (Curr: {current_price:.2f} > Exit: {recent_exit.exit_price:.2f})"
             
-            # After profitable exit (TP/Trailing Stop), require momentum reset
-            if close_reason in ["TAKE_PROFIT", "TRAILING_STOP"]:
+            # After exit (TP/Trailing Stop/SL), require momentum reset
+            if close_reason in ["TAKE_PROFIT", "TRAILING_STOP","STOP_LOSS"]:
                 reset_ok, reset_reason = self._check_momentum_reset(
                     recent_exit,
                     current_trend,
@@ -92,25 +95,9 @@ class ReEntryManager:
                 )
                 
                 if not reset_ok:
-                    return False, f"Profitable exit @ {recent_exit.closed_at.strftime('%H:%M')}: {reset_reason}"
+                    return False, f"Last {close_reason} exit @ {recent_exit.closed_at.strftime('%H:%M')}: {reset_reason}"
                 else:
                     return True, f"Momentum reset OK after {close_reason} - {reset_reason}"
-            
-            # After stop loss, allow but log it (signal generator should be more cautious)
-            elif close_reason == "STOP_LOSS":
-                # Don't re-enter at higher price after stop
-
-                if current_price > recent_exit.exit_price:
-                    return False, f"Re-entry rejected. Price higher than exit (Curr: {current_price:.2f} > Exit: {recent_exit.exit_price:.2f})"
-                reset_ok, reset_reason = self._check_momentum_reset(
-                    recent_exit,
-                    current_trend,
-                    current_price
-                )
-                if not reset_ok:
-                    return False, f"Re-entry after Stop loss exit @ {recent_exit.closed_at.strftime('%H:%M')}: {reset_reason}"
-                else:
-                    return True, f"Momentum reset OK after {close_reason}"
             
             # Other close reasons (MANUAL, INVALID, etc.)
             else:
