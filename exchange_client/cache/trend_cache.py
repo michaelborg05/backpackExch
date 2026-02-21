@@ -757,73 +757,77 @@ class TrendCache:
                 max_pct_b     = params.get("max_pct_b", 0.25)   # for pct_b lower mode
                 min_pct_b     = params.get("min_pct_b", 0.75)   # for pct_b upper mode
 
-                bb_lower = trend.bb.bb_lower
-                bb_upper = trend.bb.bb_upper
-                bb_basis = trend.bb.bb_basis
-
-                values["bb_lower"] = bb_lower
-                values["bb_upper"] = bb_upper
-                values["bb_basis"] = bb_basis
-                values["price"]    = current_price
-
-                if bb_lower is None or bb_upper is None:
+                if trend.bb is None:
                     is_bullish = False
                     msg = "Bollinger Bands: ✗ (no BB data — check Pine script is sending bb fields)"
-                else:
-                    band_width = bb_upper - bb_lower
-                    pct_b = (current_price - bb_lower) / band_width if band_width > 0 else None
-                    bb_width_norm = (band_width / bb_basis) if bb_basis and bb_basis > 0 else None
+                else: 
+                    bb_lower = trend.bb.bb_lower
+                    bb_upper = trend.bb.bb_upper
+                    bb_basis = trend.bb.bb_basis
 
-                    values["pct_b"]    = round(pct_b, 4) if pct_b is not None else None
-                    values["bb_width"] = round(bb_width_norm, 5) if bb_width_norm is not None else None
+                    values["bb_lower"] = bb_lower
+                    values["bb_upper"] = bb_upper
+                    values["bb_basis"] = bb_basis
+                    values["price"]    = current_price
 
-                    if mode == "pct_b":
-                        # Most useful for range trading — where in the band is price?
-                        if pct_b is None:
-                            is_bullish = False
-                            msg = "BB %B: ✗ (band width is zero)"
-                        elif band == "lower":
-                            # Bullish = price in lower portion of band (near lower band)
-                            is_bullish = pct_b <= max_pct_b
+                    if bb_lower is None or bb_upper is None:
+                        is_bullish = False
+                        msg = "Bollinger Bands: ✗ (no BB data — check Pine script is sending bb fields)"
+                    else:
+                        band_width = bb_upper - bb_lower
+                        pct_b = (current_price - bb_lower) / band_width if band_width > 0 else None
+                        bb_width_norm = (band_width / bb_basis) if bb_basis and bb_basis > 0 else None
+
+                        values["pct_b"]    = round(pct_b, 4) if pct_b is not None else None
+                        values["bb_width"] = round(bb_width_norm, 5) if bb_width_norm is not None else None
+
+                        if mode == "pct_b":
+                            # Most useful for range trading — where in the band is price?
+                            if pct_b is None:
+                                is_bullish = False
+                                msg = "BB %B: ✗ (band width is zero)"
+                            elif band == "lower":
+                                # Bullish = price in lower portion of band (near lower band)
+                                is_bullish = pct_b <= max_pct_b
+                                msg = (
+                                    f"BB %B lower: {'✓' if is_bullish else '✗'} "
+                                    f"(%B={pct_b:.2f} - need <={max_pct_b:.2f})"
+                                )
+                            else:  # upper — avoid entries near top of band
+                                is_bullish = pct_b < min_pct_b
+                                msg = (
+                                    f"BB %B upper check: {'✓' if is_bullish else '✗'} "
+                                    f"(%B={pct_b:.2f} - need <{min_pct_b:.2f})"
+                                )
+
+                        elif mode == "touch":
+                            target_band = bb_lower if band == "lower" else bb_upper
+                            distance_pct = abs((current_price - target_band) / target_band) * 100
+                            values["distance_pct"] = round(distance_pct, 4)
+                            is_bullish = distance_pct <= tolerance_pct
                             msg = (
-                                f"BB %B lower: {'✓' if is_bullish else '✗'} "
-                                f"(%B={pct_b:.2f} - need <={max_pct_b:.2f})"
-                            )
-                        else:  # upper — avoid entries near top of band
-                            is_bullish = pct_b < min_pct_b
-                            msg = (
-                                f"BB %B upper check: {'✓' if is_bullish else '✗'} "
-                                f"(%B={pct_b:.2f} - need <{min_pct_b:.2f})"
+                                f"BB {band} touch: {'✓' if is_bullish else '✗'} "
+                                f"(price {distance_pct:.2f}% from {band} band, "
+                                f"need <={tolerance_pct:.2f}%)"
                             )
 
-                    elif mode == "touch":
-                        target_band = bb_lower if band == "lower" else bb_upper
-                        distance_pct = abs((current_price - target_band) / target_band) * 100
-                        values["distance_pct"] = round(distance_pct, 4)
-                        is_bullish = distance_pct <= tolerance_pct
-                        msg = (
-                            f"BB {band} touch: {'✓' if is_bullish else '✗'} "
-                            f"(price {distance_pct:.2f}% from {band} band, "
-                            f"need <={tolerance_pct:.2f}%)"
-                        )
-
-                    else:  # "breach"
-                        if band == "lower":
-                            is_bullish = current_price <= bb_lower
-                            gap_pct = ((current_price - bb_lower) / bb_lower) * 100
-                            values["gap_pct"] = round(gap_pct, 4)
-                            msg = (
-                                f"BB lower breach: {'✓' if is_bullish else '✗'} "
-                                f"(price {gap_pct:+.2f}% vs lower band)"
-                            )
-                        else:  # upper
-                            is_bullish = current_price < bb_upper
-                            gap_pct = ((current_price - bb_upper) / bb_upper) * 100
-                            values["gap_pct"] = round(gap_pct, 4)
-                            msg = (
-                                f"BB upper breach check: {'✓' if is_bullish else '✗'} "
-                                f"(price {gap_pct:+.2f}% vs upper band)"
-                            )
+                        else:  # "breach"
+                            if band == "lower":
+                                is_bullish = current_price <= bb_lower
+                                gap_pct = ((current_price - bb_lower) / bb_lower) * 100
+                                values["gap_pct"] = round(gap_pct, 4)
+                                msg = (
+                                    f"BB lower breach: {'✓' if is_bullish else '✗'} "
+                                    f"(price {gap_pct:+.2f}% vs lower band)"
+                                )
+                            else:  # upper
+                                is_bullish = current_price < bb_upper
+                                gap_pct = ((current_price - bb_upper) / bb_upper) * 100
+                                values["gap_pct"] = round(gap_pct, 4)
+                                msg = (
+                                    f"BB upper breach check: {'✓' if is_bullish else '✗'} "
+                                    f"(price {gap_pct:+.2f}% vs upper band)"
+                                )
                 
             elif indicator_type == "volume_spike":
                 """
@@ -877,10 +881,16 @@ class TrendCache:
                 # Pine sends the previous CLOSED candle's OHLC as:
                 #   prev_open, prev_high, prev_low, prev_close
                 # trend.price is the LIVE price — not the closed candle close.
-                candle_open  = trend.prev_candle.prev_open
-                candle_high  = trend.prev_candle.prev_high
-                candle_low   = trend.prev_candle.prev_low
-                candle_close = trend.prev_candle.prev_close   # ← was incorrectly trend.price
+                if trend.prev_candle is not None:
+                    candle_open  = trend.prev_candle.prev_open
+                    candle_high  = trend.prev_candle.prev_high
+                    candle_low   = trend.prev_candle.prev_low
+                    candle_close = trend.prev_candle.prev_close   # ← was incorrectly trend.price
+                else:
+                    candle_open  = None
+                    candle_high  = None
+                    candle_low   = None
+                    candle_close = None
 
                 values["candle_open"]  = candle_open
                 values["candle_high"]  = candle_high

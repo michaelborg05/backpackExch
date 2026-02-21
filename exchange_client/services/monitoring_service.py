@@ -1032,7 +1032,29 @@ class MonitoringService:
             self.logger.info(
                 f"[{profile.name}] Calculated position size: {quantity:.6f} - {size_reason}"
             )
-                                                
+
+            # Apply BB position scalar from signal (1.0 = no change, <1.0 = reduce size)
+            # This is applied AFTER all portfolio/balance/cap checks so those constraints
+            # are always enforced against the full intended size first.
+            from decimal import Decimal
+            scalar = Decimal(str(getattr(signal, 'position_size_scalar', 1.0)))
+            if scalar != Decimal("1.0"):
+                original_quantity = quantity
+                quantity = quantity * scalar
+                self.logger.info(
+                    f"[{profile.name}] BB scalar {float(scalar):.2f}x applied: "
+                    f"{float(original_quantity):.6f} → {float(quantity):.6f}"
+                )
+                # Re-check minimum after scaling — a large scalar reduction could bring
+                # the USDC value below the exchange minimum
+                price = self.price_cache.get_price(signal.symbol)
+                if price and quantity * price < Decimal("5"):
+                    self.logger.warning(
+                        f"[{profile.name}] Order too small after BB scalar "
+                        f"(${float(quantity * price):.2f}), skipping"
+                    )
+                    return
+
             # Execute market buy
             result = trading.order_buy(
                 symbol=signal.symbol,
@@ -1060,7 +1082,8 @@ class MonitoringService:
                     f"Symbol: {signal.symbol}\n"
                     f"Strength: {signal.strength.name} ({signal.confidence:.0f}%)\n"
                     f"Price: ${executed_price:.4f}\n"
-                    f"Quantity: {result.executed_quantity}\n"
+                    f"Quantity: {result.executed_quantity}"
+                    + (f" (BB scalar: {float(scalar):.2f}x)" if scalar != Decimal("1.0") else "") + "\n"
                     f"Reasons:\n" + "\n".join(f"  {r}" for r in signal.reasons),
                     MessagePriority.NORMAL
                 )
@@ -1088,6 +1111,3 @@ def get_monitoring_service() -> MonitoringService:
     if _monitoring_service is None:
         return None
     return _monitoring_service
-
-
-
