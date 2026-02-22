@@ -346,3 +346,40 @@ class Settings(Base):
     def get_value_as_str(self) -> str:
         """Return value as string"""
         return self.value
+    
+# db/models.py
+
+class TrendAnalysisLog(Base):
+    """
+    Longer-term storage (48-72h) for pattern analysis.
+    Stores OHLC and Indicators as flat columns.
+    """
+    __tablename__ = "trend_analysis_log"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, index=True)
+    
+    # OHLC Data (from prev_candle)
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+    
+    # Indicators
+    rsi = Column(Float)
+    ema20 = Column(Float)
+    ema50 = Column(Float)
+    vwap = Column(Float)
+    bb_upper = Column(Float)
+    bb_lower = Column(Float)
+    bb_basis = Column(Float)
+    volume = Column(Float)
+    
+    # Explicitly store the TV bar timestamp and the DB arrival time
+    timestamp = Column(DateTime(timezone=True), index=True) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('ix_trend_log_lookup', 'symbol', 'timeframe', 'timestamp'),
+    )

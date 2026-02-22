@@ -7,8 +7,8 @@ Handles saving and loading trend data for cache warmup.
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
-from db.models import TrendHistory
+from datetime import datetime, timezone, timedelta
+from db.models import TrendHistory, TrendAnalysisLog
 from models.webhook import TrendData
 from utils.logging import log_manager
 
@@ -256,3 +256,33 @@ def get_trend_history_stats(db: Session) -> Dict[str, Any]:
             for symbol, timeframe, count in symbol_timeframe_counts
         ]
     }
+
+def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: int = 72):
+    """Saves a flat record for analysis and cleans up old data"""
+    
+    # Extract prev_candle and bb safe-guarding against missing data
+    prev = getattr(trend_data, 'prev_candle', {})
+    bb = getattr(trend_data, 'bb', {})
+
+    new_log = TrendAnalysisLog(
+        symbol=trend_data.symbol,
+        timeframe=trend_data.timeframe,
+        open=getattr(prev, 'prev_open', None),
+        high=getattr(prev, 'prev_high', None),
+        low=getattr(prev, 'prev_low', None),
+        close=getattr(prev, 'prev_close', None),
+        rsi=float(trend_data.rsi),
+        ema20=float(trend_data.ema20),
+        ema50=float(trend_data.ema50),
+        vwap=float(trend_data.vwap) if trend_data.vwap else None,
+        bb_upper=getattr(bb,'bb_upper', None),
+        bb_lower=getattr(bb,'bb_lower', None),
+        bb_basis=getattr(bb,'bb_basis', None),
+        volume=float(trend_data.volume) if trend_data.volume else None,
+        timestamp=datetime.fromtimestamp(trend_data.timestamp, tz=timezone.utc)
+    )
+    
+    db.add(new_log)
+    
+    db.commit()
+    db.refresh(TrendAnalysisLog)

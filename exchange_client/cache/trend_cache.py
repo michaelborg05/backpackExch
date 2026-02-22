@@ -100,7 +100,8 @@ class TrendCache:
             # Persist to database if enabled
             if persist_to_db:
                 self._save_to_database(trend_data)
-            
+                self._log_for_analysis(trend_data)
+
             # Log the change
             if old_trend:
                 self._log_trend_change(trend_data, old_trend)
@@ -140,7 +141,18 @@ class TrendCache:
                     exc_info=True
                 )
                 
-    
+    def _log_for_analysis(self, trend_data: TrendData):
+        """Specialized logging for trade pattern analysis"""
+        from db.utils import get_db_session
+        from db.crud_trend import log_trend_for_analysis
+
+        with get_db_session() as db:
+            try:
+                # You can make the 72 hours configurable
+                log_trend_for_analysis(db, trend_data, retention_hours=72)
+            except Exception as e:
+                self.logger.error(f"❌ Analysis Log Failed: {e}")
+                    
     def _is_significant_change(self, old_trend: Optional[TrendData], new_trend: TrendData) -> bool:
         """
         Check if indicators changed significantly
