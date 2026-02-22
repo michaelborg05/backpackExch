@@ -39,7 +39,12 @@ profiles:
           min: 30
           max: 65
           invert: true
-    min_indicators_required: 1
+      - type: "ema_slope"
+        params:
+          ema: 20
+          direction: "not_falling"
+          min_slope_pct: 0.01   # hourly trend must at least be flat
+    min_indicators_required: 2
 
     use_entry_filter: true
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
@@ -62,17 +67,30 @@ profiles:
       - type: "rsi_threshold"
         params:
           period: 14
-          min_value: 56
+          min_value: 52
           use_momentum: true
-          early_threshold: 40
+          early_threshold: 48
           hard_stop: true
       - type: "rsi_overbought"
         params:
-          min_value: 63
+          min_value: 65
           hard_stop: true
       - type: "price_vs_vwap"
         params: {}
-    min_entry_indicators_required: 5
+      - type: "bollinger_bands"
+        params:
+          band: "lower"
+          mode: "pct_b"
+          max_pct_b: 0.7    # Price in lower 25% of band = near lower band
+          hard_stop: true
+
+      - type: "bollinger_bands"
+        params:
+          band: "upper"
+          mode: "pct_b"
+          min_pct_b: 0.3    # Block if price already in upper 25% of band
+          hard_stop: true
+    min_entry_indicators_required: 6
 
     # ATR filter (volatility)
     use_atr_filter: false
@@ -370,22 +388,21 @@ profiles:
           ema: 20
           min_gap_pct: -0.5
           max_gap_pct: 1.5
-      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
+      - type: "reversal_candle"
         params:
-          ema: 20
-          direction: "rising"
-          min_slope_pct: 0.02
-      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
+          pattern: "hammer"
+          min_body_pct: 0.08    # Candle structure confirms buyer
+      - type: "bollinger_bands"
         params:
-          ema: 50
-          direction: "not_falling"
-          min_slope_pct: 0.01
+          band: "lower"
+          mode: "pct_b"
+          max_pct_b: 0.65       # Don't buy near top of band
       - type: "rsi_threshold"
         params:
           period: 14
-          min_value: 53
+          min_value: 57
           use_momentum: true
-          early_threshold: 40
+          early_threshold: 45
           hard_stop: true
       - type: "rsi_overbought"
         params:
@@ -400,7 +417,7 @@ profiles:
      # Trend-based exit (intelligent)
     use_trend_invalidation_exit: true
     trend_invalidation_indicators: entry #trend or entry
-    min_position_age_for_trend_check: 20  # minutes
+    min_position_age_for_trend_check: 45  # minutes
     # Time-based invalidation and max position backstop (last resort)
     max_position_hours: 12  # Force exit if stuck
 
