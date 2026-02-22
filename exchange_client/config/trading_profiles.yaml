@@ -534,7 +534,7 @@ profiles:
 
      # Trend-based exit (intelligent)
     use_trend_invalidation_exit: false
-    max_position_hours: 2  # Force exit if stuck
+    max_position_hours: 4  # Force exit if stuck
 
 
 

@@ -371,6 +371,8 @@ class SignalGenerator:
                     "confidence_pct": round(confidence_pct, 2),
                     "bb_penalty": bb_penalty
                 })
+            else:
+                reasons.append(f"✅ %BB= {pct_b:.2f}) — no penalty")
 
         validation.additional_checks.append(bb_check)
         validation.score = confidence_pct
