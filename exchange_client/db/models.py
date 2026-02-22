@@ -375,6 +375,8 @@ class TrendAnalysisLog(Base):
     bb_lower = Column(Float)
     bb_basis = Column(Float)
     volume = Column(Float)
+    volume_ratio = Column(Float)
+    volume_sma = Column(Float)
     
     # Explicitly store the TV bar timestamp and the DB arrival time
     timestamp = Column(DateTime(timezone=True), index=True) 

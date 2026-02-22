@@ -279,6 +279,8 @@ def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: 
         bb_lower=getattr(bb,'bb_lower', None),
         bb_basis=getattr(bb,'bb_basis', None),
         volume=float(trend_data.volume) if trend_data.volume else None,
+        volume_sma=float(trend_data.volume_sma) if trend_data.volume_sma else None,
+        volume_ratio=float(trend_data.volume_ratio) if trend_data.volume_ratio else None,
         timestamp=datetime.fromtimestamp(trend_data.timestamp, tz=timezone.utc)
     )
     
