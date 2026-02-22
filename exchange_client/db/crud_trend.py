@@ -285,4 +285,4 @@ def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: 
     db.add(new_log)
     
     db.commit()
-    db.refresh(TrendAnalysisLog)
+    db.refresh(new_log)
