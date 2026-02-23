@@ -279,10 +279,11 @@ class TelegramService:
                         text="💰 Fetching summary..."
                     )
                     msg = self.get_summary_data()
+                    safe_msg = msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=msg,
+                        text=safe_msg,
                         parse_mode="HTML"
                     )
 
