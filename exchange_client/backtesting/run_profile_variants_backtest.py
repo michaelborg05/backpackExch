@@ -1,24 +1,62 @@
 import argparse
 import sys
-import yaml
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from datetime import datetime, timezone, timedelta
-#from profile_variants  import RANGE_VARIANTS, MEAN_REV_VARIANTS, run_all_variants
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, ALL_VARIANTS, run_all_variants
 from db.utils import get_db_session
 
+parser = argparse.ArgumentParser(description="Run profile variant backtests")
+parser.add_argument("--days",    type=int, default=7,
+                    help="Lookback window in days (default: 7)")
+parser.add_argument("--symbol",  default=None,
+                    help="Single symbol override, e.g. SOL_USDC (default: all 4)")
+parser.add_argument("--set",     default="all", choices=["all", "range", "mr"],
+                    help="Which variant set to run (default: all)")
+parser.add_argument("--trades",  action="store_true", default=True,
+                    help="Print per-trade breakdown table under each variant")
+parser.add_argument("--csv",     default=None,
+                    help="Export all trades to CSV. Filename is auto-suffixed per set/symbol.")
+parser.add_argument("--verbose", action="store_true",
+                    help="Per-candle debug output from the engine")
+args = parser.parse_args()
+
 end   = datetime.now(tz=timezone.utc)
-start = end - timedelta(days=7)  # Use 7 days for meaningful sample
+start = end - timedelta(days=args.days)
+print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
+
+VARIANT_SETS = {
+    "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]),
+    "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]),
+}
+sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
+symbols_override = [args.symbol] if args.symbol else None
 
 with get_db_session() as db:
-    # Test range variants on SOL
-    print("=== RANGE TRADING - SOL ===")
-    run_all_variants(db, "SOL_USDC", start, end, RANGE_VARIANTS)
+    for set_name, (variants, default_symbols) in sets_to_run:
+        symbols = symbols_override or default_symbols
+        label   = "RANGE TRADING" if set_name == "range" else "MEAN REVERSION"
 
-    # Test mean reversion variants on SUI
-    print("\n=== MEAN REVERSION - SUI ===")
-    run_all_variants(db, "SUI_USDC", start, end, MEAN_REV_VARIANTS)
+        for symbol in symbols:
+            csv_path = None
+            if args.csv:
+                base     = args.csv.replace(".csv", "")
+                csv_path = f"{base}_{set_name}_{symbol}.csv"
+
+            print(f"\n{'='*60}")
+            print(f"  {label} -- {symbol}")
+            print(f"{'='*60}")
+
+            run_all_variants(
+                db,
+                symbol,
+                start,
+                end,
+                variant_set=variants,
+                verbose=args.verbose,
+                show_trades=args.trades,
+                export_csv=csv_path,
+            )

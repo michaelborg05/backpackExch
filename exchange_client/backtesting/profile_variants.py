@@ -432,6 +432,22 @@ MEAN_REV_VARIANTS = {
         "min_signal_confidence": 68.0,
         "min_volume_ratio": 0.8,
     },
+
+        "mr_v9_lookback_sustained": {
+        **_MEAN_REV_BASE,
+        "entry_indicators": [
+            {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 5, "oversold_threshold": 32, "current_min": 38, "min_jump": 3.0, "require_sustained": True, "hard_stop": True}},
+            {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.7, "max_gap_pct": -8.0}},
+            {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
+            {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 5.0}},
+            {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "breach"}},
+            {"type": "rsi_overbought",             "params": {"min_value": 65}},
+            {"type": "reversal_candle",            "params": {"pattern": "hammer", "min_body_pct": 0.08}},
+        ],
+        "min_entry_indicators_required": 4,
+
+    },
+
 }
 
 
@@ -451,13 +467,19 @@ def run_all_variants(
     end,
     variant_set: dict = None,
     verbose: bool = False,
+    show_trades: bool = False,
+    export_csv: str = None,
 ) -> list:
     """
     Run all variants and return sorted results.
 
+    Args:
+        show_trades: print per-trade breakdown table under each variant
+        export_csv:  filepath to write all trades across all variants as CSV
+
     Example:
-        from backtesting.profile_variants import run_all_variants, RANGE_VARIANTS
-        results = run_all_variants(db, "SOL_USDC", start, end, RANGE_VARIANTS)
+        results = run_all_variants(db, "SOL_USDC", start, end, RANGE_VARIANTS,
+                                   show_trades=True, export_csv="trades.csv")
     """
     from backtesting.backtest_engine import BacktestEngine, BacktestProfile
 
@@ -473,6 +495,7 @@ def run_all_variants(
 
     results.sort(key=lambda r: (r.profit_factor, r.total_pnl_pct), reverse=True)
 
+    # ---- Summary table ----
     print(f"\n{'Variant':<35} {'Trades':>7} {'Win%':>6} {'AvgPnL':>8} {'TotalPnL':>10} {'ProfFact':>9}")
     print("-" * 80)
     for r in results:
@@ -480,4 +503,49 @@ def run_all_variants(
             f"{r.profile_name:<35} {r.total_trades:>7} {r.win_rate:>6.0%} "
             f"{r.avg_pnl_pct:>7.2f}% {r.total_pnl_pct:>9.2f}% {r.profit_factor:>9.2f}x"
         )
+
+    # ---- Per-trade breakdown ----
+    if show_trades:
+        print("\n" + "=" * 80)
+        print("TRADE-BY-TRADE BREAKDOWN")
+        print("=" * 80)
+        for r in results:
+            if r.total_trades == 0:
+                print(f"\n{r.profile_name}: (no trades)")
+                continue
+            print(f"\n-- {r.profile_name} --")
+            print(r.trade_log())
+
+    # ---- CSV export ----
+    if export_csv:
+        import csv
+        fields = [
+            "variant", "symbol", "trade_num", "outcome",
+            "entry_time", "exit_time", "hold_minutes",
+            "entry_price", "exit_price", "pnl_pct",
+            "exit_reason", "confidence", "volume_ratio", "rsi_at_entry",
+        ]
+        with open(export_csv, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            for r in results:
+                for i, t in enumerate(r.trades, 1):
+                    writer.writerow({
+                        "variant":      r.profile_name,
+                        "symbol":       r.symbol,
+                        "trade_num":    i,
+                        "outcome":      "WIN" if t.won else ("OPEN" if t.exit_price is None else "LOSS"),
+                        "entry_time":   t.entry_time.isoformat() if t.entry_time else "",
+                        "exit_time":    t.exit_time.isoformat()  if t.exit_time  else "",
+                        "hold_minutes": round(t.hold_minutes, 1) if t.hold_minutes else "",
+                        "entry_price":  t.entry_price,
+                        "exit_price":   t.exit_price or "",
+                        "pnl_pct":      round(t.pnl_pct, 4),
+                        "exit_reason":  t.exit_reason,
+                        "confidence":   t.entry_details.get("confidence", ""),
+                        "volume_ratio": t.entry_details.get("volume_ratio", ""),
+                        "rsi_at_entry": t.entry_details.get("rsi", ""),
+                    })
+        print(f"\n[CSV] Trade log exported -> {export_csv}")
+
     return results

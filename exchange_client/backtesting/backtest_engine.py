@@ -748,6 +748,18 @@ class BacktestTrade:
     # Snapshot of indicators at entry (for analysis)
     entry_details: Dict[str, Any]     = field(default_factory=dict)
 
+    @property
+    def hold_minutes(self) -> Optional[float]:
+        if self.entry_time and self.exit_time:
+            return (self.exit_time - self.entry_time).total_seconds() / 60
+        return None
+
+    @property
+    def outcome_icon(self) -> str:
+        if self.exit_price is None:
+            return "⏳"
+        return "✅" if self.won else "❌"
+
     def to_dict(self) -> dict:
         return {
             "entry_time":   self.entry_time.isoformat() if self.entry_time else None,
@@ -756,7 +768,11 @@ class BacktestTrade:
             "exit_price":   self.exit_price,
             "exit_reason":  self.exit_reason,
             "pnl_pct":      round(self.pnl_pct, 4),
+            "hold_minutes": round(self.hold_minutes, 1) if self.hold_minutes is not None else None,
             "won":          self.won,
+            "confidence":   self.entry_details.get("confidence"),
+            "volume_ratio": self.entry_details.get("volume_ratio"),
+            "rsi_at_entry": self.entry_details.get("rsi"),
         }
 
 
@@ -837,6 +853,104 @@ class BacktestResult:
             lines.append(f"Params  : {self.profile_params}")
         lines.append("="*60)
         return "\n".join(lines)
+
+    def trade_log(self, show_indicators: bool = True) -> str:
+        """
+        Per-trade breakdown table. Call after summary() for the full picture.
+
+            print(result.summary())
+            print(result.trade_log())
+
+        show_indicators: include confidence / RSI / volume columns captured at entry
+        """
+        closed = [t for t in self.trades if t.exit_price is not None]
+        open_t = [t for t in self.trades if t.exit_price is None]
+
+        if not closed and not open_t:
+            return "  (no trades in period)"
+
+        # Build header
+        base_hdr = (
+            f"  {'#':>3}  {'Entry':>14}  {'Exit':>14}  "
+            f"{'Buy':>9}  {'Sell':>9}  {'PnL%':>6}  {'Hold':>5}  {'Exit reason':<15}"
+        )
+        ind_hdr = f"  {'Conf':>5}  {'Vol':>5}  {'RSI':>5}" if show_indicators else ""
+        header  = base_hdr + ind_hdr
+        sep     = "  " + "─" * (len(header) - 2)
+
+        lines = [header, sep]
+
+        for i, t in enumerate(closed, 1):
+            entry_s = t.entry_time.strftime("%m-%d %H:%M") if t.entry_time else "—"
+            exit_s  = t.exit_time.strftime("%m-%d %H:%M")  if t.exit_time  else "—"
+            hold_s  = f"{t.hold_minutes:.0f}m"             if t.hold_minutes is not None else "—"
+            line = (
+                f"  {i:>3}{t.outcome_icon} "
+                f"{entry_s:>14}  {exit_s:>14}  "
+                f"{t.entry_price:>9.4f}  {t.exit_price:>9.4f}  "
+                f"{t.pnl_pct:>+6.2f}%  {hold_s:>5}  {t.exit_reason:<15}"
+            )
+            if show_indicators:
+                conf = t.entry_details.get("confidence")
+                vol  = t.entry_details.get("volume_ratio")
+                rsi  = t.entry_details.get("rsi")
+                line += (
+                    f"  {f'{conf:.0f}%' if conf is not None else '—':>5}"
+                    f"  {f'{vol:.1f}x' if vol is not None else '—':>5}"
+                    f"  {f'{rsi:.0f}' if rsi is not None else '—':>5}"
+                )
+            lines.append(line)
+
+        if open_t:
+            for t in open_t:
+                entry_s = t.entry_time.strftime("%m-%d %H:%M") if t.entry_time else "—"
+                lines.append(
+                    f"  ⏳   {entry_s:>14}  {'(still open)':>14}  "
+                    f"{t.entry_price:>9.4f}  {'—':>9}  {'—':>7}  {'—':>5}  open"
+                )
+
+        # Footer totals row
+        wins   = sum(1 for t in closed if t.won)
+        losses = len(closed) - wins
+        lines.append(sep)
+        lines.append(
+            f"  {'':>3}   {'':>14}  {'':>14}  "
+            f"{'':>9}  {'':>9}  "
+            f"{self.total_pnl_pct:>+6.2f}%  {'':>5}  "
+            f"{wins}W / {losses}L  (signals fired: {self.signals_fired})"
+        )
+        return "\n".join(lines)
+
+    def to_csv(self, filepath: str):
+        """Export per-trade detail to CSV for spreadsheet cross-checking."""
+        import csv
+        fields = [
+            "profile", "symbol", "trade_num", "outcome",
+            "entry_time", "exit_time", "hold_minutes",
+            "entry_price", "exit_price", "pnl_pct",
+            "exit_reason", "confidence", "volume_ratio", "rsi_at_entry",
+        ]
+        with open(filepath, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            for i, t in enumerate(self.trades, 1):
+                writer.writerow({
+                    "profile":       self.profile_name,
+                    "symbol":        self.symbol,
+                    "trade_num":     i,
+                    "outcome":       "WIN" if t.won else ("OPEN" if t.exit_price is None else "LOSS"),
+                    "entry_time":    t.entry_time.isoformat() if t.entry_time else "",
+                    "exit_time":     t.exit_time.isoformat()  if t.exit_time  else "",
+                    "hold_minutes":  round(t.hold_minutes, 1) if t.hold_minutes else "",
+                    "entry_price":   t.entry_price,
+                    "exit_price":    t.exit_price or "",
+                    "pnl_pct":       round(t.pnl_pct, 4),
+                    "exit_reason":   t.exit_reason,
+                    "confidence":    t.entry_details.get("confidence", ""),
+                    "volume_ratio":  t.entry_details.get("volume_ratio", ""),
+                    "rsi_at_entry":  t.entry_details.get("rsi", ""),
+                })
+        print(f"[CSV] Trade log saved → {filepath}")
 
 
 # ===========================================================================
