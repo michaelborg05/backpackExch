@@ -7,7 +7,7 @@ profiles:
 
     strategy_type: trend_following
 
-    take_profit_pct: 0.8
+    take_profit_pct: 1
     stop_loss_pct: 0.7
     trailing_stop_pct: 0.5
     arm_trailing_stop_pct: 0.5

@@ -18,7 +18,7 @@ logger = log_manager.get_logger("TrendHistoryCRUD")
 def save_trend_snapshot(
     db: Session,
     trend_data: TrendData,
-    max_entries_per_symbol: int = 5
+    max_entries_per_symbol: int = 15
 ) -> TrendHistory:
     """
     Save a trend snapshot to the database.

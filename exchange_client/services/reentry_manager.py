@@ -83,8 +83,8 @@ class ReEntryManager:
             
             current_price = float(price)
             # Don't re-enter at higher price after stop - Adjusted 21st Feb to do this check for ALL positions , not just stop loss            
-            if current_price > recent_exit.exit_price:
-                return False, f"Re-entry rejected. Price higher than exit (Curr: {current_price:.2f} > Exit: {recent_exit.exit_price:.2f})"
+            #if current_price > recent_exit.exit_price:
+            #    return False, f"Re-entry rejected. Price higher than exit (Curr: {current_price:.2f} > Exit: {recent_exit.exit_price:.2f})"
             
             # After exit (TP/Trailing Stop/SL), require momentum reset
             if close_reason in ["TAKE_PROFIT", "TRAILING_STOP","STOP_LOSS"]:

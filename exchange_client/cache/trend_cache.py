@@ -80,8 +80,8 @@ class TrendCache:
             self._rsi_history[key].append((trend_data.timestamp, trend_data.rsi))
             
             # Keep last 5 significant changes
-            if len(self._rsi_history[key]) > 5:
-                self._rsi_history[key] = self._rsi_history[key][-5:]
+            if len(self._rsi_history[key]) > 15:
+                self._rsi_history[key] = self._rsi_history[key][-15:]
             
             # Update EMA history for slope calculation
             if key not in self._ema_history:
@@ -128,7 +128,7 @@ class TrendCache:
             from db.crud_trend import save_trend_snapshot
             
             try:
-                save_trend_snapshot(db, trend_data, max_entries_per_symbol=5)
+                save_trend_snapshot(db, trend_data, max_entries_per_symbol=15)
                 self._stats['db_saves'] += 1
                 
                 self.logger.debug(

@@ -205,58 +205,58 @@ TREND_VARIANTS = {
     # Lean: slightly more aggressive, good for testing "what if we just didn't
     # require 57 RSI and a hammer candle" from 15m_no_trend.
     # -------------------------------------------------------------------------
-    # "tf_v4_no_trend_bb_rsi": {
-    #     **_TF_NO_TREND_BASE,
-    #     "entry_indicators": [
-    #         # BB must be in the mid-rising range
-    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.75}},
-    #         {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.30, "hard_stop": True}},
-    #         # RSI showing actual momentum up
-    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": True, "early_threshold": 40, "hard_stop": True}},
-    #         {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
-    #         # Price vs VWAP and EMA — looser gap than baseline
-    #         {"type": "price_vs_vwap",   "params": {}},
-    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.8, "max_gap_pct": 1.5}},
-    #     ],
-    #     "min_entry_indicators_required": 4,
-    #     "min_signal_confidence": 68.0,
-    #     "min_volume_ratio": 0.9,
-    # },
+    "tf_v4_no_trend_bb_rsi": {
+        **_TF_NO_TREND_BASE,
+        "entry_indicators": [
+            # BB must be in the mid-rising range
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.75}},
+            {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.30, "hard_stop": True}},
+            # RSI showing actual momentum up
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": True, "early_threshold": 40, "hard_stop": True}},
+            {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
+            # Price vs VWAP and EMA — looser gap than baseline
+            {"type": "price_vs_vwap",   "params": {}},
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.8, "max_gap_pct": 1.5}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_signal_confidence": 68.0,
+        "min_volume_ratio": 0.9,
+    },
 
-    # # -------------------------------------------------------------------------
-    # # V5: "No trend filter, RSI reversal + BB" — specifically designed for
-    # # the post-crash bounces in this dataset. The 15m RSI went from 12 → 42
-    # # over ~5 hours. The reversal momentum indicator looks back 4-5 candles
-    # # to confirm the bounce has started.
-    # # Key difference from MR variants: this is trend_following not MR, so it
-    # # doesn't require the full capitulation setup (BB breach, extreme vwap gap).
-    # # It just needs to see RSI recovering from an oversold read.
-    # # -------------------------------------------------------------------------
-    # "tf_v5_no_trend_rsi_reversal": {
-    #     **_TF_NO_TREND_BASE,
-    #     "entry_indicators": [
-    #         # RSI was recently oversold and is rising sustainably
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    5,
-    #             "oversold_threshold":  35,   # was below 35 in last 5 candles
-    #             "current_min":         40,   # currently above 40
-    #             "min_jump":            4.0,  # jumped 4+ in one candle (the bounce candle)
-    #             "require_sustained":   True,
-    #             "sustained_rise_mode": "net",  # allow dip-then-recovery shape
-    #             "hard_stop":           True,
-    #         }},
-    #         {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
-    #         # BB: not at the top yet (catching the move, not chasing)
-    #         {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "hard_stop": True}},
-    #         # VWAP: must be near or above (bounce has legs)
-    #         {"type": "price_vs_vwap",   "params": {}},
-    #         # EMA: allow meaningful gap below (post-crash EMA still elevated)
-    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -2.5, "max_gap_pct": 2.0}},
-    #     ],
-    #     "min_entry_indicators_required": 4,
-    #     "min_volume_ratio": 0.8,
-    #     "min_signal_confidence": 65.0,
-    # },
+    # -------------------------------------------------------------------------
+    # V5: "No trend filter, RSI reversal + BB" — specifically designed for
+    # the post-crash bounces in this dataset. The 15m RSI went from 12 → 42
+    # over ~5 hours. The reversal momentum indicator looks back 4-5 candles
+    # to confirm the bounce has started.
+    # Key difference from MR variants: this is trend_following not MR, so it
+    # doesn't require the full capitulation setup (BB breach, extreme vwap gap).
+    # It just needs to see RSI recovering from an oversold read.
+    # -------------------------------------------------------------------------
+    "tf_v5_no_trend_rsi_reversal": {
+        **_TF_NO_TREND_BASE,
+        "entry_indicators": [
+            # RSI was recently oversold and is rising sustainably
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":    5,
+                "oversold_threshold":  35,   # was below 35 in last 5 candles
+                "current_min":         40,   # currently above 40
+                "min_jump":            4.0,  # jumped 4+ in one candle (the bounce candle)
+                "require_sustained":   True,
+                "sustained_rise_mode": "net",  # allow dip-then-recovery shape
+                "hard_stop":           True,
+            }},
+            {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
+            # BB: not at the top yet (catching the move, not chasing)
+            {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "hard_stop": True}},
+            # VWAP: must be near or above (bounce has legs)
+            {"type": "price_vs_vwap",   "params": {}},
+            # EMA: allow meaningful gap below (post-crash EMA still elevated)
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -2.5, "max_gap_pct": 2.0}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_volume_ratio": 0.8,
+        "min_signal_confidence": 65.0,
+    },
 
     # -------------------------------------------------------------------------
     # V6: Strict trend confirm, lower RSI — keep the HTF discipline but relax
@@ -290,19 +290,19 @@ TREND_VARIANTS = {
     # The hammer candle check stays because it adds good timing precision
     # (confirms the reversal candle, not just any RSI bounce).
     # -------------------------------------------------------------------------
-    # "tf_v7_no_trend_lower_rsi_keep_hammer": {
-    #     **_TF_NO_TREND_BASE,
-    #     "entry_indicators": [
-    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-    #         {"type": "reversal_candle", "params": {"pattern": "hammer", "min_body_pct": 0.08}},
-    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.65}},
-    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 47, "use_momentum": True, "early_threshold": 42, "hard_stop": True}},
-    #         {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
-    #         {"type": "price_vs_vwap",   "params": {}},
-    #     ],
-    #     "min_entry_indicators_required": 5,
-    #     "min_signal_confidence": 68.0,
-    # },
+    "tf_v7_no_trend_lower_rsi_keep_hammer": {
+        **_TF_NO_TREND_BASE,
+        "entry_indicators": [
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
+            {"type": "reversal_candle", "params": {"pattern": "hammer", "min_body_pct": 0.08}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.65}},
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 47, "use_momentum": True, "early_threshold": 42, "hard_stop": True}},
+            {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
+            {"type": "price_vs_vwap",   "params": {}},
+        ],
+        "min_entry_indicators_required": 5,
+        "min_signal_confidence": 68.0,
+    },
 
     # -------------------------------------------------------------------------
     # V8: Volume spike as primary gating signal
