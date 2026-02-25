@@ -108,7 +108,7 @@ def main():
     parser.add_argument("--symbol",     default="SOL_USDC",      help="Trading pair")
     parser.add_argument("--days",       type=int, default=7,     help="Lookback window in days")
     parser.add_argument("--yaml",       default="config/trading_profiles.yaml", help="Path to profiles YAML")
-    parser.add_argument("--sweep",      action="store_true",     help="Run parameter sweep", default=False)
+    parser.add_argument("--sweep",      action="store_true",     help="Run parameter sweep", default=True)
     parser.add_argument("--sweep-grid", default="tp_sl",
                         choices=["confidence_volume", "tp_sl", "trailing"],
                         help="Which parameter grid to sweep")

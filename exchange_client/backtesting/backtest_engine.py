@@ -505,6 +505,10 @@ class ReplayTrendCache:
                 jump_required      = params.get("jump_required", True)
                 min_jump           = params.get("min_jump", 5.0)
                 require_sustained  = params.get("require_sustained", True)
+                # "strict" (default): each candle must be higher than the last (consecutive rise)
+                # "net"             : current candle just needs to be above the candle 2 steps back
+                #                     — allows a dip-then-higher-high recovery shape
+                sustained_rise_mode = params.get("sustained_rise_mode", "strict")
 
                 key_str   = f"{symbol}_{timeframe}"
                 rsi_hist  = self._rsi_history.get(key_str, [])
@@ -543,19 +547,28 @@ class ReplayTrendCache:
                     sustained_rise = True
                     if require_sustained and len(rsi_hist) >= 3:
                         last3 = [r for _, r in rsi_hist[-3:]]
-                        sustained_rise = last3[1] > last3[0] and last3[2] > last3[1]
+                        if sustained_rise_mode == "net":
+                            # Allow: consecutive up-up OR dip-then-higher-high (last3[2] > last3[0])
+                            consecutive    = last3[1] > last3[0] and last3[2] > last3[1]
+                            net_higher     = last3[2] > last3[0]
+                            sustained_rise = consecutive or net_higher
+                        else:
+                            # "strict" (default): must be strictly consecutive up-up
+                            sustained_rise = last3[1] > last3[0] and last3[2] > last3[1]
 
                     is_bull = touched_oversold and jump_found and current_above_min and currently_rising
                     if require_sustained:
                         is_bull = is_bull and sustained_rise
 
                     values = {
-                        "touched_oversold": touched_oversold,
-                        "min_rsi": min_rsi_val,
-                        "jump_found": jump_found,
-                        "max_jump": max_jump,
-                        "current_rsi": current_rsi,
-                        "rsi_direction": rsi_dir,
+                        "touched_oversold":  touched_oversold,
+                        "min_rsi":           min_rsi_val,
+                        "jump_found":        jump_found,
+                        "max_jump":          max_jump,
+                        "current_rsi":       current_rsi,
+                        "rsi_direction":     rsi_dir,
+                        "sustained_rise":    sustained_rise,
+                        "sustained_mode":    sustained_rise_mode,
                     }
                     msg = f"RSI Reversal Momentum: {'✓' if is_bull else '✗'} (RSI {min_rsi_val:.0f}→{current_rsi:.0f})"
 

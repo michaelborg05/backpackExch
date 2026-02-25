@@ -31,7 +31,7 @@ profiles:
     min_volume_ratio: 1.1             # Require 10% above average volume
 
     # Trend filters
-    use_trend_filter: true
+    use_trend_filter: false
     trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
     trend_indicators:
       - type: "rsi_range"  # NEW: Ensure 60m trend is rising
@@ -45,7 +45,6 @@ profiles:
           direction: "not_falling"
           min_slope_pct: 0.01   # hourly trend must at least be flat
     min_indicators_required: 2
-
     use_entry_filter: true
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
     entry_indicators:
@@ -67,30 +66,17 @@ profiles:
       - type: "rsi_threshold"
         params:
           period: 14
-          min_value: 52
+          min_value: 54
           use_momentum: true
-          early_threshold: 48
+          early_threshold: 40
           hard_stop: true
       - type: "rsi_overbought"
         params:
-          min_value: 65
+          min_value: 70
           hard_stop: true
       - type: "price_vs_vwap"
         params: {}
-      - type: "bollinger_bands"
-        params:
-          band: "lower"
-          mode: "pct_b"
-          max_pct_b: 0.7    # Price in lower 25% of band = near lower band
-          hard_stop: true
-
-      - type: "bollinger_bands"
-        params:
-          band: "upper"
-          mode: "pct_b"
-          min_pct_b: 0.3    # Block if price already in upper 25% of band
-          hard_stop: true
-    min_entry_indicators_required: 6
+    min_entry_indicators_required: 5
 
     # ATR filter (volatility)
     use_atr_filter: false
@@ -479,7 +465,13 @@ profiles:
           mode: "pct_b"
           min_pct_b: 0.80    # Block if 60m price already in top 20% of its band
           hard_stop: true
-    min_indicators_required: 3
+      - type: "bollinger_bands"
+        params:
+          band: "lower"
+          mode: "pct_b"
+          max_pct_b: 0.20    # Block if 60m price already in top 20% of its band
+          hard_stop: true
+    min_indicators_required: 4
 
     use_entry_filter: true
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
