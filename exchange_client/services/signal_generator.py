@@ -419,6 +419,8 @@ class SignalGenerator:
             position_size_scalar, scalar_reason = self._get_bb_position_scalar(symbol, self.entry_timeframe,pct_b=pct_b)
             if position_size_scalar != 1.0:
                 reasons.append(scalar_reason)
+                position_size_scalar = 1.0
+                reasons.append("Scalar override back to 1.0")
 
         # Create signal
         signal = TradingSignal(
