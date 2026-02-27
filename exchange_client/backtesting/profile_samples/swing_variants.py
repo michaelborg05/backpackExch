@@ -180,7 +180,7 @@ SWING_VARIANTS = {
             # Raised from 0.85 → 1.10: only block if genuinely extended above band
             {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 1.10, "hard_stop": True}},
         ],
-        "min_entry_indicators_required": 3,
+        "min_entry_indicators_required": 4,
     },
 
     # -------------------------------------------------------------------------
@@ -380,7 +380,46 @@ SWING_VARIANTS = {
         ],
         "min_entry_indicators_required": 3,
     },
-}
+    "p3_base_current_profile": {
+        **_SWING_BASE,
+        "trend_indicators": [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":    5,
+                "oversold_threshold":  30,
+                "current_min":         35,
+                "min_jump":            5.0,
+                "require_sustained":   True,
+                "sustained_rise_mode": "net",
+                "hard_stop":           True,
+            }},
+            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+            {"type": "volume_spike", "params": {"min_ratio": 2.0,"max_ratio": 10.0, "hard_stop": True}},
+            {"type": "ema_slope",   "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.05}},
+],
+        "min_indicators_required": 3,
+        "entry_indicators": [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":    5,   # ~15 hours back — crosses the 4h candle boundary
+                "oversold_threshold":  35,
+                "current_min":         40,
+                "min_jump":            3.0,
+                "require_sustained":   True,
+                "sustained_rise_mode": "net",
+                "hard_stop":           True,
+            }},
+            # RSI overbought is the ONLY "too late" gate — not BB
+            {"type": "rsi_overbought", "params": {"min_value": 60, "hard_stop": True}},
+            # Price vs EMA: wide allowance for post-crash EMA elevation
+            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -2.0, "max_gap_pct": 5.0}},
+            {"type": "ema_slope",   "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.02}},
+            # Volume: soft, no hard_stop
+            {"type": "volume_spike",   "params": {"min_ratio": 1.2, "max_ratio": 5.0}},
+            # BB: lower band check only — confirms price was genuinely depressed
+            # (not a hard stop — just a confidence indicator)
+        ],
+        "min_entry_indicators_required": 4,
+    },}
+
 
 SWING_VARIANTS_OLD = {
 

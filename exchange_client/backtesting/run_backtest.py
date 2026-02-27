@@ -104,7 +104,7 @@ def run_sweep(args, profile_config: dict):
 def main():
     import sys
     parser = argparse.ArgumentParser(description="Run strategy backtests")
-    parser.add_argument("--profile",    default="15m_MB_ATR",       help="Profile name from YAML")
+    parser.add_argument("--profile",    default="profile3",       help="Profile name from YAML")
     parser.add_argument("--symbol",     default="SOL_USDC",      help="Trading pair")
     parser.add_argument("--days",       type=int, default=7,     help="Lookback window in days")
     parser.add_argument("--yaml",       default="config/trading_profiles.yaml", help="Path to profiles YAML")

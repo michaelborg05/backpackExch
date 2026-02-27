@@ -29,9 +29,9 @@ start = end - timedelta(days=args.days)
 print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
 
 VARIANT_SETS = {
-    "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]),
-    "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]),
-    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"] ),
+    #"range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]),
+    #"mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]),
+    #"trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"] ),
     "4hr_swing": (SWING_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"] ),
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
@@ -43,13 +43,13 @@ if args.csv:
     csv_path = f"{base}_backtest.csv"
     import os
     if os.path.exists(csv_path):
-        choice = input(f"File '{csv_path}' already exists. Delete and restart? (y/n): ").lower()
+    #     choice = input(f"File '{csv_path}' already exists. Delete and restart? (y/n): ").lower()
         
-        if choice == 'y':
-            os.remove(csv_path)
-            print(f"Deleted {csv_path}. Starting fresh.")
-        else:
-            print(f"Continuing. Data will be appended to {csv_path}.")
+    #     if choice == 'y':
+        os.remove(csv_path)
+        print(f"Deleted {csv_path}. Starting fresh.")
+        # else:
+        #     print(f"Continuing. Data will be appended to {csv_path}.")
 with get_db_session() as db:
     for set_name, (variants, default_symbols) in sets_to_run:
         symbols = symbols_override or default_symbols

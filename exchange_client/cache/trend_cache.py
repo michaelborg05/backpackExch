@@ -1101,7 +1101,8 @@ class TrendCache:
                 jump_required = params.get("jump_required", True)  #Requires a jump in RSI. Disabled on trend invalidation checks
                 min_jump = params.get("min_jump", 5.0)  # Must have jumped >5 points
                 require_sustained = params.get("require_sustained", True)  # Rising for multiple candles
-                
+                sustained_rise_mode = params.get("sustained_rise_mode", "strict")                
+
                 # Get RSI history
                 key = f"{symbol}_{timeframe}"
                 rsi_history = self._rsi_history.get(key, [])
@@ -1167,8 +1168,15 @@ class TrendCache:
                     if require_sustained and len(rsi_history) >= 3:
                         # Check last 3 candles show progression
                         last_3 = [rsi for _, rsi in rsi_history[-3:]]
-                        sustained_rise = (last_3[1] > last_3[0]) and (last_3[2] > last_3[1])
-                        values["sustained_rise"] = sustained_rise
+                        if sustained_rise_mode == "net":
+                            # Allow: consecutive up-up OR dip-then-higher-high (last3[2] > last3[0])
+                            consecutive    = last_3[1] > last_3[0] and last_3[2] > last_3[1]
+                            net_higher     = last_3[2] > last_3[0]
+                            sustained_rise = consecutive or net_higher
+                        else:
+                            # "strict" (default): must be strictly consecutive up-up
+                            sustained_rise = (last_3[1] > last_3[0]) and (last_3[2] > last_3[1])
+                            values["sustained_rise"] = sustained_rise
                     
                     # ALL conditions must pass
                     is_bullish = (

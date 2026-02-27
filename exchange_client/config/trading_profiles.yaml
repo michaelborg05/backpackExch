@@ -95,7 +95,7 @@ profiles:
     
     strategy_type: trend_following
 
-    take_profit_pct: 5.0        # Target 8% gains on swings
+    take_profit_pct: 6.0        # Target 8% gains on swings
     stop_loss_pct: 4.0          # 4% initial stop (wider for volatility)
     trailing_stop_pct: 3.5      # Trail with 3% buffer
     arm_trailing_stop_pct: 3.0  # Arm TSL after 4% gain
@@ -131,11 +131,12 @@ profiles:
     trend_indicators:
       - type: "rsi_reversal_momentum"
         params:
-          lookback_candles: 5        # Last 20 hours (5 x 4H)
-          oversold_threshold: 30      # Must have been <30
+          lookback_candles: 8        # Last 20 hours (5 x 4H)
+          oversold_threshold: 32      # Must have been <30
           current_min: 35             # Current must be >35
-          min_jump: 5.0               # Must have jumped >5 at some point
+          min_jump: 4.0               # Must have jumped >5 at some point
           require_sustained: true     # Must be rising for 2+ candles
+          sustained_rise_mode: "net"
           hard_stop: true             # BLOCK if fails
       
       # 2. RSI NOT OVERBOUGHT (SAFETY)
@@ -144,22 +145,8 @@ profiles:
           min_value: 65
           hard_stop: true
       
-      # 3. VOLUME SPIKE (CAPITULATION CONFIRMATION)
-      # Higher threshold - need real spike, not just elevated
-      - type: "volume_spike"
-        params:
-          min_ratio: 2.0              # Raised from 1.5 (need bigger spike)
-          max_ratio: 10.0
-      
-      # 4. EMA20 STABILIZING
-      - type: "ema_slope"
-        params:
-          ema: 20
-          direction: "not_falling"
-          min_slope_pct: 0.05
-    
     # STRICT: Need 3/4 (all except maybe EMA slope)
-    min_indicators_required: 3
+    min_indicators_required: 2
     
     # ========================================
     # 1H EXECUTION VALIDATION (via entry_indicators)
@@ -172,43 +159,44 @@ profiles:
     entry_indicators:
       - type: "rsi_reversal_momentum"
         params:
-          lookback_candles: 5        # Last 5 hours
-          oversold_threshold: 35      # Less extreme on 1H
-          current_min: 40             # Current must be >40
+          lookback_candles: 15        # Last 5 hours
+          oversold_threshold: 34      # Less extreme on 1H
+          current_min: 38             # Current must be >35
           min_jump: 3.0               # Smaller jump ok on 1H
           require_sustained: true
+          sustained_rise_mode: "net"
           hard_stop: true
       
       # 2. 1H RSI NOT TOO HOT
       # Make sure we're not chasing
       - type: "rsi_overbought"
         params:
-          min_value: 60              # Block if already >60
+          min_value: 62
           hard_stop: true
       
       # 3. PRICE VS EMA20 (LESS RESTRICTIVE)
       - type: "price_vs_ema"
         params:
           ema: 20
-          min_gap_pct: -2.0
-          max_gap_pct: 5.0
+          min_gap_pct: -10.0
+          max_gap_pct: 6.0
       
-      # 4. EMA20 STABILIZING
-      - type: "ema_slope"
-        params:
-          ema: 20
-          direction: "not_falling"
-          min_slope_pct: 0.02
-      
-      # 5. VOLUME CONFIRMATION
+      # 4. VOLUME CONFIRMATION
       - type: "volume_spike"
         params:
-          min_ratio: 1.2              # At least elevated
-          max_ratio: 5.0
-    
+          min_ratio: 1.0              # At least elevated
+          max_ratio: 8.0
+
+      - type: "bollinger_bands"
+        params:
+          band: "upper"
+          mode: "pct_b"
+          min_pct_b: 1.10    # Block if 60m price already above 1.10 of band
+          hard_stop: true
+
     # Need 4/5 (all except maybe one)
     min_entry_indicators_required: 4
-    
+        
     use_atr_filter: false
     use_trend_invalidation_exit: true
     trend_invalidation_indicators: entry
