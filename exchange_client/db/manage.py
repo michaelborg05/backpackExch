@@ -383,10 +383,17 @@ def populate_default_settings():
                 'cooldown_default_mins': '15',      # default cooldown
                 'mean_rever_rsi_inval_threshold': '36',  # default cooldown after take profit
                 'mean_rever_rsi_lookback_candles': '35',    # default cooldown after stop loss
+                'alert_trend_max_age': '1200',      # max age for trend cache before i raise an alert - in seconds
+                'alert_price_max_age': '300',       #  max age for price cache before i raise an alert - in seconds
+                'alert_re_alert_cooldown': '900',   # time between raising the same alert
+                'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
             }
             new_settings = {
-                'mean_rever_rsi_inval_threshold': '36',  # default cooldown after take profit
-                'mean_rever_rsi_lookback_candles': '2',    # default cooldown after stop loss
+                'alert_trend_max_age': '1200',      # max age for trend cache before i raise an alert - in seconds
+                'alert_price_max_age': '300',       #  max age for price cache before i raise an alert - in seconds
+                'alert_re_alert_cooldown': '900',   # time between raising the same alert
+                'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
+                'alert_healthcheck_interval': '60', # interval between performing health/alert checks
 
             }
             created = initialize_default_settings(db, default_settings=new_settings)

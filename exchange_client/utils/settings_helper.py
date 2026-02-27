@@ -160,13 +160,38 @@ class SettingsHelper:
 
     @property
     def mean_rever_rsi_inval_threshold(self) -> int:
-        """cooldown in minutes for same symbol"""
+        """RSI invalidation threshold for mean reversion profiles """
         return self._get_int('mean_rever_rsi_inval_threshold', 36)
 
     @property
     def mean_rever_rsi_lookback_candles(self) -> int:
-        """cooldown in minutes for same symbol"""
+        """rsi lookback candle amount for mean reversion profile"""
         return self._get_int('mean_rever_rsi_lookback_candles', 2)
+
+    @property
+    def alert_trend_max_age(self) -> int:
+        """trend cache max age to raise an alert"""
+        return self._get_int('alert_trend_max_age', 1200)
+
+    @property
+    def alert_price_max_age(self) -> int:
+        """price cache max age to raise an alert"""
+        return self._get_int('alert_price_max_age', 120)
+
+    @property
+    def alert_re_alert_cooldown(self) -> int:
+        """cooldown in seconds before raising next alert """
+        return self._get_int('alert_re_alert_cooldown', 900)
+    
+    @property
+    def alert_startup_grace_period(self) -> int:
+        """grace period in seconds before triggering health checks """
+        return self._get_int('alert_startup_grace_period', 120)
+
+    @property
+    def alert_healthcheck_interval(self) -> int:
+        """interval between performing health/alert checks """
+        return self._get_int('alert_healthcheck_interval', 60)
 
     def get_custom(self, setting_name: str, default: Any = None) -> Any:
         """

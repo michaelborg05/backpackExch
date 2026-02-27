@@ -19,7 +19,8 @@ post_tp_reentry_rules:
   time_window_seconds: 10800
   require_price_below_previous_high: true  # Must enter BELOW previous TP high
   min_volume_ratio_override: 1.5  # Higher volume requirement
-
+#ability to add a deposit/withdrawal in the system to update snapshotdata and not let it trigger a circuit breaker
+#raise alert if no trend data received in 10mins
 
 No need
  # split into separate modules so i can migrate to Azure
