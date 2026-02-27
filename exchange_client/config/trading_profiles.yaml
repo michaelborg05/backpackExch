@@ -191,7 +191,7 @@ profiles:
         params:
           band: "upper"
           mode: "pct_b"
-          min_pct_b: 1.10    # Block if 60m price already above 1.10 of band
+          max_pct_b: 1.10    # Block if 60m price already above 1.10 of band
           hard_stop: true
 
     # Need 4/5 (all except maybe one)
@@ -371,6 +371,7 @@ profiles:
         params:
           band: "lower"
           mode: "pct_b"
+          min_pct_b: 0.05       # Don't buy below bottom band
           max_pct_b: 0.65       # Don't buy near top of band
       - type: "rsi_threshold"
         params:
@@ -450,17 +451,11 @@ profiles:
       #    pct_b > 0.80 on the 60m = price in top 20% of HTF band = caution.
       - type: "bollinger_bands"
         params:
-          band: "upper"
-          mode: "pct_b"
-          min_pct_b: 0.80    # Block if 60m price already in top 20% of its band
-          hard_stop: true
-      - type: "bollinger_bands"
-        params:
           band: "lower"
           mode: "pct_b"
-          max_pct_b: 0.40    # Block if 60m price already in top 20% of its band
+          max_pct_b: 0.80    # Block if 60m price already in top 20% of its band
           hard_stop: true
-    min_indicators_required: 4
+    min_indicators_required: 3
 
     use_entry_filter: true
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
@@ -484,7 +479,8 @@ profiles:
         params:
           band: "lower"
           mode: "pct_b"
-          max_pct_b: 0.30    # Price in lower 30% of the band
+          min_pct_b: 0.05    # Price in lower 30% of the band
+          max_pct_b: 0.35    # Price in lower 30% of the band
 
       - type: "volume_spike"
         params:

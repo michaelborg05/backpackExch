@@ -797,25 +797,29 @@ class TrendCache:
                 Check price position relative to Bollinger Bands.
 
                 Modes:
-                  "touch"   — price is within tolerance_pct of a band edge
-                  "breach"  — price has crossed outside a band
-                  "pct_b"   — price position within the band as 0.0–1.0
+                  "touch" — price is within tolerance_pct of a band edge
+                  "breach" — price has crossed outside a band
+                  "pct_b" — price position within the band as 0.0–1.0
                               0.0 = at lower band, 1.0 = at upper band
                               Best mode for range trading entry timing
 
                 params: {
-                    band:          "lower" | "upper"   default "lower"
-                    mode:          "touch" | "breach" | "pct_b"   default "touch"
-                    tolerance_pct: 0.5     # for "touch" mode: within 0.5% of band
-                    max_pct_b:     0.25    # for "pct_b" mode: price in lower 25% of band
-                    min_pct_b:     0.75    # for "pct_b" mode (upper band): price in upper 25%
+                    band: "lower" | "upper" default "lower"
+                    mode: "touch" | "breach" | "pct_b" default "touch"
+                    tolerance_pct: 0.5 # for "touch" mode: within 0.5% of band
+                    # pct_b mode — both params apply to both bands as an inclusive range:
+                    # min_pct_b: %B >= this (exclude breaches, e.g. 0.10 blocks price below lower band)
+                    # max_pct_b: %B <= this (upper limit, e.g. 0.35 for lower entry, 0.75 for upper avoid)
+                    # Omit min_pct_b (or set to null) to allow breached values (<0.0) to also pass.
+                    min_pct_b: null # no lower bound by default
+                    max_pct_b: 0.25 # %B must be at or below this
                 }
                 """
-                band          = params.get("band", "lower")
-                mode          = params.get("mode", "touch")
+                band = params.get("band", "lower")
+                mode = params.get("mode", "touch")
                 tolerance_pct = params.get("tolerance_pct", 0.5)
-                max_pct_b     = params.get("max_pct_b", 0.25)   # for pct_b lower mode
-                min_pct_b     = params.get("min_pct_b", 0.75)   # for pct_b upper mode
+                max_pct_b = params.get("max_pct_b", 0.25)
+                min_pct_b = params.get("min_pct_b", None) # None = no lower bound
                 lookback_candles = params.get("lookback_candles", 0)
 
                 if trend.bb is None:
@@ -843,22 +847,28 @@ class TrendCache:
                         values["bb_width"] = round(bb_width_norm, 5) if bb_width_norm is not None else None
 
                         if mode == "pct_b":
-                            # Most useful for range trading — where in the band is price?
+                            # Range check: is %B within [min_pct_b, max_pct_b]?
+                            # Works identically for band="lower" and band="upper" —
+                            # the YAML params define the window, not the band direction.
+                            # min_pct_b: optional lower bound (exclude breaches below band)
+                            # max_pct_b: upper bound (%B must not exceed this)
                             if pct_b is None:
                                 is_bullish = False
                                 msg = "BB %B: ✗ (band width is zero)"
-                            elif band == "lower":
-                                # Bullish = price in lower portion of band (near lower band)
-                                is_bullish = pct_b <= max_pct_b
+                            else:
+                                below_max = pct_b <= max_pct_b
+                                above_min = (min_pct_b is None) or (pct_b >= min_pct_b)
+                                is_bullish = below_max and above_min
+
+                                # Build readable range string for the log message
+                                if min_pct_b is not None:
+                                    range_str = f"need {min_pct_b:.2f}–{max_pct_b:.2f}"
+                                else:
+                                    range_str = f"need <={max_pct_b:.2f}"
+
                                 msg = (
-                                    f"BB %B lower: {'✓' if is_bullish else '✗'} "
-                                    f"(%B={pct_b:.2f} - need <={max_pct_b:.2f})"
-                                )
-                            else:  # upper — avoid entries near top of band
-                                is_bullish = pct_b < min_pct_b
-                                msg = (
-                                    f"BB %B upper check: {'✓' if is_bullish else '✗'} "
-                                    f"(%B={pct_b:.2f} - need <{min_pct_b:.2f})"
+                                    f"BB %B ({band}): {'✓' if is_bullish else '✗'} "
+                                    f"(%B={pct_b:.2f} - {range_str})"
                                 )
 
                         elif mode == "touch":
