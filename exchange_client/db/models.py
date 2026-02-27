@@ -13,7 +13,8 @@ class TradingProfileDB(Base):
     __tablename__ = "trading_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False, index=True)
+    profile_name = Column(String, unique=True, nullable=False, index=True)
+    display_name = Column(String, unique=True, nullable=False, index=True)
     api_key = Column(String, nullable=False)
     secret = Column(String, nullable=False)
     

@@ -590,19 +590,26 @@ class SignalGenerator:
         
         # Start with base score from passing indicators
         bonus_points = 0.0
-        max_bonus = 25.0  # Can add up to 25 points beyond base
+        max_bonus = 30.0  # Can add up to 25 points beyond base
         
-        # FACTOR 1: RSI Oversold Depth (max +10 points)
-        # Deeper oversold = higher probability of bounce
+        # FACTOR 1: RSI Oversold Depth via lookback (max +10 points)
+        # Check how low RSI dipped in the last 8 candles, not just current RSI.
+        # This is critical: entry indicators require RSI to have ALREADY recovered
+        # above ~38 before they pass, so scoring current RSI against oversold
+        # thresholds would always give 0 points. We reward the depth of the dip
+        # that preceded the reversal, which is a better quality signal anyway.
         rsi = trend.rsi
-        if rsi < 20:
-            bonus_points += 10.0  # Extreme oversold
-        elif rsi < 25:
-            bonus_points += 8.0   # Very oversold
-        elif rsi < 30:
-            bonus_points += 6.0   # Oversold
-        elif rsi < 35:
-            bonus_points += 4.0   # Slightly oversold
+        rsi_min = self.trend_cache._get_rsi_min(symbol, timeframe, lookback=5)
+        rsi_low = rsi_min if rsi_min is not None else rsi  # fall back to current if no history
+        
+        if rsi_low < 20:
+            bonus_points += 10.0  # Extreme oversold dip
+        elif rsi_low < 25:
+            bonus_points += 8.0   # Very oversold dip
+        elif rsi_low < 30:
+            bonus_points += 6.0   # Oversold dip
+        elif rsi_low < 35:
+            bonus_points += 4.0   # Slightly oversold dip
         
         # FACTOR 2: Volume Spike Magnitude (max +8 points)
         # Higher volume = more conviction in selling climax
@@ -643,21 +650,36 @@ class SignalGenerator:
         elif ema20_gap_pct < -1.0:
             bonus_points += 1.0   # Slight
         
-        # FACTOR 5: RSI Momentum Turning (max +5 points)
-        # Strong upward reversal = higher confidence
-        rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
-            symbol, timeframe
-        )
-        
-        if rsi_momentum is not None and rsi_direction == "increasing":
-            if rsi_momentum >= 5.0:
-                bonus_points += 5.0   # Strong reversal
-            elif rsi_momentum >= 3.0:
-                bonus_points += 4.0   # Good reversal
-            elif rsi_momentum >= 2.0:
-                bonus_points += 3.0   # Moderate reversal
-            elif rsi_momentum >= 1.0:
-                bonus_points += 2.0   # Slight reversal
+        # FACTOR 5: RSI Recovery Magnitude from trough (max +5 points)
+        # Measures how far RSI has bounced from its lookback low.
+        # A large recovery (+10 points from trough) is a stronger signal than
+        # a gentle uptick, and this correctly rewards the 18:48 scenario where
+        # RSI went 32→43 (+10.3 jump) even though current RSI is now "too high"
+        # to score on Factor 1.
+        if rsi_min is not None:
+            rsi_recovery = rsi - rsi_min  # current RSI minus lookback low
+            if rsi_recovery >= 10.0:
+                bonus_points += 5.0   # Strong recovery from trough
+            elif rsi_recovery >= 7.0:
+                bonus_points += 4.0
+            elif rsi_recovery >= 5.0:
+                bonus_points += 3.0
+            elif rsi_recovery >= 3.0:
+                bonus_points += 2.0
+        else:
+            # No lookback history — fall back to momentum direction only
+            rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
+                symbol, timeframe
+            )
+            if rsi_momentum is not None and rsi_direction == "increasing":
+                if rsi_momentum >= 5.0:
+                    bonus_points += 5.0
+                elif rsi_momentum >= 3.0:
+                    bonus_points += 4.0
+                elif rsi_momentum >= 2.0:
+                    bonus_points += 3.0
+                elif rsi_momentum >= 1.0:
+                    bonus_points += 2.0
         
         # Cap bonus at max_bonus
         bonus_points = min(bonus_points, max_bonus)
@@ -671,7 +693,7 @@ class SignalGenerator:
             f"{symbol} Mean Reversion Confidence: "
             f"Base {base_score:.1f} + Bonus {bonus_points:.1f} = "
             f"{total_score:.1f}/{max_score + max_bonus:.1f} = {confidence_pct:.1f}% "
-            f"(RSI:{rsi:.1f}, Vol:{trend.volume_ratio:.1f}x, "
+            f"(RSI:{rsi:.1f}, RSI_low:{rsi_low:.1f}, Vol:{trend.volume_ratio:.1f}x, "
             f"VWAP:{vwap_gap_pct:+.1f}%, EMA20:{ema20_gap_pct:+.1f}%)"
         )
         

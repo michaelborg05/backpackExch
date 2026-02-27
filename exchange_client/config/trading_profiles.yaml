@@ -287,6 +287,7 @@ profiles:
         params:
           band: "lower"
           mode: "breach"
+          lookback_candles: 6        # Last X candles
       
       # 6. NOT overbought on higher timeframe (sanity check)
       - type: "rsi_overbought"

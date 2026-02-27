@@ -73,6 +73,7 @@ class ReplayTrendCache:
         self._cache: Dict[str, Any] = {}          # key → TrendData
         self._rsi_history: Dict[str, list] = {}   # key → [(ts, rsi), ...]
         self._ema_history: Dict[str, list] = {}   # key → [{ts, ema20, ema50}, ...]
+        self._bb_history: Dict[str, list] = {}
 
     # ------------------------------------------------------------------
     # Feed one row into the cache (called by engine in timestamp order)
@@ -95,8 +96,8 @@ class ReplayTrendCache:
             # RSI history
             hist = self._rsi_history.setdefault(key, [])
             hist.append((trend_data.timestamp, trend_data.rsi))
-            if len(hist) > 10:          # keep more history for rsi_reversal_momentum
-                self._rsi_history[key] = hist[-10:]
+            if len(hist) > 15:          # keep more history for rsi_reversal_momentum
+                self._rsi_history[key] = hist[-15:]
 
             # EMA history
             ehist = self._ema_history.setdefault(key, [])
@@ -108,6 +109,19 @@ class ReplayTrendCache:
             if len(ehist) > 5:
                 self._ema_history[key] = ehist[-5:]
 
+            # Update BB history for lookback breach checks
+            if trend_data.bb is not None and trend_data.bb.bb_lower is not None:
+                bbhist = self._bb_history.setdefault(key, [])
+                bbhist.append({
+                    'timestamp': trend_data.timestamp,
+                    'bb_lower':  trend_data.bb.bb_lower,
+                    'bb_upper':  trend_data.bb.bb_upper,
+                    'bb_basis':  trend_data.bb.bb_basis,
+                    'price':     trend_data.prev_candle.prev_close,   # close price at this candle
+                })
+                if len(bbhist) > 15:          # keep more history for rsi_reversal_momentum
+                    self._bb_history[key] = bbhist[-15:]
+                            
         return indicators_changed
 
     # ------------------------------------------------------------------
@@ -406,6 +420,7 @@ class ReplayTrendCache:
                 tolerance_pct = params.get("tolerance_pct", 0.5)
                 max_pct_b     = params.get("max_pct_b", 0.25)
                 min_pct_b     = params.get("min_pct_b", 0.75)
+                lookback_candles = params.get("lookback_candles", 0)
 
                 if trend.bb is None or trend.bb.bb_upper is None or trend.bb.bb_lower is None:
                     is_bull = False
@@ -435,12 +450,49 @@ class ReplayTrendCache:
                         is_bull = dist_pct <= tolerance_pct
                         msg = f"BB {band} touch: {'✓' if is_bull else '✗'} ({dist_pct:.2f}% from band)"
                     else:  # breach
-                        if band == "lower":
+                        if lookback_candles > 0:
+                            # Lookback mode: did price breach the band in the last N candles?
+                            bb_key = f"{symbol}_{timeframe}"
+                            bb_hist = self._bb_history.get(bb_key, [])
+                            window = bb_hist[-lookback_candles:] if bb_hist else []
+                            
+                            values["lookback_candles"] = lookback_candles
+                            values["history_candles"] = len(window)
+                            
+                            if not window:
+                                is_bullish = False
+                                msg = (
+                                    f"BB {band} breach (lookback {lookback_candles}): ✗ "
+                                    f"(no BB history yet)"
+                                )
+                            elif band == "lower":
+                                breached = any(entry['price'] <= entry['bb_lower'] for entry in window)
+                                is_bullish = breached
+                                msg = (
+                                    f"BB lower breach (lookback {lookback_candles}): "
+                                    f"{'✓' if is_bullish else '✗'} "
+                                    f"({'breach found' if breached else 'no breach'} "
+                                    f"in last {len(window)} candles)"
+                                )
+                            else:  # upper
+                                breached = any(entry['price'] >= entry['bb_upper'] for entry in window)
+                                is_bullish = breached
+                                msg = (
+                                    f"BB upper breach (lookback {lookback_candles}): "
+                                    f"{'✓' if is_bullish else '✗'} "
+                                    f"({'breach found' if breached else 'no breach'} "
+                                    f"in last {len(window)} candles)"
+                                )
+                        elif band == "lower":
                             is_bull = current_price <= bb_lower
                             msg = f"BB lower breach: {'✓' if is_bull else '✗'}"
                         else:
                             is_bull = current_price < bb_upper
                             msg = f"BB upper breach: {'✓' if is_bull else '✗'}"
+
+
+
+
 
             elif indicator_type == "volume_spike":
                 min_ratio = params.get("min_ratio", 1.5)

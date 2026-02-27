@@ -29,6 +29,9 @@ class TrendCache:
         # EMA history for slope calculation (only updated when EMAs change)
         self._ema_history: Dict[str, list] = {}
         
+        # BB history for lookback breach checks (updated when indicators change)
+        self._bb_history: Dict[str, list] = {}
+        
         # Track statistics
         self._stats = {
             'total_updates': 0,
@@ -96,6 +99,24 @@ class TrendCache:
             # Keep last 3 significant changes for slope (need 2-3 points)
             if len(self._ema_history[key]) > 3:
                 self._ema_history[key] = self._ema_history[key][-3:]
+            
+            # Update BB history for lookback breach checks
+            if trend_data.bb is not None and trend_data.bb.bb_lower is not None:
+                if key not in self._bb_history:
+                    self._bb_history[key] = []
+                
+                close_price = trend_data.prev_candle.prev_close if trend_data.prev_candle.prev_close else trend_data.price
+                self._bb_history[key].append({
+                    'timestamp': trend_data.timestamp,
+                    'bb_lower':  trend_data.bb.bb_lower,
+                    'bb_upper':  trend_data.bb.bb_upper,
+                    'bb_basis':  trend_data.bb.bb_basis,
+                    'price':     close_price,   # close price at this candle
+                })
+                
+                # Keep last 15 candles (matches RSI history cap)
+                if len(self._bb_history[key]) > 15:
+                    self._bb_history[key] = self._bb_history[key][-15:]
             
             # Persist to database if enabled
             if persist_to_db:
@@ -280,6 +301,33 @@ class TrendCache:
         
         return avg_momentum, direction
     
+    def _get_rsi_min(self, symbol: str, timeframe: str, lookback: int = 8) -> Optional[float]:
+        """
+        Return the lowest RSI seen in the last N significant candles.
+        
+        Used by _mean_reversion_confidence_score to reward setups where RSI
+        dipped deeply even if it has since recovered (which is required for
+        entry indicators to pass).
+        
+        Args:
+            symbol:   Trading symbol
+            timeframe: Timeframe key
+            lookback: Number of historical entries to scan (default 8 candles)
+            
+        Returns:
+            Minimum RSI value found, or None if insufficient history
+        """
+        key = f"{symbol}_{timeframe}"
+        history = self._rsi_history.get(key, [])
+        
+        if not history:
+            return None
+        
+        # Scan whichever is smaller: available history or requested lookback
+        window = history[-lookback:]
+        rsi_values = [rsi for _, rsi in window]
+        return min(rsi_values) if rsi_values else None
+
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
         """Get cached trend data if available and not stale"""
         key = f"{symbol}_{timeframe}"
@@ -768,6 +816,7 @@ class TrendCache:
                 tolerance_pct = params.get("tolerance_pct", 0.5)
                 max_pct_b     = params.get("max_pct_b", 0.25)   # for pct_b lower mode
                 min_pct_b     = params.get("min_pct_b", 0.75)   # for pct_b upper mode
+                lookback_candles = params.get("lookback_candles", 0)
 
                 if trend.bb is None:
                     is_bullish = False
@@ -824,7 +873,41 @@ class TrendCache:
                             )
 
                         else:  # "breach"
-                            if band == "lower":
+                            
+                            if lookback_candles > 0:
+                                # Lookback mode: did price breach the band in the last N candles?
+                                bb_key = f"{symbol}_{timeframe}"
+                                bb_hist = self._bb_history.get(bb_key, [])
+                                window = bb_hist[-lookback_candles:] if bb_hist else []
+                                
+                                values["lookback_candles"] = lookback_candles
+                                values["history_candles"] = len(window)
+                                
+                                if not window:
+                                    is_bullish = False
+                                    msg = (
+                                        f"BB {band} breach (lookback {lookback_candles}): ✗ "
+                                        f"(no BB history yet)"
+                                    )
+                                elif band == "lower":
+                                    breached = any(entry['price'] <= entry['bb_lower'] for entry in window)
+                                    is_bullish = breached
+                                    msg = (
+                                        f"BB lower breach (lookback {lookback_candles}): "
+                                        f"{'✓' if is_bullish else '✗'} "
+                                        f"({'breach found' if breached else 'no breach'} "
+                                        f"in last {len(window)} candles)"
+                                    )
+                                else:  # upper
+                                    breached = any(entry['price'] >= entry['bb_upper'] for entry in window)
+                                    is_bullish = breached
+                                    msg = (
+                                        f"BB upper breach (lookback {lookback_candles}): "
+                                        f"{'✓' if is_bullish else '✗'} "
+                                        f"({'breach found' if breached else 'no breach'} "
+                                        f"in last {len(window)} candles)"
+                                    )
+                            elif band == "lower":
                                 is_bullish = current_price <= bb_lower
                                 gap_pct = ((current_price - bb_lower) / bb_lower) * 100
                                 values["gap_pct"] = round(gap_pct, 4)
