@@ -406,7 +406,7 @@ profiles:
     strategy_type: range_trading
 
     take_profit_pct: 0.6
-    stop_loss_pct: 0.45
+    stop_loss_pct: 0.5
     trailing_stop_pct: 0.3
     arm_trailing_stop_pct: 0.25
     use_trailing_stop: true
