@@ -418,8 +418,8 @@ class ReplayTrendCache:
                 band          = params.get("band", "lower")
                 mode          = params.get("mode", "touch")
                 tolerance_pct = params.get("tolerance_pct", 0.5)
-                max_pct_b     = params.get("max_pct_b", 0.25)
-                min_pct_b     = params.get("min_pct_b", 0.75)
+                max_pct_b     = params.get("max_pct_b", 0.75)
+                min_pct_b     = params.get("min_pct_b", None)
                 lookback_candles = params.get("lookback_candles", 0)
 
                 if trend.bb is None or trend.bb.bb_upper is None or trend.bb.bb_lower is None:
@@ -437,12 +437,22 @@ class ReplayTrendCache:
                     if mode == "pct_b":
                         if pct_b is None:
                             is_bull, msg = False, "BB %B: ✗ (zero band width)"
-                        elif band == "lower":
-                            is_bull = pct_b <= max_pct_b
-                            msg = f"BB %B lower: {'✓' if is_bull else '✗'} (%B={pct_b:.2f}<={max_pct_b:.2f})"
                         else:
-                            is_bull = pct_b < min_pct_b
-                            msg = f"BB %B upper: {'✓' if is_bull else '✗'} (%B={pct_b:.2f}<{min_pct_b:.2f})"
+                            below_max = pct_b <= max_pct_b
+                            above_min = (min_pct_b is None) or (pct_b >= min_pct_b)
+                            is_bull = below_max and above_min
+
+                            # Build readable range string for the log message
+                            if min_pct_b is not None:
+                                range_str = f"need {min_pct_b:.2f}–{max_pct_b:.2f}"
+                            else:
+                                range_str = f"need <={max_pct_b:.2f}"
+
+                            msg = (
+                                f"BB %B ({band}): {'✓' if is_bull else '✗'} "
+                                f"(%B={pct_b:.2f} - {range_str})"
+                            )
+
                     elif mode == "touch":
                         target   = bb_lower if band == "lower" else bb_upper
                         dist_pct = abs((current_price - target) / target) * 100 if target else 0

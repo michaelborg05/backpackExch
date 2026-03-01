@@ -26,16 +26,16 @@ _RANGE_BASE = {
     # Trend filter (60m)
     "trend_indicators": [
         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-        {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 40, "use_momentum": False}},
+        {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-        {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "hard_stop": True}},
+        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
     ],
     "min_indicators_required": 3,
     # Entry filter (15m)
     "entry_indicators": [
         {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
         {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0}},
-        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.30}},
+        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.05, "max_pct_b": 0.35}},
         {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 4.0}},
         {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
         {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
@@ -63,7 +63,7 @@ RANGE_VARIANTS = {
             {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
             {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": False, "hard_stop": True}},  # raised+hardstop
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
         ],
         "min_indicators_required": 3,
     },
@@ -80,9 +80,7 @@ RANGE_VARIANTS = {
             {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
             {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 40, "use_momentum": False}},
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "hard_stop": True}},
-            # NEW: block if HTF is near its own lower band (downtrend on HTF)
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.20, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.20,"max_pct_b": 0.80, "hard_stop": True}},
         ],
         "min_indicators_required": 3,  # still 3/5, but the new BB lower hard_stop blocks downtrends
     },
@@ -159,8 +157,7 @@ RANGE_VARIANTS = {
             {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
             {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": False, "hard_stop": True}},
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.20, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.20, "max_pct_b": 0.80, "hard_stop": True}},
         ],
         "min_indicators_required": 3,
         "entry_indicators": [
