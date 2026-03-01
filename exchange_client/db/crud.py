@@ -454,24 +454,12 @@ def get_all_profiles(db: Session) -> list[TradingProfileDB]:
         TradingProfileDB.is_active == True
     ).all()
 
-def create_profile(db: Session, profile: TradingProfile) -> TradingProfileDB:
+def create_profile(db: Session, profile: TradingProfileDB) -> TradingProfileDB:
     """Create a new trading profile"""
-    db_profile = TradingProfileDB(
-        name=profile.name,
-        api_key=profile.api_key,
-        secret=profile.secret,
-        take_profit_pct=profile.take_profit_pct,
-        stop_loss_pct=profile.stop_loss_pct,
-        trailing_stop_pct=profile.trailing_stop_pct,
-        use_trailing_stop=profile.use_trailing_stop,
-        max_risk_pct=profile.max_risk_pct,
-        default_order_size_pct=profile.default_order_size_pct,
-        max_position_size=profile.max_position_size
-    )
-    db.add(db_profile)
+    db.add(profile)
     db.commit()
-    db.refresh(db_profile)
-    return db_profile
+    db.refresh(profile)
+    return profile
 
 def update_profile(db: Session, name: str, profile: TradingProfile) -> TradingProfileDB:
     """Update an existing profile"""
@@ -497,22 +485,31 @@ def delete_profile(db: Session, name: str) -> bool:
     db.commit()
     return True
 
-def db_profile_to_pydantic(db_profile: TradingProfileDB) -> TradingProfile:
-    """Convert database profile to Pydantic model"""
-    return TradingProfile(
-        name=db_profile.name,
-        api_key=db_profile.api_key,
-        secret=db_profile.secret,
-        take_profit_pct=db_profile.take_profit_pct,
-        stop_loss_pct=db_profile.stop_loss_pct,
-        trailing_stop_pct=db_profile.trailing_stop_pct,
-        use_trailing_stop=db_profile.use_trailing_stop,
-        max_risk_pct=db_profile.max_risk_pct,
-        default_order_size_pct=db_profile.default_order_size_pct,
-        max_position_size=db_profile.max_position_size
-    )
+# def db_profile_to_pydantic(db_profile: TradingProfileDB) -> TradingProfile:
+#     """Convert database profile to Pydantic model"""
+#     return TradingProfile(
+#         name=db_profile.name,
+#         display_name=,
+#         api_key=db_profile.api_key,
+#         secret=db_profile.secret,
+#         #strategy_type=,
+#         #use_market_regime_filter=,
+#         take_profit_pct=db_profile.take_profit_pct,
+#         stop_loss_pct=db_profile.stop_loss_pct,
+#         #arm_trailing_stop_pct=,
+#         trailing_stop_pct=db_profile.trailing_stop_pct,
+#         use_trailing_stop=db_profile.use_trailing_stop,
+#         max_risk_pct=db_profile.max_risk_pct,
+#         max_position_size=db_profile.max_position_size,
+#         default_order_size_pct=db_profile.default_order_size_pct,
+#         #use_trend_filter=,
+#         #trend_timeframe=,
+#         trend_indicators=,
+#         min_indicators_required,
 
-
+#     )
+    
+   
 def get_circuit_breaker_config(
     db: Session, 
     profile_name: str

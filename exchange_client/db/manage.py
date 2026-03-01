@@ -8,11 +8,10 @@ sys.path.insert(0, str(project_root))
 
 from db.models import Trade, Position
 from db.session import engine,SessionLocal
-from db.models import Base
+from db.models import Base,TradingProfileDB
 from utils.logging import log_manager
 import yaml
 from db.crud import create_profile, create_daily_snapshot
-from models.trading_profile import TradingProfile
 from db.utils import get_db_session
 from db.crud_settings import initialize_default_settings, bulk_upsert_settings
 from utils.logging import log_manager
@@ -96,41 +95,89 @@ def load_dummy_data():
         finally:
             db.close()
 
+def setup_appusers():
+    from db.session import SessionLocal
+    from db.auth_crud import create_user, assign_profile
+    db = SessionLocal()
+    user = create_user(db, "michael", "&91z5d!R^lSLB@55", role="admin")
+    assign_profile(db, user.id, "default")
+    assign_profile(db, user.id, "profile3")
+    assign_profile(db, user.id, "15m_MB_ATR")
+    assign_profile(db, user.id, "15m_no_trend")
+    assign_profile(db, user.id, "15m_MB")
+
 def migrate_yaml_profiles():
+
+    from db.session import SessionLocal
+    from db.models import TradingProfileDB
+    from utils.secrets import encrypt_secret, is_encrypted
+
     """One-time migration: Load profiles from YAML into database"""
-    yaml_path = Path(__file__).parent / "config/trading_profiles.yaml"
+    yaml_path = Path(__file__).parent.parent / "config/trading_profiles.yaml"
     
     if not yaml_path.exists():
-        print("✗ trading_profiles.yaml not found")
+        print(f"✗ trading_profiles.yaml not found in path {yaml_path}")
         return
     
+    if not os.environ.get("DB_ENCRYPTION_KEY"):
+        print(
+            "ERROR: DB_ENCRYPTION_KEY is not set.\n"
+            "Generate one with:\n"
+            "  python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\"",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
     
     db = SessionLocal()
     try:
         for name, config in data.get("profiles", {}).items():
-            # Get credentials from environment
-            api_key = os.getenv(config["api_key_env"])
-            secret = os.getenv(config["secret_env"])
-            
-            if not api_key or not secret:
-                print(f"✗ Skipping {name}: missing environment variables")
+            raw_key = os.getenv((config.get("api_key_env") )) 
+            raw_secret = os.getenv((config.get("secret_env") )) 
+            if not raw_key or not raw_secret:
+                print(f"  SKIP  {name} — missing api_key or secret")
+                skipped += 1
                 continue
-            
-            profile = TradingProfile(
+							
+            # Encrypt only if not already encrypted (idempotent)
+            enc_key    = raw_key    if is_encrypted(raw_key)    else encrypt_secret(raw_key)
+            enc_secret = raw_secret if is_encrypted(raw_secret) else encrypt_secret(raw_secret)
+
+            # Get credentials from environment
+            profile = TradingProfileDB(
                 name=name,
-                api_key=api_key,
-                secret=secret,
+                display_name=str(config.get("display_name", name)),
+                api_key=enc_key,
+                secret=enc_secret,
+                take_profit_pct=Decimal(str(config.get("take_profit_pct", 0.5))),
+                stop_loss_pct=Decimal(str(config.get("stop_loss_pct", 0.5))),
+                trailing_stop_pct=Decimal(str(config.get("trailing_stop_pct", 0.25))),
+                arm_trailing_stop_pct=Decimal(str(config.get("arm_trailing_stop_pct", 0.25))),
+                use_trailing_stop=bool(str(config.get("use_trailing_stop", False))),
+
                 max_risk_pct=Decimal(str(config.get("max_risk_pct", 0.25))),
-                default_order_size_pct=Decimal(str(config.get("default_order_size_pct", 5)))
+                default_order_size_usdc=Decimal(str(config.get("default_order_size_usdc", 100))),
+                max_position_size_pct=Decimal(str(config.get("max_position_size_pct", 40))),
+                max_open_positions=Decimal(str(config.get("max_open_positions", 1))),
+                max_portfolio_exposure_pct=Decimal(str(config.get("max_portfolio_exposure_pct", 80))),
+
+                is_active=bool(str(config.get("enabled", True))),
+
             )
-            
+
             try:
                 create_profile(db, profile)
                 print(f"✓ Migrated profile: {name}")
             except Exception as e:
                 print(f"✗ Failed to migrate {name}: {e}")
+
+            # Show last 6 chars of encrypted token as a sanity hint
+            hint = enc_key[-6:]
+            print(f"  {name!r:20}  key=...{hint}")
+
+
         
     finally:
         db.close()
@@ -435,6 +482,7 @@ commands = {
     "setup-symbols": setup_symbol_configs,
     "add-profile": add_new_profile,
     "populate-settings": populate_default_settings,
+    "create-appuser" : setup_appusers
 }
 
 if __name__ == "__main__":
@@ -452,6 +500,8 @@ if __name__ == "__main__":
          print("  setup-symbols - Set up symbol-specific configurations")
          print("  add-profile - Add a new trading profile")
          print("  populate-settings - Populate default settings in settings table")
+         print("  create-appuser - Create new user for UI")
+         
          sys.exit(1)
     
     command = sys.argv[1]

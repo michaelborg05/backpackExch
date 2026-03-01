@@ -36,6 +36,9 @@ from utils.security import (
 from db.session import SessionLocal 
 from decimal import Decimal
 from time import time
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from services.dashboard_auth import auth_router, get_dashboard_user
 
 db = SessionLocal()
 config = Config()
@@ -804,13 +807,13 @@ async def tradingview_webhook(
 def get_portfolio(profile_name: str, quote_asset: str = "USDC"):
     """Get complete portfolio with values"""
     portfolio = get_portfolio_cache()
-    return portfolio.get_portfolio_summary(quote_asset, profile_name=profile_name)
+    return portfolio.get_portfolio_summary(profile_name=profile_name, quote_asset=quote_asset)
 
 @app.get("/portfolio/{profile_name}/total", dependencies=[Depends(require_read_permission)])
 def get_total_portfolio_value(profile_name: str, quote_asset: str = "USDC"):
     """Get total portfolio value"""
     portfolio = get_portfolio_cache()
-    total = portfolio.get_total_value(quote_asset, profile_name=profile_name)
+    total = portfolio.get_total_value(profile_name=profile_name,quote_asset=quote_asset)
 
     return {
         "total_value": str(total),
@@ -1366,3 +1369,12 @@ async def test_position_sizing(profile_name: str, symbol: str):
     except Exception as e:
         apiserver_logger.error(f"Error testing position sizing: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+app.include_router(auth_router)
+
+# Mount static files directory
+app.mount("/web", StaticFiles(directory="web"), name="web")
+
+@app.get("/")
+async def serve_dashboard():
+    return FileResponse("web/index.html")

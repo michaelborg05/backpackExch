@@ -13,7 +13,7 @@ class TradingProfileDB(Base):
     __tablename__ = "trading_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
-    profile_name = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)
     display_name = Column(String, unique=True, nullable=False, index=True)
     api_key = Column(String, nullable=False)
     secret = Column(String, nullable=False)
@@ -23,12 +23,14 @@ class TradingProfileDB(Base):
     stop_loss_pct = Column(Numeric, nullable=True)
     trailing_stop_pct = Column(Numeric, nullable=True)
     use_trailing_stop = Column(Boolean, default=False)
-    
+    arm_trailing_stop_pct = Column(Numeric, nullable=True)
+
     # Risk management
     max_risk_pct = Column(Numeric, default=0.25)
-    default_order_size_pct = Column(Numeric, default=5)
-    max_position_size = Column(Numeric, nullable=True)
-    
+    default_order_size_usdc = Column(Numeric, default=50)
+    max_position_size_pct = Column(Numeric, nullable=True)
+    max_open_positions = Column(Numeric, nullable=True)
+    max_portfolio_exposure_pct = Column(Numeric, nullable=True)
     # Metadata
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -386,3 +388,145 @@ class TrendAnalysisLog(Base):
     __table_args__ = (
         Index('ix_trend_log_lookup', 'symbol', 'timeframe', 'timestamp'),
     )
+
+
+"""
+Database models for web dashboard user authentication.
+
+Two new tables:
+  - AppUser           : Web dashboard accounts (username, bcrypt password hash, role)
+  - UserProfileMapping: Which trading profiles each user can access
+
+Intentionally kept separate from the trading models so auth concerns
+don't bleed into trading logic. Import alongside models.py in your
+Alembic env.py or session setup.
+
+Migration steps:
+    1. Import this file in your Alembic env.py target_metadata
+    2. Run: alembic revision --autogenerate -m "add app users"
+    3. Run: alembic upgrade head
+
+Or if you're not using Alembic yet, call Base.metadata.create_all(engine)
+after importing both models.py and auth_models.py.
+"""
+
+
+
+class AppUser(Base):
+    """
+    Web dashboard user account.
+
+    Roles:
+        admin   – full access to all endpoints + user management
+        viewer  – read-only access (no trade execution)
+
+    Passwords are stored as bcrypt hashes (60-char string).
+    NEVER store plaintext here.
+
+    Usage:
+        user = AppUser(username="michael", role="admin")
+        user.set_password("my-secure-password")  # hashes automatically
+        db.add(user)
+        db.commit()
+    """
+    __tablename__ = "app_user"
+
+    id           = Column(Integer, primary_key=True)
+    username     = Column(String(64), unique=True, nullable=False, index=True)
+    password_hash = Column(String(128), nullable=False)          # bcrypt hash
+    display_name = Column(String(128), nullable=True)
+    email        = Column(String(256), nullable=True, unique=True)
+    role         = Column(String(32), nullable=False, default="viewer")   # admin | viewer
+    is_active    = Column(Boolean, default=True, nullable=False)
+
+    # Soft audit trail
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    profile_mappings = relationship(
+        "UserProfileMapping",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'viewer')", name="valid_app_user_role"),
+    )
+
+    # ── Password helpers ─────────────────────────────────────────────
+    def set_password(self, plain_password: str) -> None:
+        """Hash and store a plaintext password using bcrypt."""
+        import bcrypt
+        self.password_hash = bcrypt.hashpw(
+            plain_password.encode("utf-8"),
+            bcrypt.gensalt(rounds=12)
+        ).decode("utf-8")
+
+    def verify_password(self, plain_password: str) -> bool:
+        """
+        Verify a plaintext password against the stored hash.
+        Returns True if correct, False otherwise.
+        bcrypt.checkpw is constant-time — safe against timing attacks.
+        """
+        import bcrypt
+        try:
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"),
+                self.password_hash.encode("utf-8")
+            )
+        except Exception:
+            return False
+
+    # ── Convenience ──────────────────────────────────────────────────
+    @property
+    def accessible_profiles(self) -> list[str]:
+        """Return list of profile_names this user can access."""
+        return [m.profile_name for m in self.profile_mappings if m.is_active]
+
+    def can_access_profile(self, profile_name: str) -> bool:
+        return profile_name in self.accessible_profiles
+
+    def __repr__(self):
+        return f"<AppUser id={self.id} username={self.username!r} role={self.role!r}>"
+
+
+class UserProfileMapping(Base):
+    """
+    Maps an AppUser to the trading profiles they can access.
+
+    One user can be linked to many profiles.
+    One profile can be linked to many users (e.g., two admins watching the same profile).
+
+    Example rows:
+        user_id=1, profile_name="default"
+        user_id=1, profile_name="MB15m"
+        user_id=1, profile_name="aggressive"
+        user_id=2, profile_name="aggressive"   # second user, read-only on aggressive
+    """
+    __tablename__ = "app_user_mappings"
+
+    id           = Column(Integer, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False)
+    profile_name = Column(String(128), nullable=False)   # matches TradingProfileDB.profile_name
+    is_active    = Column(Boolean, default=True, nullable=False)
+
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at   = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship back to user
+    user = relationship("AppUser", back_populates="profile_mappings")
+
+    __table_args__ = (
+        # A user can only be mapped to the same profile once
+        UniqueConstraint("user_id", "profile_name", name="uq_user_profile"),
+        Index("ix_user_profile_mappings_user", "user_id"),
+        Index("ix_user_profile_mappings_profile", "profile_name"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<UserProfileMapping user_id={self.user_id} "
+            f"profile={self.profile_name!r} active={self.is_active}>"
+        )
