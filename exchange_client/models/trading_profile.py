@@ -21,7 +21,6 @@ class TradingProfile(BaseModel):
     
     # Risk management
     max_risk_pct: Decimal = Field(Decimal("0.25"), description="Max risk per trade as % of portfolio")
-    default_order_size_pct: Decimal = Field(Decimal("5"), description="Default order size as % of portfolio")
     max_position_size: Optional[Decimal] = None
  
     # Market Regime Filter

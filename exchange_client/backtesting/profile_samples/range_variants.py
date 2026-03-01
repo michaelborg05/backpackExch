@@ -57,15 +57,14 @@ RANGE_VARIANTS = {
     # would have killed this trade outright. Slightly stricter but ranges
     # only form in neutral-to-mild trending markets.
     # -------------------------------------------------------------------------
-    "range_v1_htf_rsi_hardstop": {
+    "range_v1_htf_ema20rising": {
         **_RANGE_BASE,
         "trend_indicators": [
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": False, "hard_stop": True}},  # raised+hardstop
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01,"hard_stop": True}},
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
             {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
         ],
-        "min_indicators_required": 3,
     },
 
     # -------------------------------------------------------------------------
@@ -74,17 +73,17 @@ RANGE_VARIANTS = {
     # That means the HTF is in a downswing. For range trading you want to see
     # HTF in the MID band (0.25–0.75), not hugging the lower band.
     # -------------------------------------------------------------------------
-    "range_v2_htf_bb_midrange": {
+    "range_v2_htf_price_vs_emadip": {
         **_RANGE_BASE,
         "trend_indicators": [
             {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 40, "use_momentum": False}},
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.5, "max_gap_pct": 2.5}},
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.20,"max_pct_b": 0.80, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
         ],
-        "min_indicators_required": 3,  # still 3/5, but the new BB lower hard_stop blocks downtrends
+        "min_indicators_required": 4,
     },
-
     # -------------------------------------------------------------------------
     # V3: Make vwap a hard_stop — SOL was actually ABOVE vwap when it fired
     # Rationale: price_below_vwap was one of the indicators that FAILED, but
@@ -92,17 +91,15 @@ RANGE_VARIANTS = {
     # means range entries MUST be below vwap (which is the whole point of a
     # range dip buy).
     # -------------------------------------------------------------------------
-    "range_v3_vwap_hardstop": {
+    "range_v3_htf_bb_tighter": {
         **_RANGE_BASE,
-        "entry_indicators": [
-            {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
-            {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},  # NOW HARD STOP
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.30}},
-            {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 4.0}},
-            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
-            {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
+        "trend_indicators": [
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
+            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.55, "hard_stop": True}},
         ],
-        "min_entry_indicators_required": 4,
+        "min_indicators_required": 3,
     },
 
     # -------------------------------------------------------------------------
@@ -111,17 +108,16 @@ RANGE_VARIANTS = {
     # Tightening to 0.20 means we only enter when price is in the bottom 20%
     # of the band — a more convincing range-low signal.
     # -------------------------------------------------------------------------
-    "range_v4_tighter_bb": {
+    "range_v4_htf_v1v2v3": {
         **_RANGE_BASE,
-        "entry_indicators": [
-            {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
-            {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.20}},  # tightened 0.30→0.20
-            {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 4.0}},
-            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
-            {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
+        "trend_indicators": [
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01,"hard_stop": True}},
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.5, "max_gap_pct": 2.5}},
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
+            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.55, "hard_stop": True}},
         ],
-        "min_entry_indicators_required": 4,
+        "min_indicators_required": 4,
     },
 
     # -------------------------------------------------------------------------
@@ -132,46 +128,46 @@ RANGE_VARIANTS = {
     # downmove not a range.
     # "max_gap_pct: 1.0" means block if price is >1% below EMA20 (falling knife)
     # -------------------------------------------------------------------------
-    "range_v5_ema_proximity": {
-        **_RANGE_BASE,
-        "entry_indicators": [
-            {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
-            {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.30}},
-            {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 4.0}},
-            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
-            {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
-            # NEW: price must not be more than 1% below EMA20 (blocks falling knife entries)
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.0, "hard_stop": True}},
-        ],
-        "min_entry_indicators_required": 4,
-    },
+    # "range_v5_ema_proximity": {
+    #     **_RANGE_BASE,
+    #     "entry_indicators": [
+    #         {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
+    #         {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0}},
+    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.30}},
+    #         {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 4.0}},
+    #         {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
+    #         {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
+    #         # NEW: price must not be more than 1% below EMA20 (blocks falling knife entries)
+    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.0, "hard_stop": True}},
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    # },
 
     # -------------------------------------------------------------------------
     # V6: Kitchen sink — all of V1+V3+V4 combined (strictest)
     # Use to find the upper bound of precision (may have very few signals)
     # -------------------------------------------------------------------------
-    "range_v6_strict": {
-        **_RANGE_BASE,
-        "trend_indicators": [
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": False, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.20, "max_pct_b": 0.80, "hard_stop": True}},
-        ],
-        "min_indicators_required": 3,
-        "entry_indicators": [
-            {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
-            {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.20}},
-            {"type": "volume_spike",    "params": {"min_ratio": 1.2, "max_ratio": 4.0}},  # slightly higher volume threshold
-            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
-            {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.0, "hard_stop": True}},
-        ],
-        "min_entry_indicators_required": 4,
-        "min_signal_confidence": 68.0,
-    },
+    # "range_v6_strict": {
+    #     **_RANGE_BASE,
+    #     "trend_indicators": [
+    #         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
+    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 45, "use_momentum": False, "hard_stop": True}},
+    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.20, "max_pct_b": 0.80, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 3,
+    #     "entry_indicators": [
+    #         {"type": "rsi_oversold",    "params": {"max_value": 48, "require_rising": True, "min_momentum": 1, "hard_stop": True}},
+    #         {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},
+    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.20}},
+    #         {"type": "volume_spike",    "params": {"min_ratio": 1.2, "max_ratio": 4.0}},  # slightly higher volume threshold
+    #         {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.25}},
+    #         {"type": "rsi_overbought",  "params": {"min_value": 58, "hard_stop": True}},
+    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.0, "hard_stop": True}},
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    #     "min_signal_confidence": 68.0,
+    # },
 
     # -------------------------------------------------------------------------
     # V7: Relax entry — lower bar to catch more dips (opposite direction test)
