@@ -1,6 +1,6 @@
 # api_server.py
 import asyncio
-from fastapi import FastAPI, HTTPException, Header, Request, Depends
+from fastapi import FastAPI, HTTPException, Header, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -855,7 +855,7 @@ def get_all_markets_endpoint():
     }
 
 @app.post("/webhook/tradingview/trend")
-async def tradingview_trend_webhook(alert: TrendUpdateAlert):
+async def tradingview_trend_webhook(alert: TrendUpdateAlert, background_tasks: BackgroundTasks):
     """
     Receive trend updates from TradingView
     
@@ -872,18 +872,22 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert):
         apiserver_logger.info(
             f"Received trend update for {len(alert.trends)} symbol(s)"
         )
+
+        # Add the work to the background queue
+        background_tasks.add_task(sync_trend_updates, alert.trends)
         
+        return {"success": True, "message": "Processing in background"}        
         # Update trend cache
-        trend_cache = get_trend_cache()
+        # trend_cache = get_trend_cache()
         
-        for trend_data in alert.trends:
-            trend_cache.update(trend_data)
+        # for trend_data in alert.trends:
+        #     trend_cache.update(trend_data)
         
-        return {
-            "success": True,
-            "message": f"Updated trends for {len(alert.trends)} symbol(s)",
-            "cache_info": trend_cache.get_cache_info()
-        }
+        # return {
+        #     "success": True,
+        #     "message": f"Updated trends for {len(alert.trends)} symbol(s)",
+        #     "cache_info": trend_cache.get_cache_info()
+        # }
         
     except HTTPException:
         raise
@@ -891,6 +895,10 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert):
         apiserver_logger.error(f"Error processing trend update: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+def sync_trend_updates(trends):
+    trend_cache = get_trend_cache()
+    for trend_data in trends:
+        trend_cache.update(trend_data)
 
 @app.get("/trend/{symbol}/{timeframe}")
 async def get_trend_status(symbol: str, timeframe: str):
