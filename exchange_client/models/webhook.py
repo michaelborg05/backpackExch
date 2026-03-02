@@ -125,7 +125,7 @@ class TrendData(BaseModel):
     volume: Optional[float] = None
     volume_sma: Optional[float] = None  # 20-period average
     volume_ratio: Optional[float] = None  # current / average
-    
+    adx: Optional[float] = None  # current / average
     indicators_changed: Optional[bool] = Field(False)
     
     change_details: Optional[ChangeDetails] = None

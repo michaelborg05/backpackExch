@@ -227,7 +227,7 @@ class TrendHistory(Base):
     ema50 = Column(Float, nullable=False)
     vwap = Column(Float, nullable=True)
     volume_ratio = Column(Float, nullable=True)
-    
+    adx = Column(Float, nullable=True)
     # Tracking
     indicators_changed = Column(Boolean, default=True)  # Was this a significant change?
     data_timestamp = Column(DateTime(timezone=True), nullable=False)  # When data was generated
@@ -380,6 +380,7 @@ class TrendAnalysisLog(Base):
     volume = Column(Float)
     volume_ratio = Column(Float)
     volume_sma = Column(Float)
+    adx = Column(Float, nullable=True)
     
     # Explicitly store the TV bar timestamp and the DB arrival time
     timestamp = Column(DateTime(timezone=True), index=True) 

@@ -9,11 +9,13 @@ ema_slow        = input.int(50,     "Slow EMA")
 rsi_period      = input.int(14,     "RSI Period")
 bb_length       = input.int(20,     "BB Length")
 bb_mult         = input.float(2.0,  "BB StdDev Multiplier")
+adx_period      = input.int(14,     "ADX Period")          // ← NEW
 webhook_secret  = input.string("YOUR_SECRET_HERE", "Webhook Secret")
 
 // Thresholds for "significant change"
 ema_threshold = input.float(0.0001, "EMA Change Threshold (%)")
 rsi_threshold = input.float(0.1,    "RSI Change Threshold")
+adx_threshold = input.float(1.0,    "ADX Change Threshold") // ← NEW
 
 // ============================================================================
 // HELPER FUNCTION - Calculate trend data for a timeframe
@@ -21,7 +23,8 @@ rsi_threshold = input.float(0.1,    "RSI Change Threshold")
 // request.security call count:
 //   Original:  8 per TF × 3 TFs = 24
 //   + BB:      3 per TF × 3 TFs =  9  → 33
-//   + htf_open:1 per TF × 3 TFs =  3  → 36  (well within Pine's 40-call limit)
+//   + htf_open:1 per TF × 3 TFs =  3  → 36
+//   + ADX:     1 per TF × 3 TFs =  3  → 39  (still within Pine's 40-call limit)
 // ============================================================================
 
 get_trend_data(tf) =>
@@ -47,13 +50,23 @@ get_trend_data(tf) =>
 
     // ── Bollinger Bands on closed candles ────────────────────────────────────
     // We send upper, lower, and basis (midline = SMA of close).
-    // %B and width are calculated Python-side from these three values, keeping
-    // the payload simple and letting Python do the maths it needs per strategy.
+    // %B and width are calculated Python-side from these three values.
     bb_sma_raw   = ta.sma(close, bb_length)
     bb_std_raw   = ta.stdev(close, bb_length)
     htf_bb_basis = request.security(syminfo.tickerid, tf, bb_sma_raw[1],                      lookahead=barmerge.lookahead_off)
     htf_bb_upper = request.security(syminfo.tickerid, tf, bb_sma_raw[1] + bb_mult * bb_std_raw[1], lookahead=barmerge.lookahead_off)
     htf_bb_lower = request.security(syminfo.tickerid, tf, bb_sma_raw[1] - bb_mult * bb_std_raw[1], lookahead=barmerge.lookahead_off)
+
+    // ── ADX (Average Directional Index) ─────────────────────────────────────
+    // ta.dmi() returns [+DI, -DI, ADX].
+    // We only need the ADX value (trend strength, direction-agnostic).
+    //   ADX < 20  → weak/no trend  → ranging conditions  ✅ for range trades
+    //   ADX 20-25 → mild trend forming
+    //   ADX > 25  → trending       → avoid range trades  ❌
+    // Using [1] so we always reference the last confirmed candle, consistent
+    // with all other indicators in this script.
+    [_diplus, _diminus, adx_raw] = ta.dmi(adx_period, adx_period)
+    htf_adx = request.security(syminfo.tickerid, tf, adx_raw[1], lookahead=barmerge.lookahead_off)
 
     // ── Volume ratio ─────────────────────────────────────────────────────────
     volume_ratio = htf_volume_sma != 0 ? htf_volume / htf_volume_sma : na
@@ -61,7 +74,8 @@ get_trend_data(tf) =>
     [htf_ema20, htf_ema50, htf_rsi, htf_vwap,
      htf_volume, htf_volume_sma, volume_ratio,
      htf_close, htf_high, htf_low, htf_open,
-     htf_bb_upper, htf_bb_basis, htf_bb_lower]
+     htf_bb_upper, htf_bb_basis, htf_bb_lower,
+     htf_adx]
 
 
 // ============================================================================
@@ -70,15 +84,15 @@ get_trend_data(tf) =>
 
 [ema20_15m,  ema50_15m,  rsi_15m,  vwap_15m,  vol_15m,  vol_sma_15m,  vol_ratio_15m,
  close_15m,  high_15m,   low_15m,  open_15m,
- bb_upper_15m, bb_basis_15m, bb_lower_15m]  = get_trend_data("15")
+ bb_upper_15m, bb_basis_15m, bb_lower_15m, adx_15m]  = get_trend_data("15")
 
 [ema20_60m,  ema50_60m,  rsi_60m,  vwap_60m,  vol_60m,  vol_sma_60m,  vol_ratio_60m,
  close_60m,  high_60m,   low_60m,  open_60m,
- bb_upper_60m, bb_basis_60m, bb_lower_60m]  = get_trend_data("60")
+ bb_upper_60m, bb_basis_60m, bb_lower_60m, adx_60m]  = get_trend_data("60")
 
 [ema20_240m, ema50_240m, rsi_240m, vwap_240m, vol_240m, vol_sma_240m, vol_ratio_240m,
  close_240m, high_240m,  low_240m, open_240m,
- bb_upper_240m, bb_basis_240m, bb_lower_240m] = get_trend_data("240")
+ bb_upper_240m, bb_basis_240m, bb_lower_240m, adx_240m] = get_trend_data("240")
 
 live_price = close
 
@@ -91,16 +105,19 @@ live_price = close
 var float prev_ema20_15m  = na
 var float prev_ema50_15m  = na
 var float prev_rsi_15m    = na
+var float prev_adx_15m    = na  // ← NEW
 
 // 60m timeframe
 var float prev_ema20_60m  = na
 var float prev_ema50_60m  = na
 var float prev_rsi_60m    = na
+var float prev_adx_60m    = na  // ← NEW
 
 // 240m timeframe
 var float prev_ema20_240m = na
 var float prev_ema50_240m = na
 var float prev_rsi_240m   = na
+var float prev_adx_240m   = na  // ← NEW
 
 // Check if this is first run
 bool is_first_bar = na(prev_ema20_15m)
@@ -109,19 +126,22 @@ bool is_first_bar = na(prev_ema20_15m)
 bool ema20_changed_15m    = is_first_bar or math.abs(ema20_15m  - prev_ema20_15m)  > ema_threshold
 bool ema50_changed_15m    = is_first_bar or math.abs(ema50_15m  - prev_ema50_15m)  > ema_threshold
 bool rsi_changed_15m      = is_first_bar or math.abs(rsi_15m    - prev_rsi_15m)    > rsi_threshold
-bool indicators_changed_15m = ema20_changed_15m or ema50_changed_15m or rsi_changed_15m
+bool adx_changed_15m      = is_first_bar or math.abs(adx_15m    - prev_adx_15m)    > adx_threshold  // ← NEW
+bool indicators_changed_15m = ema20_changed_15m or ema50_changed_15m or rsi_changed_15m or adx_changed_15m
 
 // 60m changes
 bool ema20_changed_60m    = is_first_bar or math.abs(ema20_60m  - prev_ema20_60m)  > ema_threshold
 bool ema50_changed_60m    = is_first_bar or math.abs(ema50_60m  - prev_ema50_60m)  > ema_threshold
 bool rsi_changed_60m      = is_first_bar or math.abs(rsi_60m    - prev_rsi_60m)    > rsi_threshold
-bool indicators_changed_60m = ema20_changed_60m or ema50_changed_60m or rsi_changed_60m
+bool adx_changed_60m      = is_first_bar or math.abs(adx_60m    - prev_adx_60m)    > adx_threshold  // ← NEW
+bool indicators_changed_60m = ema20_changed_60m or ema50_changed_60m or rsi_changed_60m or adx_changed_60m
 
 // 240m changes
 bool ema20_changed_240m   = is_first_bar or math.abs(ema20_240m - prev_ema20_240m) > ema_threshold
 bool ema50_changed_240m   = is_first_bar or math.abs(ema50_240m - prev_ema50_240m) > ema_threshold
 bool rsi_changed_240m     = is_first_bar or math.abs(rsi_240m   - prev_rsi_240m)   > rsi_threshold
-bool indicators_changed_240m = ema20_changed_240m or ema50_changed_240m or rsi_changed_240m
+bool adx_changed_240m     = is_first_bar or math.abs(adx_240m   - prev_adx_240m)   > adx_threshold  // ← NEW
+bool indicators_changed_240m = ema20_changed_240m or ema50_changed_240m or rsi_changed_240m or adx_changed_240m
 
 // Any timeframe changed
 bool any_indicators_changed = indicators_changed_15m or indicators_changed_60m or indicators_changed_240m
@@ -146,33 +166,35 @@ if barstate.isconfirmed
         if indicators_changed_15m
             prev_ema20_15m := ema20_15m
             prev_ema50_15m := ema50_15m
-            prev_rsi_15m := rsi_15m
+            prev_rsi_15m   := rsi_15m
+            prev_adx_15m   := adx_15m   // ← NEW
         
         // Update 60m stored values
         if indicators_changed_60m
             prev_ema20_60m := ema20_60m
             prev_ema50_60m := ema50_60m
-            prev_rsi_60m := rsi_60m
+            prev_rsi_60m   := rsi_60m
+            prev_adx_60m   := adx_60m   // ← NEW
         
         // Update 240m stored values
         if indicators_changed_240m
             prev_ema20_240m := ema20_240m
             prev_ema50_240m := ema50_240m
-            prev_rsi_240m := rsi_240m
+            prev_rsi_240m   := rsi_240m
+            prev_adx_240m   := adx_240m  // ← NEW
 
 // ============================================================================
 // HELPER FUNCTION - Build JSON for a single timeframe
 // ============================================================================
-// New fields added vs original:
-//   prev_candle: { open, high, low, close }   ← full OHLC of last closed candle
-//   bb:          { upper, basis, lower }       ← Bollinger Band values
-//
-// Python-side calculations from bb values (no extra Pine calls needed):
-//   bb_width  = (upper - lower) / basis        ← normalised band width
-//   bb_pct_b  = (price - lower) / (upper - lower)  ← %B: 0=lower band, 1=upper
+// New fields vs previous version:
+//   adx: float   ← ADX value for ranging regime detection
+//                   Python-side usage:
+//                     adx < 20  → strong ranging conditions
+//                     adx < 25  → acceptable ranging conditions
+//                     adx > 25  → trending — block range trades
 // ============================================================================
 
-build_trend_json(symb, prc, tf,ema20, ema50, rsi, vwap, vol, vol_sma, vol_ratio, ema20_chg, ema50_chg, rsi_chg, ind_chg, prev_open, prev_high, prev_low, prev_close,     bb_upper, bb_basis, bb_lower) =>
+build_trend_json(symb, prc, tf, ema20, ema50, rsi, vwap, vol, vol_sma, vol_ratio, ema20_chg, ema50_chg, rsi_chg, ind_chg, prev_open, prev_high, prev_low, prev_close, bb_upper, bb_basis, bb_lower, adx) =>
       '    {\n' + 
       '      "symbol": "' + symb + '_USDC",\n' + 
       '      "price": ' + str.tostring(prc, '#.######') + ',\n' +
@@ -184,6 +206,7 @@ build_trend_json(symb, prc, tf,ema20, ema50, rsi, vwap, vol, vol_sma, vol_ratio,
       '      "volume": ' + str.tostring(vol, '#.####') + ',\n' +
       '      "volume_sma": ' + str.tostring(vol_sma, '#.####') + ',\n' +
       '      "volume_ratio": ' + (na(vol_ratio) ? "null" : str.tostring(vol_ratio, '#.###')) + ',\n' +
+      '      "adx": ' + (na(adx) ? "null" : str.tostring(adx, '#.##')) + ',\n' +
       '      "indicators_changed": ' + (ind_chg ? "true" : "false") + ',\n' +
       '      "change_details": {\n' +
       '        "ema20_changed": ' + (ema20_chg ? "true" : "false") + ',\n' +
@@ -220,21 +243,24 @@ if barstate.isconfirmed
          ema20_15m, ema50_15m, rsi_15m, vwap_15m, vol_15m, vol_sma_15m, vol_ratio_15m,
          ema20_changed_15m, ema50_changed_15m, rsi_changed_15m, indicators_changed_15m,
          open_15m, high_15m, low_15m, close_15m,
-         bb_upper_15m, bb_basis_15m, bb_lower_15m)
+         bb_upper_15m, bb_basis_15m, bb_lower_15m,
+         adx_15m)
 
     trend_60m = build_trend_json(
          baseSymbol, live_price, "60",
          ema20_60m, ema50_60m, rsi_60m, vwap_60m, vol_60m, vol_sma_60m, vol_ratio_60m,
          ema20_changed_60m, ema50_changed_60m, rsi_changed_60m, indicators_changed_60m,
          open_60m, high_60m, low_60m, close_60m,
-         bb_upper_60m, bb_basis_60m, bb_lower_60m)
+         bb_upper_60m, bb_basis_60m, bb_lower_60m,
+         adx_60m)
 
     trend_240m = build_trend_json(
          baseSymbol, live_price, "240",
          ema20_240m, ema50_240m, rsi_240m, vwap_240m, vol_240m, vol_sma_240m, vol_ratio_240m,
          ema20_changed_240m, ema50_changed_240m, rsi_changed_240m, indicators_changed_240m,
          open_240m, high_240m, low_240m, close_240m,
-         bb_upper_240m, bb_basis_240m, bb_lower_240m)
+         bb_upper_240m, bb_basis_240m, bb_lower_240m,
+         adx_240m)
 
     // Combine into final JSON
     json_msg = '{\n' + 
@@ -252,7 +278,7 @@ if barstate.isconfirmed
 
 
 // ============================================================================
-// VISUAL INDICATORS (unchanged from original)
+// VISUAL INDICATORS
 // ============================================================================
 
 bullish_count_15m = (ema20_15m > ema50_15m ? 1 : 0) + (rsi_15m > 50 ? 1 : 0) + (close_15m > vwap_15m ? 1 : 0)
@@ -261,6 +287,12 @@ bullish_count_60m = (ema20_60m > ema50_60m ? 1 : 0) + (rsi_60m > 50 ? 1 : 0) + (
 trend_bullish_60m = bullish_count_60m >= 2
 bullish_count_240m = (ema20_240m > ema50_240m ? 1 : 0) + (rsi_240m > 50 ? 1 : 0)
 trend_bullish_240m = bullish_count_240m >= 1
+
+// Ranging conditions based on ADX (shown in info table)
+ranging_15m  = not na(adx_15m)  and adx_15m  < 25
+ranging_60m  = not na(adx_60m)  and adx_60m  < 25
+ranging_240m = not na(adx_240m) and adx_240m < 25
+
 
 // ============================================================================
 // PLOTS - Show all timeframes
@@ -288,8 +320,7 @@ plot(rsi_60m, "60m RSI", color=color.rgb(33, 37, 243), linewidth=1)
 //   85 = slightly stronger if you prefer more visible colouring
 // ============================================================================
 
-
-tf_now = timeframe.period   // e.g. "15", "60", "240"
+tf_now = timeframe.period
 var color bgcolor_color = na
 
 if tf_now == "15"
@@ -334,7 +365,7 @@ fill(bb_upper_line, bb_lower_line, color=color.new(color.purple, 92))
 var table info = na
 if barstate.islast
     if na(info)
-        info := table.new(position.top_right, 2, 15, bgcolor=color.new(color.black, 20), border_width=1)
+        info := table.new(position.top_right, 2, 18, bgcolor=color.new(color.black, 20), border_width=1)
     
     table.cell(info, 0, 0, "Monitoring:", text_color=color.gray, text_size=size.small)
     table.cell(info, 1, 0, "Multi-TF Trend", text_color=color.white, text_size=size.small)
@@ -357,8 +388,27 @@ if barstate.islast
     table.cell(info, 0, 4, "240m Trend:", text_color=color.white)
     table.cell(info, 1, 4, trend_bullish_240m ? "BULLISH ✓" : "BEARISH ✗", 
                text_color=trend_bullish_240m ? color.lime : color.red, text_size=size.normal)
-    
-    
+
+    // ── ADX / Ranging rows (NEW) ──────────────────────────────────────────────
+    table.cell(info, 0, 5, "── ADX ──", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, "", text_color=color.gray, text_size=size.tiny)
+
+    table.cell(info, 0, 6, "15m ADX:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6,
+         na(adx_15m) ? "n/a" : str.tostring(adx_15m, '#.#') + (ranging_15m ? " ✓ Range" : " ✗ Trend"),
+         text_color=ranging_15m ? color.lime : color.orange, text_size=size.tiny)
+
+    table.cell(info, 0, 7, "60m ADX:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 7,
+         na(adx_60m) ? "n/a" : str.tostring(adx_60m, '#.#') + (ranging_60m ? " ✓ Range" : " ✗ Trend"),
+         text_color=ranging_60m ? color.lime : color.orange, text_size=size.tiny)
+
+    table.cell(info, 0, 8, "240m ADX:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 8,
+         na(adx_240m) ? "n/a" : str.tostring(adx_240m, '#.#') + (ranging_240m ? " ✓ Range" : " ✗ Trend"),
+         text_color=ranging_240m ? color.lime : color.orange, text_size=size.tiny)
+    // ── End ADX rows ──────────────────────────────────────────────────────────
+
     table.cell(info, 0, 10, "15m RSI:", text_color=color.gray, text_size=size.tiny)
     table.cell(info, 1, 10, str.tostring(rsi_15m, '#.#'), 
                text_color=rsi_changed_15m ? color.yellow : color.white, text_size=size.tiny)

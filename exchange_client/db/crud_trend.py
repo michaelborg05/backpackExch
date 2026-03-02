@@ -46,6 +46,7 @@ def save_trend_snapshot(
         ema50=float(trend_data.ema50),
         vwap=float(trend_data.vwap) if trend_data.vwap else None,
         volume_ratio=float(trend_data.volume_ratio) if trend_data.volume_ratio else None,
+        adx=float(trend_data.adx) if trend_data.adx else None,
         indicators_changed=getattr(trend_data, 'indicators_changed', True),
         data_timestamp=datetime.fromtimestamp(
             getattr(trend_data, 'timestamp', datetime.now(timezone.utc).timestamp()),
@@ -281,6 +282,7 @@ def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: 
         volume=float(trend_data.volume) if trend_data.volume else None,
         volume_sma=float(trend_data.volume_sma) if trend_data.volume_sma else None,
         volume_ratio=float(trend_data.volume_ratio) if trend_data.volume_ratio else None,
+        adx=float(trend_data.adx) if trend_data.adx else None,
         timestamp=datetime.fromtimestamp(trend_data.timestamp, tz=timezone.utc)
     )
     

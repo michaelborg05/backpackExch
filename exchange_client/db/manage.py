@@ -99,7 +99,7 @@ def setup_appusers():
     from db.session import SessionLocal
     from db.auth_crud import create_user, assign_profile
     db = SessionLocal()
-    user = create_user(db, "michael", "&91z5d!R^lSLB@55", role="admin")
+    user = create_user(db, "michael", "password", role="admin")
     assign_profile(db, user.id, "default")
     assign_profile(db, user.id, "profile3")
     assign_profile(db, user.id, "15m_MB_ATR")
