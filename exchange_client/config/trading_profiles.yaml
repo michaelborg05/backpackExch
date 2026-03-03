@@ -24,7 +24,7 @@ profiles:
     use_market_regime_filter: true
 
     # 🎯 SIGNAL GENERATION SETTINGS (NEW)
-    enable_signal_generation: true    # Enable automated signal generation
+    enable_signal_generation: false    # Enable automated signal generation
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 900      # Wait 15min between signals for same symbol
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
