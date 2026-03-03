@@ -73,7 +73,7 @@ def run_all_variants(
         result  = engine.run(symbol=symbol, start=start, end=end)
         results.append(result)
 
-    results.sort(key=lambda r: (r.profit_factor, r.total_pnl_pct), reverse=True)
+    results.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)
 
     # ---- Summary table ----
     print(f"\n{'Variant':<35} {'Trades':>7} {'Win%':>6} {'AvgPnL':>8} {'TotalPnL':>10} {'ProfFact':>9}")

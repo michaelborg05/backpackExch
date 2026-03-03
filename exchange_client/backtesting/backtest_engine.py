@@ -214,6 +214,100 @@ class ReplayTrendCache:
             direction = "stable"
         return avg, direction
 
+    def _get_bb_width_trend(
+        self, symbol: str, timeframe: str, lookback: int = 4,
+        expand_threshold_pct: float = 0.08,   # 8% change per step = expanding
+        contract_threshold_pct: float = 0.08, # 8% change per step = contracting
+    ) -> Tuple[Optional[float], Optional[str]]:
+        key = f"{symbol}_{timeframe}"
+        history = self._bb_history.get(key, [])
+
+        if len(history) < 2:
+            return None, None
+
+        window = history[-lookback:] if len(history) >= lookback else history
+
+        widths = []
+        for entry in window:
+            basis = entry.get('bb_basis')
+            upper = entry.get('bb_upper')
+            lower = entry.get('bb_lower')
+            if basis and basis > 0 and upper is not None and lower is not None:
+                widths.append((upper - lower) / basis)
+
+        if len(widths) < 2:
+            return None, None
+
+        avg_change = (widths[-1] - widths[0]) / (len(widths) - 1)
+        avg_width  = sum(widths) / len(widths)
+
+        # Threshold scales with the typical width of this symbol/timeframe
+        expand_threshold   =  avg_width * expand_threshold_pct
+        contract_threshold = -avg_width * contract_threshold_pct
+
+        if avg_change > expand_threshold:
+            direction = "expanding"
+        elif avg_change < contract_threshold:
+            direction = "contracting"
+        else:
+            direction = "stable"
+
+        return avg_change, direction
+
+    def _get_pct_b_trend(
+        self, symbol: str, timeframe: str, lookback: int = 4
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """
+        Is %B moving lower (price falling toward lower band) or higher?
+
+        Measures the change in %B across the last N history entries.
+        Used by bb_pct_b_momentum indicator on the 15m entry filter.
+
+        For a range-trade long entry we want %B to be falling toward the lower
+        band and then flattening/turning — not still in free-fall.
+
+        direction values:
+          "falling"  — %B dropping toward lower band  (good: dip forming)
+          "rising"   — %B moving toward upper band    (bad: dip has reversed, chasing)
+          "flat"     — %B stable                      (neutral)
+
+        Returns:
+            (total_change_over_window, direction)
+            Returns (None, None) if insufficient history.
+        """
+        key = f"{symbol}_{timeframe}"
+        history = self._bb_history.get(key, [])
+
+        if len(history) < 2:
+            return None, None
+
+        window = history[-lookback:] if len(history) >= lookback else history
+
+        pct_b_values = []
+        for entry in window:
+            upper = entry.get('bb_upper')
+            lower = entry.get('bb_lower')
+            price = entry.get('price')
+            if upper is not None and lower is not None and price is not None:
+                band_width = upper - lower
+                if band_width > 0:
+                    pct_b_values.append((price - lower) / band_width)
+
+        if len(pct_b_values) < 2:
+            return None, None
+
+        # Total change from start to end of window
+        total_change = pct_b_values[-1] - pct_b_values[0]
+
+        if total_change < -0.08:
+            direction = "falling"
+        elif total_change > 0.08:
+            direction = "rising"
+        else:
+            direction = "flat"
+
+        return total_change, direction
+
     def _validate_timeframe_indicators(
         self,
         symbol: str,
@@ -470,26 +564,26 @@ class ReplayTrendCache:
                             values["history_candles"] = len(window)
                             
                             if not window:
-                                is_bullish = False
+                                is_bull = False
                                 msg = (
                                     f"BB {band} breach (lookback {lookback_candles}): ✗ "
                                     f"(no BB history yet)"
                                 )
                             elif band == "lower":
                                 breached = any(entry['price'] <= entry['bb_lower'] for entry in window)
-                                is_bullish = breached
+                                is_bull = breached
                                 msg = (
                                     f"BB lower breach (lookback {lookback_candles}): "
-                                    f"{'✓' if is_bullish else '✗'} "
+                                    f"{'✓' if is_bull else '✗'} "
                                     f"({'breach found' if breached else 'no breach'} "
                                     f"in last {len(window)} candles)"
                                 )
                             else:  # upper
                                 breached = any(entry['price'] >= entry['bb_upper'] for entry in window)
-                                is_bullish = breached
+                                is_bull = breached
                                 msg = (
                                     f"BB upper breach (lookback {lookback_candles}): "
-                                    f"{'✓' if is_bullish else '✗'} "
+                                    f"{'✓' if is_bull else '✗'} "
                                     f"({'breach found' if breached else 'no breach'} "
                                     f"in last {len(window)} candles)"
                                 )
@@ -552,6 +646,30 @@ class ReplayTrendCache:
                         upper_wick_ratio = upper_wick / body_size if body_size > 0 else 999
                         is_bull = lower_wick_ratio >= 2.0 and upper_wick_ratio <= 0.3 and body_pct >= min_body_pct
                         msg = f"Hammer: {'✓' if is_bull else '✗'} (lw={lower_wick_ratio:.1f}x, uw={upper_wick_ratio:.1f}x, body={body_pct:.1%})"
+                    elif pattern == "engulfing":
+                        curr_open  = c   # current candle opened at prev close
+                        curr_close = current_price  # current candle's live close
+                        prev_open  = o
+                        prev_close = c
+
+                        curr_bull = curr_close > curr_open
+                        prev_bear = prev_close < prev_open
+                        curr_body_low  = min(curr_open, curr_close)
+                        curr_body_high = max(curr_open, curr_close)
+                        prev_body_low  = min(prev_open, prev_close)
+                        prev_body_high = max(prev_open, prev_close)
+
+                        engulfs = curr_body_low <= prev_body_low and curr_body_high >= prev_body_high
+
+                        values["curr_bull"]   = curr_bull
+                        values["prev_bear"]   = prev_bear
+                        values["engulfs"]     = engulfs
+
+                        is_bull = curr_bull and prev_bear and engulfs
+                        msg = (
+                            f"Bullish engulfing: {'✓' if is_bull else '✗'} "
+                            f"(curr_bull={curr_bull}, prev_bear={prev_bear}, engulfs={engulfs})"
+                        )
                     elif pattern == "doji":
                         body_pct = body_size / total_range
                         is_bull  = body_pct <= max_body_pct
@@ -634,6 +752,119 @@ class ReplayTrendCache:
                     }
                     msg = f"RSI Reversal Momentum: {'✓' if is_bull else '✗'} (RSI {min_rsi_val:.0f}→{current_rsi:.0f})"
 
+            
+            elif indicator_type == "adx_regime":
+                max_adx   = params.get("max_adx", 25)
+                min_adx   = params.get("min_adx", 0)
+
+                adx_value = getattr(trend, 'adx', None)
+                values["adx"] = adx_value
+                values["max_adx"] = max_adx
+                values["min_adx"] = min_adx
+
+                if adx_value is None:
+                    # ADX not yet in TrendData — fail gracefully rather than crash.
+                    # Add 'adx: float = None' to your TrendData model and update
+                    # the Pine webhook to send it.
+                    is_bull = False
+                    msg = "ADX regime: ✗ (no ADX data — add adx field to TrendData and Pine script)"
+                else:
+                    adx_value = float(adx_value)
+                    below_max = adx_value <= max_adx
+                    above_min = adx_value >= min_adx
+                    is_bull = below_max and above_min
+
+                    if is_bull:
+                        msg = (
+                            f"ADX regime: ✓ "
+                            f"(ADX={adx_value:.1f} — ranging, need <={max_adx})"
+                        )
+                    else:
+                        reason = f"ADX={adx_value:.1f} > {max_adx} (trending)" if not below_max else f"ADX={adx_value:.1f} < {min_adx} (dead)"
+                        msg = f"ADX regime: ✗ ({reason})"
+
+            elif indicator_type == "bb_width_regime":
+                required_direction = params.get("required_direction", "not_expanding")
+                lookback           = params.get("lookback", 4)
+                expand_threshold_pct   = params.get("expand_threshold_pct", 0.08)
+                contract_threshold_pct = params.get("contract_threshold_pct", 0.08)
+
+
+                width_change, width_direction = self._get_bb_width_trend(
+                    symbol, timeframe, lookback,
+                    expand_threshold_pct, contract_threshold_pct
+                )
+
+                values["width_direction"] = width_direction
+                values["width_change"]    = round(width_change, 6) if width_change is not None else None
+                values["required"]        = required_direction
+                values["lookback"]        = lookback
+
+                if width_direction is None:
+                    is_bull = False
+                    msg = f"BB width regime: ✗ (insufficient BB history — need {lookback} candles)"
+                else:
+                    if required_direction == "not_expanding":
+                        is_bull = width_direction != "expanding"
+                    elif required_direction == "contracting":
+                        is_bull = width_direction == "contracting"
+                    elif required_direction == "stable":
+                        is_bull = width_direction == "stable"
+                    else:
+                        is_bull = False
+
+                    if is_bull:
+                        msg = (
+                            f"BB width regime: ✓ "
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
+                            f"need {required_direction})"
+                        )
+                    else:
+                        msg = (
+                            f"BB width regime: ✗ "
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
+                            f"need {required_direction})"
+                        )
+
+            elif indicator_type == "bb_pct_b_momentum":
+                required_direction = params.get("required_direction", "not_rising")
+                lookback           = params.get("lookback", 3)
+
+                pct_b_change, pct_b_direction = self._get_pct_b_trend(symbol, timeframe, lookback)
+
+                values["pct_b_direction"] = pct_b_direction
+                values["pct_b_change"]    = round(pct_b_change, 4) if pct_b_change is not None else None
+                values["required"]        = required_direction
+                values["lookback"]        = lookback
+
+                if pct_b_direction is None:
+                    is_bull = False
+                    msg = f"BB %B momentum: ✗ (insufficient BB history — need {lookback} candles)"
+                else:
+                    if required_direction == "not_rising":
+                        is_bull = pct_b_direction != "rising"
+                    elif required_direction == "falling":
+                        is_bull = pct_b_direction == "falling"
+                    elif required_direction == "flat":
+                        is_bull = pct_b_direction == "flat"
+                    else:
+                        is_bull = False
+
+                    direction_symbol = "↓" if pct_b_direction == "falling" else ("↑" if pct_b_direction == "rising" else "→")
+
+                    if is_bull:
+                        msg = (
+                            f"BB %B momentum: ✓ "
+                            f"(%B {direction_symbol} {pct_b_direction}, Δ={pct_b_change:+.3f} "
+                            f"over {lookback} candles — need {required_direction})"
+                        )
+                    else:
+                        msg = (
+                            f"BB %B momentum: ✗ "
+                            f"(%B {direction_symbol} {pct_b_direction}, Δ={pct_b_change:+.3f} "
+                            f"over {lookback} candles — need {required_direction})"
+                        )
+			
             else:
                 is_bull = False
                 msg = f"Unknown indicator type: {indicator_type}"
@@ -756,7 +987,6 @@ def row_to_trend_data(row, prev_row=None):
 
     class _TrendData:
         pass
-
     td = _TrendData()
     td.symbol     = row.symbol
     td.timeframe  = row.timeframe
@@ -766,7 +996,7 @@ def row_to_trend_data(row, prev_row=None):
     td.ema50      = float(row.ema50)   if row.ema50  is not None else float(row.close)
     td.vwap       = float(row.vwap)    if row.vwap   is not None else float(row.close)
     td.volume_ratio = float(row.volume_ratio) if row.volume_ratio is not None else None
-
+    td.adx          =float(row.adx)    if row.adx   is not None else None
     # Raw volume also available if needed
     td.volume = float(row.volume) if row.volume is not None else None
 

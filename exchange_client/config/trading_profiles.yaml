@@ -28,7 +28,7 @@ profiles:
     signal_timeframe: "15"           # Timeframe for entry signals
     signal_cooldown_seconds: 900      # Wait 15min between signals for same symbol
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
-    min_volume_ratio: 1.1             # Require 10% above average volume
+    min_volume_ratio: 1.0             # Require 10% above average volume
 
     # Trend filters
     use_trend_filter: false
@@ -440,7 +440,7 @@ profiles:
         params: 
           period: 14
           min_value: 35
-          use_momentum: false
+          use_momentum: True
       - type: "rsi_overbought"
         params:
           min_value: 62
@@ -480,7 +480,7 @@ profiles:
           band: "lower"
           mode: "pct_b"
           min_pct_b: 0.05    # Price in lower 30% of the band
-          max_pct_b: 0.35    # Price in lower 30% of the band
+          max_pct_b: 0.4    # Price in lower 30% of the band
 
       - type: "volume_spike"
         params:
@@ -494,13 +494,8 @@ profiles:
       #    Not a hard_stop — adds timing confidence without blocking every entry.
       - type: "reversal_candle"
         params:
-          pattern: "doji"
-          max_body_pct: 0.25   # Body must be <= 25% of candle range
+          pattern: "engulfing"
 
-      - type: "rsi_overbought"
-        params:
-          min_value: 58
-          hard_stop: true
     min_entry_indicators_required: 4
 
     # ATR filter (volatility)

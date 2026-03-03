@@ -328,6 +328,117 @@ class TrendCache:
         rsi_values = [rsi for _, rsi in window]
         return min(rsi_values) if rsi_values else None
 
+
+    def _get_bb_width_trend(
+        self, symbol: str, timeframe: str, lookback: int = 4,
+        expand_threshold_pct: float = 0.08,   # 8% change per step = expanding
+        contract_threshold_pct: float = 0.08, # 8% change per step = contracting
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """
+        Is the Bollinger Band expanding, contracting, or stable?
+
+        Measures normalised band width (upper - lower) / basis across the last
+        N history entries and returns the direction of that change.
+
+        Used by bb_width_regime indicator — intended as a 60m HTF regime filter.
+        Expanding bands on the HTF mean a breakout or trend is forming, which
+        is the opposite of the flat oscillation a range trade needs.
+
+        Returns:
+            (avg_change_per_candle, direction)
+            direction: "expanding" | "contracting" | "stable"
+            Returns (None, None) if insufficient history.
+        """
+        key = f"{symbol}_{timeframe}"
+        history = self._bb_history.get(key, [])
+
+        if len(history) < 2:
+            return None, None
+
+        window = history[-lookback:] if len(history) >= lookback else history
+
+        widths = []
+        for entry in window:
+            basis = entry.get('bb_basis')
+            upper = entry.get('bb_upper')
+            lower = entry.get('bb_lower')
+            if basis and basis > 0 and upper is not None and lower is not None:
+                widths.append((upper - lower) / basis)
+
+        if len(widths) < 2:
+            return None, None
+
+        # Average per-step change across the window
+        avg_change = (widths[-1] - widths[0]) / (len(widths) - 1)
+        avg_width  = sum(widths) / len(widths)
+
+        # Threshold scales with the typical width of this symbol/timeframe
+        expand_threshold   =  avg_width * expand_threshold_pct
+        contract_threshold = -avg_width * contract_threshold_pct
+
+        if avg_change > expand_threshold:
+            direction = "expanding"
+        elif avg_change < contract_threshold:
+            direction = "contracting"
+        else:
+            direction = "stable"
+
+        return avg_change, direction
+
+    def _get_pct_b_trend(
+        self, symbol: str, timeframe: str, lookback: int = 4
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """
+        Is %B moving lower (price falling toward lower band) or higher?
+
+        Measures the change in %B across the last N history entries.
+        Used by bb_pct_b_momentum indicator on the 15m entry filter.
+
+        For a range-trade long entry we want %B to be falling toward the lower
+        band and then flattening/turning — not still in free-fall.
+
+        direction values:
+          "falling"  — %B dropping toward lower band  (good: dip forming)
+          "rising"   — %B moving toward upper band    (bad: dip has reversed, chasing)
+          "flat"     — %B stable                      (neutral)
+
+        Returns:
+            (total_change_over_window, direction)
+            Returns (None, None) if insufficient history.
+        """
+        key = f"{symbol}_{timeframe}"
+        history = self._bb_history.get(key, [])
+
+        if len(history) < 2:
+            return None, None
+
+        window = history[-lookback:] if len(history) >= lookback else history
+
+        pct_b_values = []
+        for entry in window:
+            upper = entry.get('bb_upper')
+            lower = entry.get('bb_lower')
+            price = entry.get('price')
+            if upper is not None and lower is not None and price is not None:
+                band_width = upper - lower
+                if band_width > 0:
+                    pct_b_values.append((price - lower) / band_width)
+
+        if len(pct_b_values) < 2:
+            return None, None
+
+        # Total change from start to end of window
+        total_change = pct_b_values[-1] - pct_b_values[0]
+
+        if total_change < -0.08:
+            direction = "falling"
+        elif total_change > 0.08:
+            direction = "rising"
+        else:
+            direction = "flat"
+
+        return total_change, direction
+
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
         """Get cached trend data if available and not stale"""
         key = f"{symbol}_{timeframe}"
@@ -1221,7 +1332,218 @@ class TrendCache:
                             reasons.append("not sustained")
                         
                         msg = f"RSI Reversal Momentum: ✗ ({', '.join(reasons)})"
-    
+
+            elif indicator_type == "adx_regime":
+                """
+                ADX-based ranging regime filter.
+
+                ADX measures trend STRENGTH regardless of direction.
+                Low ADX = weak trend = ranging conditions = good for range trades.
+                High ADX = strong trend = bad for range trades.
+
+                Requires the Pine script to send an "adx" field in the payload.
+                Add ta.dmi(14, 14) to get_trend_data() in Pine and include
+                "adx" in the JSON — see updated Pine script for implementation.
+
+                Typical use: HTF (60m) trend filter.
+                  adx < 20  → strong ranging conditions    ✅
+                  adx < 25  → acceptable ranging           ✅
+                  adx > 25  → trending — block range trade ❌
+                  adx > 30  → strong trend — definitely block
+
+                params: {
+                    max_adx: 25,        # Block if ADX is above this (trending)
+                    min_adx: 0,         # Optional: block if ADX is too low (dead market)
+                    hard_stop: false
+                }
+
+                YAML example (60m trend filter):
+                  - type: "adx_regime"
+                    params:
+                      max_adx: 25
+                      hard_stop: true
+                """
+                max_adx   = params.get("max_adx", 25)
+                min_adx   = params.get("min_adx", 0)
+
+                adx_value = getattr(trend, 'adx', None)
+                values["adx"] = adx_value
+                values["max_adx"] = max_adx
+                values["min_adx"] = min_adx
+
+                if adx_value is None:
+                    # ADX not yet in TrendData — fail gracefully rather than crash.
+                    # Add 'adx: float = None' to your TrendData model and update
+                    # the Pine webhook to send it.
+                    is_bullish = False
+                    msg = "ADX regime: ✗ (no ADX data — add adx field to TrendData and Pine script)"
+                else:
+                    adx_value = float(adx_value)
+                    below_max = adx_value <= max_adx
+                    above_min = adx_value >= min_adx
+                    is_bullish = below_max and above_min
+
+                    if is_bullish:
+                        msg = (
+                            f"ADX regime: ✓ "
+                            f"(ADX={adx_value:.1f} — ranging, need <={max_adx})"
+                        )
+                    else:
+                        reason = f"ADX={adx_value:.1f} > {max_adx} (trending)" if not below_max else f"ADX={adx_value:.1f} < {min_adx} (dead)"
+                        msg = f"ADX regime: ✗ ({reason})"
+
+            elif indicator_type == "bb_width_regime":
+                """
+                Bollinger Band width trend — is the band expanding or contracting?
+
+                Expanding bands = volatility increasing, breakout/trend forming.
+                  → BAD for range trades. Block.
+                Contracting or stable bands = volatility compressing.
+                  → GOOD for range trades. Allow.
+
+                Uses _bb_history to compute the slope of normalised band width
+                (upper - lower) / basis across the last N candles.
+
+                Typical use: HTF (60m) trend filter alongside adx_regime.
+                Provides a second independent confirmation that the market is
+                actually ranging rather than trending — ADX can lag, but band
+                width expansion is visible immediately.
+
+                params: {
+                    required_direction: "not_expanding",  # "contracting" | "stable" | "not_expanding"
+                    lookback: 4,                          # candles of BB history to use
+                    hard_stop: false
+                }
+
+                Direction options:
+                  "not_expanding"  — pass if stable OR contracting (recommended default)
+                  "contracting"    — only pass when bands are actively narrowing (strict)
+                  "stable"         — only pass when bands are flat (very strict)
+
+                YAML example (60m trend filter):
+                  - type: "bb_width_regime"
+                    params:
+                      required_direction: "not_expanding"
+                      lookback: 4
+                      hard_stop: true
+                """
+                required_direction = params.get("required_direction", "not_expanding")
+                lookback           = params.get("lookback", 4)
+                expand_threshold_pct   = params.get("expand_threshold_pct", 0.08)
+                contract_threshold_pct = params.get("contract_threshold_pct", 0.08)
+
+
+                width_change, width_direction = self._get_bb_width_trend(
+                    symbol, timeframe, lookback,
+                    expand_threshold_pct, contract_threshold_pct
+                )
+
+                values["width_direction"] = width_direction
+                values["width_change"]    = round(width_change, 6) if width_change is not None else None
+                values["required"]        = required_direction
+                values["lookback"]        = lookback
+
+                if width_direction is None:
+                    is_bullish = False
+                    msg = f"BB width regime: ✗ (insufficient BB history — need {lookback} candles)"
+                else:
+                    if required_direction == "not_expanding":
+                        is_bullish = width_direction != "expanding"
+                    elif required_direction == "contracting":
+                        is_bullish = width_direction == "contracting"
+                    elif required_direction == "stable":
+                        is_bullish = width_direction == "stable"
+                    else:
+                        is_bullish = False
+
+                    if is_bullish:
+                        msg = (
+                            f"BB width regime: ✓ "
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
+                            f"need {required_direction})"
+                        )
+                    else:
+                        msg = (
+                            f"BB width regime: ✗ "
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
+                            f"need {required_direction})"
+                        )
+
+            elif indicator_type == "bb_pct_b_momentum":
+                """
+                Bollinger Band %B momentum — is %B falling, rising, or flat?
+
+                Tracks the direction %B has been moving across the last N candles
+                using _bb_history.
+
+                For a range-trade long entry on the 15m:
+                  - "falling" means price has been moving toward the lower band
+                    → the dip is forming, not already bouncing → good timing
+                  - "flat"    means price has stalled near the lower band
+                    → potential floor forming → acceptable timing
+                  - "rising"  means price is already bouncing away from the floor
+                    → entry is late, chasing a move already in progress → block
+
+                Typical use: 15m entry filter.
+
+                params: {
+                    required_direction: "not_rising",  # "falling" | "flat" | "not_rising"
+                    lookback: 3,                       # candles of BB history to use
+                    hard_stop: false
+                }
+
+                Direction options:
+                  "not_rising"  — pass if falling OR flat (recommended — catches both
+                                  active dips and stalled floors without being too strict)
+                  "falling"     — only pass when %B is actively falling (strict — good for
+                                  catching dips early but may miss slow floor formations)
+                  "flat"        — only pass when %B has stabilised (very strict — only
+                                  enters after the dip has clearly stopped)
+
+                YAML example (15m entry filter):
+                  - type: "bb_pct_b_momentum"
+                    params:
+                      required_direction: "not_rising"
+                      lookback: 3
+                """
+                required_direction = params.get("required_direction", "not_rising")
+                lookback           = params.get("lookback", 3)
+
+                pct_b_change, pct_b_direction = self._get_pct_b_trend(symbol, timeframe, lookback)
+
+                values["pct_b_direction"] = pct_b_direction
+                values["pct_b_change"]    = round(pct_b_change, 4) if pct_b_change is not None else None
+                values["required"]        = required_direction
+                values["lookback"]        = lookback
+
+                if pct_b_direction is None:
+                    is_bullish = False
+                    msg = f"BB %B momentum: ✗ (insufficient BB history — need {lookback} candles)"
+                else:
+                    if required_direction == "not_rising":
+                        is_bullish = pct_b_direction != "rising"
+                    elif required_direction == "falling":
+                        is_bullish = pct_b_direction == "falling"
+                    elif required_direction == "flat":
+                        is_bullish = pct_b_direction == "flat"
+                    else:
+                        is_bullish = False
+
+                    direction_symbol = "↓" if pct_b_direction == "falling" else ("↑" if pct_b_direction == "rising" else "→")
+
+                    if is_bullish:
+                        msg = (
+                            f"BB %B momentum: ✓ "
+                            f"(%B {direction_symbol} {pct_b_direction}, Δ={pct_b_change:+.3f} "
+                            f"over {lookback} candles — need {required_direction})"
+                        )
+                    else:
+                        msg = (
+                            f"BB %B momentum: ✗ "
+                            f"(%B {direction_symbol} {pct_b_direction}, Δ={pct_b_change:+.3f} "
+                            f"over {lookback} candles — need {required_direction})"
+                        )
+                        
             results.append((is_bullish, msg))
             if hard_stop and not is_bullish:
                 values["hard_stop"] = True
