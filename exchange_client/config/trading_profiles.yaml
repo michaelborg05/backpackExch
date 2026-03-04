@@ -405,10 +405,10 @@ profiles:
 
     strategy_type: range_trading
 
-    take_profit_pct: 0.6
-    stop_loss_pct: 0.52
+    take_profit_pct: 0.85
+    stop_loss_pct: 0.65
     trailing_stop_pct: 0.3
-    arm_trailing_stop_pct: 0.25
+    arm_trailing_stop_pct: 0.35
     use_trailing_stop: true
 
     #position sizing
@@ -443,60 +443,92 @@ profiles:
           use_momentum: false
       - type: "rsi_overbought"
         params:
-          min_value: 62
+          min_value: 60
           hard_stop: true
-      # 4. NEW: 60m BB upper — block if 60m price is near the upper band
-      #    If the 60m is pressing against its BB upper, the range may be
-      #    breaking out and this isn't a range trading environment.
-      #    pct_b > 0.80 on the 60m = price in top 20% of HTF band = caution.
       - type: "bollinger_bands"
         params:
           band: "lower"
           mode: "pct_b"
           max_pct_b: 0.80    # Block if 60m price already in top 20% of its band
           hard_stop: true
-    min_indicators_required: 3
+    min_indicators_required: 4
 
     use_entry_filter: true
     entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
     entry_indicators:
-      - type: "rsi_oversold"
+
+      # ── HARD GATES (4 total) ─────────────────────────────────────────────
+      # All 4 must pass — each counts 1 toward the score when passing.
+      # A single failure here blocks the trade immediately.
+
+      # 1. RSI not too low — avoids catching a knife in a real breakdown.
+      #    No momentum check: ranging RSI oscillates in a narrow band and
+      #    momentum readings are too noisy to be useful here.
+      - type: "rsi_threshold"
         params:
-          max_value: 48
-          require_rising: true
-          min_momentum: 1
+          period: 14
+          min_value: 35
+          use_momentum: false
           hard_stop: true
+
+      # 2. RSI not overbought — don't buy near the top of the range.
+      - type: "rsi_overbought"
+        params:
+          min_value: 62
+          hard_stop: true
+
+      # 3. Price below VWAP — confirms we are at the dip, not chasing.
+      #    Promoted to hard_stop: if price is above VWAP this is not a
+      #    range-low entry at all.
       - type: "price_below_vwap"
         params:
-          min_gap_pct: -0.15
-          max_gap_pct: -2.0
-      # 3. REPLACED price_extended_below_ema with BB
-      #    BB %B — price in lower portion of the Bollinger Band
-      #    On a range day, %B < 0.25 means price is in the bottom quarter
-      #    of the band, which IS the bottom of the range. Much more precise
-      #    than a fixed EMA distance check.
+          min_gap_pct: -0.15    # at least 0.15% below VWAP
+          max_gap_pct: -2.0     # not more than 2% below (too extended)
+          hard_stop: true
+
+      # 4. BB %B in lower portion of the band — price near range floor.
+      #    Promoted to hard_stop: positional requirement, not optional.
       - type: "bollinger_bands"
         params:
           band: "lower"
           mode: "pct_b"
-          min_pct_b: 0.05    # Price in lower 30% of the band
-          max_pct_b: 0.4    # Price in lower 30% of the band
+          min_pct_b: 0.05       # don't enter below the band (possible breakdown)
+          max_pct_b: 0.45       # price in lower 40% of the band
+          hard_stop: true
 
-      - type: "volume_spike"
-        params:
-          min_ratio: 1.0
-          max_ratio: 4.0
+      # ── EXHAUSTION GROUP (need at least 1 of these 3) ───────────────────
+      # The 4 hard stops above are all positional/directional-agnostic —
+      # they are consistent with a market still in free-fall.
+      # At least 1 of these 3 must pass to confirm the fall is STALLING.
+      # Enforced by min_entry_indicators_required: 5 (4 hard stops + 1 here).
 
-      # 5. REPLACED ema_slope not_falling:
-      #    Reversal candle at the dip — doji or hammer signals indecision/rejection
-      #    at the range low. On flat range days, dojis are more common than
-      #    hammers as the signal for "this dip is done".
-      #    Not a hard_stop — adds timing confidence without blocking every entry.
+      # 5. Higher low — most recent closed candle's low is above the previous
+      #    closed candle's low. Selling exhaustion: each dip finds support
+      #    slightly higher. Works even when both candles are red.
+      #    Uses _candle_history (two confirmed closed candles).
       - type: "reversal_candle"
         params:
-          pattern: "engulfing"
+          pattern: "higher_low"
+          require_bull: false   # both candles can be red — low is what matters
 
-    min_entry_indicators_required: 4
+      # 6. Bull close — candle closed in the upper portion of its own range.
+      #    Even a red candle shows buyers absorbed sell pressure before close.
+      #    Uses prev_candle (single confirmed closed candle).
+      - type: "reversal_candle"
+        params:
+          pattern: "bull_close"
+          min_close_pct: 0.55   # closed in top 45% of its range
+
+      # 7. Doji — indecision at the range low, neither side in control.
+      #    Often fires 1-2 candles before higher_low would form, giving
+      #    the earliest possible entry signal.
+      #    Uses prev_candle (single confirmed closed candle).
+      - type: "reversal_candle"
+        params:
+          pattern: "doji"
+          max_body_pct: 0.35    # body <= 35% of total candle range
+
+    min_entry_indicators_required: 5
 
     # ATR filter (volatility)
     use_atr_filter: false

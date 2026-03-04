@@ -31,6 +31,13 @@ class TrendCache:
         
         # BB history for lookback breach checks (updated when indicators change)
         self._bb_history: Dict[str, list] = {}
+
+        # Closed candle OHLC history — populated from prev_candle on every
+        # indicator change.  Patterns like higher_low and bull_close need
+        # two *confirmed* closed candles, not one closed + one live candle.
+        # Stored as dicts: {timestamp, open, high, low, close}
+        # Kept to last 6 candles (patterns never need more than 3).
+        self._candle_history: Dict[str, list] = {}
         
         # Track statistics
         self._stats = {
@@ -117,6 +124,38 @@ class TrendCache:
                 # Keep last 15 candles (matches RSI history cap)
                 if len(self._bb_history[key]) > 15:
                     self._bb_history[key] = self._bb_history[key][-15:]
+
+            # Update closed candle OHLC history (for multi-candle reversal patterns)
+            # prev_candle always holds the most recently *closed* bar from Pine.
+            # We deduplicate on timestamp so re-fires of the same candle don't
+            # double-append (Pine can send the same prev_candle across several
+            # 15m bars before the next one closes).
+            if trend_data.prev_candle is not None:
+                pc = trend_data.prev_candle
+                if (pc.prev_open is not None and pc.prev_high is not None
+                        and pc.prev_low is not None and pc.prev_close is not None):
+                    if key not in self._candle_history:
+                        self._candle_history[key] = []
+
+                    # Deduplicate: only append if close price differs from last entry
+                    # (timestamp alone isn't reliable — Pine doesn't always send one)
+                    last = self._candle_history[key][-1] if self._candle_history[key] else None
+                    is_new_candle = (
+                        last is None
+                        or abs(last['close'] - pc.prev_close) > 0.0001
+                        or abs(last['open']  - pc.prev_open)  > 0.0001
+                    )
+                    if is_new_candle:
+                        self._candle_history[key].append({
+                            'timestamp': trend_data.timestamp,
+                            'open':  pc.prev_open,
+                            'high':  pc.prev_high,
+                            'low':   pc.prev_low,
+                            'close': pc.prev_close,
+                        })
+                        # Keep last 6 candles — no pattern needs more than 3
+                        if len(self._candle_history[key]) > 6:
+                            self._candle_history[key] = self._candle_history[key][-6:]
             
             # Persist to database if enabled
             if persist_to_db:
@@ -1070,148 +1109,245 @@ class TrendCache:
                 
             elif indicator_type == "reversal_candle":
                 """
-                Check for bullish reversal candle patterns using the previous
-                closed candle's OHLC data (prev_open/high/low/close from Pine).
+                Check for bullish reversal candle patterns.
 
-                Patterns:
-                  "hammer"     — small body at top, long lower wick (>=2x body),
-                                 tiny upper wick (<=0.3x body). Bullish reversal.
-                  "engulfing"  — current candle's body fully engulfs previous
-                                 candle's body AND current is bullish (close > open).
-                                 Requires 2 candles worth of data — uses prev_close
-                                 as current close and current_price as live price.
-                  "doji"       — open ≈ close (body < min_body_pct of total range).
-                                 Signals indecision / potential reversal.
+                Patterns that use only the single most-recent closed candle
+                (sourced from trend.prev_candle — Pine's previous closed bar):
+                  "hammer"    — long lower wick, small upper wick, real body.
+                  "doji"      — body tiny relative to total range (indecision).
+                  "bull_close"— candle closed in its upper half despite being
+                                red or small; sellers tried, buyers held.
 
-                params: {
-                    pattern:       "hammer"   # "hammer" | "engulfing" | "doji"
-                    min_body_pct:  0.1        # Min body as % of candle range (hammer/engulfing)
-                    max_body_pct:  0.3        # Max body as % of range for doji
-                }
+                Patterns that use _candle_history (two confirmed closed candles):
+                  "higher_low"  — candle[-1].low > candle[-2].low.
+                                  Selling exhaustion: each swing-low is shallower.
+                                  Works even when both candles are red.
+                  "engulfing"   — candle[-1] is bullish AND its body fully
+                                  contains candle[-2]'s body, AND candle[-2]
+                                  was bearish.  Uses two closed candles so the
+                                  pattern is confirmed, not approximated against
+                                  a live price.
+
+                Common params:
+                    pattern:       "doji"    # see list above
+                    min_body_pct:  0.1       # hammer/bull_close: min body as % of range
+                    max_body_pct:  0.35      # doji: max body as % of range
+                    min_close_pct: 0.6       # bull_close: close must be in top X% of range
+
+                History-based patterns fall back gracefully to the single
+                prev_candle when _candle_history has fewer than 2 entries.
                 """
-                pattern      = params.get("pattern", "hammer")
-                min_body_pct = params.get("min_body_pct", 0.1)
-                max_body_pct = params.get("max_body_pct", 0.3)
+                pattern        = params.get("pattern", "doji")
+                min_body_pct   = params.get("min_body_pct", 0.1)
+                max_body_pct   = params.get("max_body_pct", 0.35)
+                min_close_pct  = params.get("min_close_pct", 0.6)   # for bull_close
 
-                # ── Correctly read prev_candle fields ────────────────────────
-                # Pine sends the previous CLOSED candle's OHLC as:
-                #   prev_open, prev_high, prev_low, prev_close
-                # trend.price is the LIVE price — not the closed candle close.
+                values["pattern"] = pattern
+
+                # ── Helper: derive candle metrics from an OHLC dict ──────────
+                def _candle_metrics(o, h, l, c):
+                    total  = h - l
+                    body   = abs(c - o)
+                    l_wick = min(o, c) - l
+                    u_wick = h - max(o, c)
+                    return total, body, l_wick, u_wick, c > o   # (range, body, lw, uw, is_bull)
+
+                # ── Resolve which candles to use ─────────────────────────────
+                # For history-based patterns we prefer _candle_history so both
+                # candles are confirmed closed bars.  Single-candle patterns
+                # always use trend.prev_candle (most up-to-date closed bar).
+
+                ch_key   = f"{symbol}_{timeframe}"
+                ch       = self._candle_history.get(ch_key, [])
+                have_history = len(ch) >= 2
+
+                # Most-recent closed candle (used by all single-candle patterns
+                # and as the fallback for history-based ones)
                 if trend.prev_candle is not None:
-                    candle_open  = trend.prev_candle.prev_open
-                    candle_high  = trend.prev_candle.prev_high
-                    candle_low   = trend.prev_candle.prev_low
-                    candle_close = trend.prev_candle.prev_close   # ← was incorrectly trend.price
+                    pc_o = trend.prev_candle.prev_open
+                    pc_h = trend.prev_candle.prev_high
+                    pc_l = trend.prev_candle.prev_low
+                    pc_c = trend.prev_candle.prev_close
                 else:
-                    candle_open  = None
-                    candle_high  = None
-                    candle_low   = None
-                    candle_close = None
+                    pc_o = pc_h = pc_l = pc_c = None
 
-                values["candle_open"]  = candle_open
-                values["candle_high"]  = candle_high
-                values["candle_low"]   = candle_low
-                values["candle_close"] = candle_close
-                values["pattern"]      = pattern
-
-                if candle_open is None or candle_high is None or candle_low is None or candle_close is None:
-                    is_bullish = False
-                    msg = (
-                        f"Reversal candle ({pattern}): ✗ "
-                        f"(no prev_candle OHLC data — check Pine script is sending prev_candle fields)"
-                    )
-                else:
-                    total_range  = candle_high - candle_low
-                    body_size    = abs(candle_close - candle_open)
-                    lower_wick   = min(candle_open, candle_close) - candle_low
-                    upper_wick   = candle_high - max(candle_open, candle_close)
-                    is_bull_candle = candle_close > candle_open
-
-                    values["total_range"]    = round(total_range, 6)
-                    values["body_size"]      = round(body_size, 6)
-                    values["lower_wick"]     = round(lower_wick, 6)
-                    values["upper_wick"]     = round(upper_wick, 6)
-                    values["is_bull_candle"] = is_bull_candle
-
-                    if total_range == 0:
+                # ── Single-candle patterns ────────────────────────────────────
+                if pattern in ("hammer", "doji", "bull_close"):
+                    if pc_o is None:
                         is_bullish = False
-                        msg = f"Reversal candle ({pattern}): ✗ (zero range candle — doji)"
-                    
-                    elif pattern == "hammer":
-                        # Hammer criteria:
-                        #   1. Long lower wick (>= 2x body size)
-                        #   2. Small upper wick (<= 0.3x body size)
-                        #   3. Body is at least min_body_pct of total range
-                        #      (avoids gravestone doji being called a hammer)
-                        body_pct = body_size / total_range
-                        lower_wick_ratio = lower_wick / body_size if body_size > 0 else 0
-                        upper_wick_ratio = upper_wick / body_size if body_size > 0 else 999
-
-                        values["body_pct"]          = round(body_pct, 4)
-                        values["lower_wick_ratio"]  = round(lower_wick_ratio, 4)
-                        values["upper_wick_ratio"]  = round(upper_wick_ratio, 4)
-
-                        is_bullish = (
-                            lower_wick_ratio >= 2.0 and    # long lower wick
-                            upper_wick_ratio <= 0.3 and    # small upper wick
-                            body_pct >= min_body_pct       # has a real body
-                        )
                         msg = (
-                            f"Hammer: {'✓' if is_bullish else '✗'} "
-                            f"(lower_wick={lower_wick_ratio:.1f}x body, "
-                            f"upper_wick={upper_wick_ratio:.1f}x body, "
-                            f"body={body_pct:.1%} of range)"
+                            f"Reversal candle ({pattern}): ✗ "
+                            f"(no prev_candle OHLC — check Pine script)"
+                        )
+                    else:
+                        total, body, l_wick, u_wick, is_bull = _candle_metrics(pc_o, pc_h, pc_l, pc_c)
+                        values.update({
+                            "candle_open":  pc_o, "candle_high": pc_h,
+                            "candle_low":   pc_l, "candle_close": pc_c,
+                            "total_range":  round(total, 6),
+                            "body_size":    round(body, 6),
+                            "lower_wick":   round(l_wick, 6),
+                            "upper_wick":   round(u_wick, 6),
+                            "is_bull_candle": is_bull,
+                        })
+
+                        if total == 0:
+                            is_bullish = False
+                            msg = f"Reversal candle ({pattern}): ✗ (zero-range candle)"
+
+                        elif pattern == "hammer":
+                            # Long lower wick (>=2x body), small upper wick (<=0.3x body),
+                            # body at least min_body_pct of total range.
+                            body_pct       = body / total
+                            lw_ratio       = l_wick / body if body > 0 else 0
+                            uw_ratio       = u_wick / body if body > 0 else 999
+                            values["body_pct"]         = round(body_pct, 4)
+                            values["lower_wick_ratio"] = round(lw_ratio, 4)
+                            values["upper_wick_ratio"] = round(uw_ratio, 4)
+                            is_bullish = (lw_ratio >= 2.0 and uw_ratio <= 0.3
+                                          and body_pct >= min_body_pct)
+                            msg = (
+                                f"Hammer: {'✓' if is_bullish else '✗'} "
+                                f"(lower_wick={lw_ratio:.1f}x body, "
+                                f"upper_wick={uw_ratio:.1f}x body, "
+                                f"body={body_pct:.1%} of range)"
+                            )
+
+                        elif pattern == "doji":
+                            body_pct = body / total
+                            values["body_pct"] = round(body_pct, 4)
+                            is_bullish = body_pct <= max_body_pct
+                            msg = (
+                                f"Doji: {'✓' if is_bullish else '✗'} "
+                                f"(body={body_pct:.1%} of range, max={max_body_pct:.1%})"
+                            )
+
+                        elif pattern == "bull_close":
+                            # Candle closed in the upper portion of its range regardless
+                            # of whether it was a red or green candle.
+                            # close_position: 0.0 = closed at the low, 1.0 = at the high.
+                            # Use case: in a range, small red candles that hold their
+                            # upper half show buyers absorbing the sell pressure.
+                            close_pos = (pc_c - pc_l) / total if total > 0 else 0
+                            values["close_position"] = round(close_pos, 4)
+                            values["min_close_pct"]  = min_close_pct
+                            is_bullish = close_pos >= min_close_pct
+                            msg = (
+                                f"Bull close: {'✓' if is_bullish else '✗'} "
+                                f"(closed at {close_pos:.1%} of range, "
+                                f"need >={min_close_pct:.1%})"
+                            )
+
+                # ── Two-closed-candle patterns ────────────────────────────────
+                elif pattern in ("higher_low", "engulfing"):
+
+                    # Resolve the two closed candles.
+                    # Prefer history (both confirmed), fall back to history[-1] +
+                    # prev_candle if history only has one entry, and finally fall
+                    # back to prev_candle + current_price (old behaviour for
+                    # engulfing) so we degrade gracefully on first start.
+                    if have_history:
+                        c1 = ch[-2]   # older closed candle
+                        c2 = ch[-1]   # most-recent closed candle
+                        data_source = "history"
+                    elif len(ch) == 1 and pc_o is not None:
+                        # history has one entry; use prev_candle as c2
+                        c1 = ch[-1]
+                        c2 = {"open": pc_o, "high": pc_h, "low": pc_l, "close": pc_c}
+                        data_source = "partial_history"
+                    elif pc_o is not None:
+                        # No history yet — fall back to prev_candle vs live price
+                        # (only usable for engulfing; higher_low skips)
+                        c1 = {"open": pc_o,    "high": pc_h,          "low": pc_l,
+                              "close": pc_c}
+                        c2 = {"open": pc_c,    "high": current_price,  "low": current_price,
+                              "close": current_price}
+                        data_source = "live_fallback"
+                    else:
+                        c1 = c2 = None
+                        data_source = "no_data"
+
+                    values["data_source"] = data_source
+
+                    if c1 is None or c2 is None:
+                        is_bullish = False
+                        msg = (
+                            f"Reversal candle ({pattern}): ✗ "
+                            f"(no candle data — check Pine script and allow cache to warm up)"
+                        )
+
+                    elif pattern == "higher_low":
+                        # c2 (recent) low must be strictly above c1 (older) low.
+                        # Both can be red — the signal is that the sell pressure is
+                        # waning: each dip finds support at a higher level.
+                        # Optional: require c2 to also be a bull candle for a
+                        # stricter version (set require_bull: true in params).
+                        require_bull = params.get("require_bull", False)
+
+                        hl_ok   = c2["low"] > c1["low"]
+                        bull_ok = (not require_bull) or (c2["close"] > c2["open"])
+
+                        values["c1_low"]       = c1["low"]
+                        values["c2_low"]       = c2["low"]
+                        values["higher_low"]   = hl_ok
+                        values["require_bull"] = require_bull
+                        values["c2_is_bull"]   = c2["close"] > c2["open"]
+
+                        is_bullish = hl_ok and bull_ok
+                        msg = (
+                            f"Higher low: {'✓' if is_bullish else '✗'} "
+                            f"(c2_low={c2['low']:.4f} vs c1_low={c1['low']:.4f}"
+                            + (f", bull={bull_ok}" if require_bull else "")
+                            + f") [{data_source}]"
                         )
 
                     elif pattern == "engulfing":
-                        # Bullish engulfing criteria:
-                        #   1. Current candle is bullish (close > open)
-                        #   2. Current body fully contains previous candle's body
-                        #   3. Previous candle was bearish (open > close)
-                        # We use prev_candle as the "previous" candle and
-                        # current_price + prev_close as the "current" candle.
-                        # Since we only have one candle of history from Pine,
-                        # we approximate: prev candle = prev_open/close,
-                        # current candle = prev_close (open) → current_price (close)
-                        curr_open  = candle_close   # current candle opened at prev close
-                        curr_close = current_price  # current candle's live close
-                        prev_open  = candle_open
-                        prev_close = candle_close
+                        # Bullish engulfing (two confirmed closed candles):
+                        #   c1 (older) was bearish, c2 (recent) is bullish and
+                        #   its body fully contains c1's body.
+                        # Skip live_fallback for this pattern — an unfinished
+                        # candle can't confirm an engulf.
+                        if data_source == "live_fallback":
+                            is_bullish = False
+                            msg = (
+                                "Bullish engulfing: ✗ "
+                                "(candle history warming up — need 2 closed candles)"
+                            )
+                        else:
+                            c2_total, c2_body, _, _, c2_bull = _candle_metrics(
+                                c2["open"], c2["high"], c2["low"], c2["close"])
+                            _, c1_body, _, _, c1_bull = _candle_metrics(
+                                c1["open"], c1["high"], c1["low"], c1["close"])
 
-                        curr_bull = curr_close > curr_open
-                        prev_bear = prev_close < prev_open
-                        curr_body_low  = min(curr_open, curr_close)
-                        curr_body_high = max(curr_open, curr_close)
-                        prev_body_low  = min(prev_open, prev_close)
-                        prev_body_high = max(prev_open, prev_close)
+                            c1_bear        = not c1_bull
+                            c2_body_lo     = min(c2["open"], c2["close"])
+                            c2_body_hi     = max(c2["open"], c2["close"])
+                            c1_body_lo     = min(c1["open"], c1["close"])
+                            c1_body_hi     = max(c1["open"], c1["close"])
+                            engulfs        = (c2_body_lo <= c1_body_lo
+                                              and c2_body_hi >= c1_body_hi)
+                            body_pct       = c2_body / c2_total if c2_total > 0 else 0
 
-                        engulfs = curr_body_low <= prev_body_low and curr_body_high >= prev_body_high
+                            values.update({
+                                "c1_open": c1["open"], "c1_close": c1["close"],
+                                "c2_open": c2["open"], "c2_close": c2["close"],
+                                "c1_bear": c1_bear,    "c2_bull":  c2_bull,
+                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
+                            })
 
-                        values["curr_bull"]   = curr_bull
-                        values["prev_bear"]   = prev_bear
-                        values["engulfs"]     = engulfs
+                            is_bullish = c2_bull and c1_bear and engulfs
+                            msg = (
+                                f"Bullish engulfing: {'✓' if is_bullish else '✗'} "
+                                f"(c2_bull={c2_bull}, c1_bear={c1_bear}, "
+                                f"engulfs={engulfs}) [{data_source}]"
+                            )
 
-                        is_bullish = curr_bull and prev_bear and engulfs
-                        msg = (
-                            f"Bullish engulfing: {'✓' if is_bullish else '✗'} "
-                            f"(curr_bull={curr_bull}, prev_bear={prev_bear}, engulfs={engulfs})"
-                        )
-
-                    elif pattern == "doji":
-                        # Doji criteria: body is very small relative to total range
-                        # Signals indecision — potential reversal when at range extremes
-                        body_pct = body_size / total_range
-                        values["body_pct"] = round(body_pct, 4)
-
-                        is_bullish = body_pct <= max_body_pct
-                        msg = (
-                            f"Doji: {'✓' if is_bullish else '✗'} "
-                            f"(body={body_pct:.1%} of range, max={max_body_pct:.1%})"
-                        )
-
-                    else:
-                        is_bullish = False
-                        msg = f"Reversal candle: ✗ (unknown pattern '{pattern}' — use hammer/engulfing/doji)"
+                else:
+                    is_bullish = False
+                    msg = (
+                        f"Reversal candle: ✗ (unknown pattern '{pattern}' — "
+                        f"use hammer | doji | bull_close | higher_low | engulfing)"
+                    )
 
 
             elif indicator_type == "rsi_reversal_momentum":
