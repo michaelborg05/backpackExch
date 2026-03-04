@@ -157,7 +157,7 @@ RANGE_VARIANTS = {
             {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.05, "max_pct_b": 0.45, "hard_stop": True}},
             {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False}},
             {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55}},
-            {"type": "reversal_candle", "params": {"pattern": "doji", "min_close_pct": 0.35}},
+            {"type": "reversal_candle", "params": {"pattern": "doji", "min_close_pct": 0.2}},
         ],
         "min_entry_indicators_required": 5,        
     },

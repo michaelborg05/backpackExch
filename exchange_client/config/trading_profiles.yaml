@@ -526,7 +526,7 @@ profiles:
       - type: "reversal_candle"
         params:
           pattern: "doji"
-          max_body_pct: 0.35    # body <= 35% of total candle range
+          max_body_pct: 0.2    # body <= 35% of total candle range
 
     min_entry_indicators_required: 5
 
