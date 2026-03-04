@@ -440,7 +440,7 @@ profiles:
         params: 
           period: 14
           min_value: 35
-          use_momentum: True
+          use_momentum: false
       - type: "rsi_overbought"
         params:
           min_value: 62
