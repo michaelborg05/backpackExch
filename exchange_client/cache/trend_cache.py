@@ -912,7 +912,7 @@ class TrendCache:
                 
                 msg = (
                     f"Price below VWAP: {'✓' if is_bullish else '✗'} "
-                    f"({gap_pct:+.2f}% - need between {max_gap_pct:.1f}% and {min_gap_pct:.1f}%)"
+                    f"({gap_pct:+.2f}% - need between {max_gap_pct:.2f}% and {min_gap_pct:.2f}%)"
                 )
 
             elif indicator_type == "price_extended_below_ema":
