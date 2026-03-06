@@ -16,6 +16,7 @@ PERMISSIVE BY DEFAULT: Only blocks genuinely dangerous conditions
 """
 
 from typing import Optional, Tuple, Dict
+from decimal import Decimal
 from enum import Enum
 import time
 from utils.constants import StrategyType, MarketRegime
@@ -94,9 +95,15 @@ class RegimeFilter:
         if primary_trend is None:
             return MarketRegime.UNKNOWN, f"No {primary_timeframe}m data - cannot assess risk"
         
+
+        from cache.price_cache import get_price_cache
+        price_cache = get_price_cache()
+        price = price_cache.get_price(symbol)
+        current_price = float(price) if price is not None else confirm_trend.price
+
         # PRIORITY 1: Check for HIGH RISK (blocks everything)
         high_risk, risk_reason = self._check_high_risk(
-            symbol, primary_trend, confirm_trend, primary_timeframe, strategy_type=strategy_type
+            symbol, primary_trend, confirm_trend, primary_timeframe, strategy_type=strategy_type, price=current_price
         )
         if high_risk:
             regime = MarketRegime.HIGH_RISK
@@ -107,7 +114,7 @@ class RegimeFilter:
         
         # PRIORITY 2: Check for CHOPPY conditions (wait for better setup)
         is_choppy, chop_reason = self._check_choppy(
-            symbol, primary_trend, confirm_trend, primary_timeframe, confirm_timeframe
+            symbol, primary_trend, confirm_trend, primary_timeframe, confirm_timeframe, price=current_price
         )
         if is_choppy:
             regime = MarketRegime.CHOPPY
@@ -128,7 +135,8 @@ class RegimeFilter:
         primary_trend,
         confirm_trend,
         primary_timeframe: str,
-        strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
+        strategy_type: StrategyType = StrategyType.TREND_FOLLOWING,
+        price: Decimal = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Detect HIGH RISK conditions that invalidate ALL setups
@@ -136,7 +144,9 @@ class RegimeFilter:
         These are conditions where even a "perfect" 3/3 bullish trend should be avoided
         """
         rsi = primary_trend.rsi
-
+        if price is None:
+            price = confirm_trend.price
+            
         #1. Panic zone
         if strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
             # Original logic - block extreme panic
@@ -219,11 +229,15 @@ class RegimeFilter:
                 # (Do NOT check the inverse - that's a recovery, not a whipsaw)
                 if primary_diff_pct > self.whipsaw_threshold:  # Strong bullish 60m
                     if confirm_diff_pct < self.reversal_threshold:  # Strong bearish 15m (reversal)
-                        return True, (
-                            f"Whipsaw reversal - strong uptrend breaking "
-                            f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
-                        )
-        
+                        # NEW: Don't block if price has already recovered above the confirm EMA20
+                        # (EMAs are lagging — price above them means the "reversal" is already over)
+                        if price > confirm_trend.ema20:
+                            pass  # Recovery, not breakdown — let it through
+                        else:
+                            return True, (
+                                f"Whipsaw reversal - strong uptrend breaking "
+                                f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
+                            )    
         
          
         # 5. DISTRIBUTION PATTERN - High volume selling
@@ -231,7 +245,7 @@ class RegimeFilter:
         if primary_trend.volume_ratio is not None:
             if primary_trend.volume_ratio > self.distribution_volume:
                 # High volume - check if it's selling pressure
-                if primary_trend.price < primary_trend.vwap:  # Below VWAP
+                if price < primary_trend.vwap:  # Below VWAP
                     # Get RSI momentum to confirm distribution
                     rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
                         symbol, primary_timeframe
@@ -247,7 +261,8 @@ class RegimeFilter:
         primary_trend,
         confirm_trend,
         primary_timeframe: str,
-        confirm_timeframe: str
+        confirm_timeframe: str,
+        price: Decimal = None
     ) -> Tuple[bool, str]:
         """
         Detect CHOPPY conditions where trends are unreliable
@@ -256,7 +271,11 @@ class RegimeFilter:
         This is about "is the market structure clean enough to trade?"
         """
         issues = []
-        
+
+        if price is None:
+            price = primary_trend.price
+            
+
         # 1. EMA COMPRESSION - Tight range indicates indecision
         ema_diff_pct = abs(((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100)
         if ema_diff_pct < self.chop_ema_range_pct:
@@ -304,9 +323,9 @@ class RegimeFilter:
 
         # 4. PRICE STAGNATION (NEW - use price vs EMA as proxy)
         # If price is very close to BOTH EMA20 and EMA50, it's oscillating (dead)
-        price_ema20_gap = abs((primary_trend.price - primary_trend.ema20) / 
+        price_ema20_gap = abs((price - primary_trend.ema20) / 
                               primary_trend.ema20) * 100
-        price_ema50_gap = abs((primary_trend.price - primary_trend.ema50) / 
+        price_ema50_gap = abs((price - primary_trend.ema50) / 
                               primary_trend.ema50) * 100
         
         if price_ema20_gap < 0.3 and price_ema50_gap < 0.5:
