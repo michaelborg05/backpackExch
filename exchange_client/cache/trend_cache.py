@@ -1349,6 +1349,65 @@ class TrendCache:
                         f"use hammer | doji | bull_close | higher_low | engulfing)"
                     )
 
+                # ── Post-pattern guard: price must not have dropped too far
+                # from the candle close since the signal fired.
+                #
+                # Why this matters: a bull_close (or any reversal pattern) is
+                # evaluated against the *closed* candle.  If the live price has
+                # already fallen X% below that close by the time the entry order
+                # runs, the bullish thesis is already breaking down and buying
+                # here means chasing the exit of the move, not joining it.
+                #
+                # Applies to ALL patterns — the candle close is always the
+                # reference price the pattern used to signal, so any material
+                # drop from that close is a red flag regardless of pattern type.
+                #
+                # params:
+                #   max_drop_from_close_pct: float  (default: None = disabled)
+                #       Maximum allowed drop (%) from the candle close to the
+                #       current live price.  E.g. 0.5 means "block if price is
+                #       already >0.5% below the candle close".
+                #       Recommended starting value: 0.4–0.6 for 15m candles.
+                #
+                # YAML example:
+                #   - type: "reversal_candle"
+                #     params:
+                #       pattern: "bull_close"
+                #       min_close_pct: 0.55
+                #       max_drop_from_close_pct: 0.5   # block if price drops >0.5% from close
+                #
+                max_drop_from_close_pct = params.get("max_drop_from_close_pct", None)
+                if max_drop_from_close_pct is not None:
+                    # Determine the reference candle close (whichever the pattern used)
+                    ref_close = None
+                    if pattern in ("hammer", "doji", "bull_close") and pc_c is not None:
+                        ref_close = pc_c
+                    elif pattern in ("higher_low", "engulfing"):
+                        # Use c2 close if we resolved it, otherwise fall back to prev_candle
+                        try:
+                            ref_close = c2["close"] if c2 is not None else pc_c
+                        except (NameError, TypeError):
+                            ref_close = pc_c
+
+                    if ref_close is not None and ref_close > 0:
+                        drop_pct = ((ref_close - current_price) / ref_close) * 100
+                        values["candle_close_ref"]      = ref_close
+                        values["drop_from_close_pct"]   = round(drop_pct, 4)
+                        values["max_drop_from_close_pct"] = max_drop_from_close_pct
+
+                        if drop_pct > max_drop_from_close_pct:
+                            # Price has fallen too far below the candle close —
+                            # override the pattern result regardless of what it found.
+                            prev_result = "✓" if is_bullish else "✗"
+                            is_bullish = False
+                            msg = (
+                                f"Reversal candle ({pattern}): ✗ "
+                                f"(pattern {prev_result} but price dropped "
+                                f"{drop_pct:.2f}% from candle close "
+                                f"${ref_close:.4f} → ${current_price:.4f}, "
+                                f"max allowed {max_drop_from_close_pct:.2f}%)"
+                            )
+
 
             elif indicator_type == "rsi_reversal_momentum":
                 # Parameters

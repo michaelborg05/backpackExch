@@ -510,7 +510,7 @@ profiles:
         params:
           pattern: "higher_low"
           require_bull: false   # both candles can be red — low is what matters
-
+          max_drop_from_close_pct: 0.5
       # 6. Bull close — candle closed in the upper portion of its own range.
       #    Even a red candle shows buyers absorbed sell pressure before close.
       #    Uses prev_candle (single confirmed closed candle).
@@ -518,6 +518,7 @@ profiles:
         params:
           pattern: "bull_close"
           min_close_pct: 0.55   # closed in top 45% of its range
+          max_drop_from_close_pct: 0.5
 
       # 7. Doji — indecision at the range low, neither side in control.
       #    Often fires 1-2 candles before higher_low would form, giving
@@ -527,6 +528,7 @@ profiles:
         params:
           pattern: "doji"
           max_body_pct: 0.2    # body <= 35% of total candle range
+          max_drop_from_close_pct: 0.5
 
     min_entry_indicators_required: 5
 
