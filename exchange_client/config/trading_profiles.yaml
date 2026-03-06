@@ -204,7 +204,7 @@ profiles:
       - type: "rsi_reversal_momentum"
         params:
           lookback_candles: 8        # Last 20 hours (5 x 4H)
-          oversold_threshold: 35      # Must have been <30
+          oversold_threshold: 45      # stretched to 45 to catch more swings
           current_min: 36             # Current must be >35
           min_jump: 4.0               # Must have jumped >5 at some point
           require_sustained: true     # Must be rising for 2+ candles
@@ -232,7 +232,7 @@ profiles:
       - type: "rsi_reversal_momentum"
         params:
           lookback_candles: 15        # Last 5 hours
-          oversold_threshold: 34      # Less extreme on 1H
+          oversold_threshold: 45      # Less extreme on 1H
           current_min: 38             # Current must be >35
           min_jump: 3.0               # Smaller jump ok on 1H
           require_sustained: true
