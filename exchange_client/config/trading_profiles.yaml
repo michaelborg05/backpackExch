@@ -7,85 +7,157 @@ profiles:
 
     strategy_type: trend_following
 
-    take_profit_pct: 0.75
-    stop_loss_pct: 0.6
-    trailing_stop_pct: 0.5
-    arm_trailing_stop_pct: 0.5
+    take_profit_pct: 1.8
+    stop_loss_pct: 1.2
+    trailing_stop_pct: 0.8
+    arm_trailing_stop_pct: 0.9      # Only arm after a confirmed move, not on small bounces
     use_trailing_stop: true
 
-    #position sizing
-    default_order_size_usdc: 100.0      # Buy $100 per order
-    max_position_size_pct: 40.0         # Max 40% of portfolio per symbol
-    
+    # Position sizing
+    default_order_size_usdc: 100.0
+    max_position_size_pct: 40.0
+
     # Risk management
-    max_open_positions: 1               # Max concurrent positions per token
-    max_portfolio_exposure_pct: 100.0    # Max 100% in positions total
+    max_open_positions: 2
+    max_portfolio_exposure_pct: 100.0
 
     use_market_regime_filter: true
 
-    # 🎯 SIGNAL GENERATION SETTINGS (NEW)
-    enable_signal_generation: false    # Enable automated signal generation
-    signal_timeframe: "15"           # Timeframe for entry signals
-    signal_cooldown_seconds: 900      # Wait 15min between signals for same symbol
-    min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
-    min_volume_ratio: 1.0             # Require 10% above average volume
+    # Signal generation
+    enable_signal_generation: true
+    signal_timeframe: "15"
+    signal_cooldown_seconds: 900
+    min_signal_confidence: 72.0
+    min_volume_ratio: 1.0             # Require slightly above-average volume — trends need participation
 
-    # Trend filters
-    use_trend_filter: false
-    trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
+    use_trend_filter: true
+    trend_timeframe: "60"
+
     trend_indicators:
-      - type: "rsi_range"  # NEW: Ensure 60m trend is rising
-        params:
-          min: 30
-          max: 65
-          invert: true
+
+      # 1. EMA20 must be actively rising on 1h — not just flat.
       - type: "ema_slope"
         params:
           ema: 20
           direction: "not_falling"
-          min_slope_pct: 0.01   # hourly trend must at least be flat
-    min_indicators_required: 2
-    use_entry_filter: true
-    entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
-    entry_indicators:
-      - type: "price_vs_ema"  # NEW: Price must be at/above EMA20
-        params:
-          ema: 20
-          min_gap_pct: -0.5
-          max_gap_pct: 1.5
-      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
-        params:
-          ema: 20
-          direction: "rising"
-          min_slope_pct: 0.02
-      - type: "ema_slope"  # NEW: Ensure 15m trend is rising
-        params:
-          ema: 50
-          direction: "not_falling"
           min_slope_pct: 0.01
-      - type: "rsi_threshold"
+          hard_stop: true
+      - type: "bollinger_bands"
         params:
-          period: 14
-          min_value: 54
-          use_momentum: true
-          early_threshold: 40
+          band: "lower"
+          mode: "pct_b"
+          min_pct_b: 0.05
+          max_pct_b: 0.95
+          hard_stop: true
+
+      # 2. EMA cross: EMA20 must be above EMA50 on the 1h.
+      #- type: "ema_cross"
+      #  params:
+      #    hard_stop: true
+
+      # 3. ADX >= 20 on 1h confirms a real trend exists (not ranging).
+      - type: "adx_regime"
+        params:
+          min_adx: 23
+          max_adx: 60             # No ceiling — strong trends are fine
+          hard_stop: true
+      # 4. 60m trend filter — replace existing rsi_overbought with lookback version:
+      - type: "rsi_overbought"
+        params:
+          min_value: 68
+          lookback_candles: 5     # Blocks T3 (69.3 in history), passes T1 (max 65.0)
+          hard_stop: true
+    
+    min_indicators_required: 3
+
+    use_entry_filter: true
+    entry_timeframe: "15"
+
+    entry_indicators:
+
+      - type: "ema_gap"
+        params:
+          min_gap_pct: 0.15
+          mode: "min"
+          hard_stop: true
+      - type: "price_vs_ema"
+        params:
+          ema: 20
+          min_gap_pct: -1.5
+          max_gap_pct: 2.0
+          hard_stop: true
+      - type: "bollinger_bands"
+        params:
+          band: "lower"
+          mode: "pct_b"
+          max_pct_b: 0.90
           hard_stop: true
       - type: "rsi_overbought"
         params:
-          min_value: 70
+          min_value: 68
+          lookback_candles: 6
           hard_stop: true
-      - type: "price_vs_vwap"
-        params: {}
-    min_entry_indicators_required: 5
+      - type: "rsi_reversal_momentum"
+        params:
+          lookback_candles: 10
+          oversold_threshold: 48    # Raised from 50 — catches the Feb28 15:03 dip to 47
+          current_min: 36
+          min_jump: 3.0
+          require_sustained: false
+          hard_stop: false          # NOT a hard stop — scoring indicator
 
-    # ATR filter (volatility)
+      # Path B: Trend continuation — RSI holding in bullish zone (50–68)
+      # Passes when RSI is between 50-67 and momentum is not falling.
+      # No dip required — just sustained trend-level RSI.
+      - type: "rsi_range"
+        params:
+          min: 50
+          max: 67
+          invert: true              # invert:true = PASS when RSI IS in range
+          hard_stop: false
+      # ── CANDLE CONFIRMATION GROUP (need at least 1 of 3) ───────
+      # The 4 hard stops above confirm position and momentum but don't
+      # confirm the exact moment the pullback is ending.
+      # At least 1 of these 3 must pass to confirm the turn is happening
+
+      # 5. Bullish engulfing — strongest reversal signal.
+      - type: "reversal_candle"
+        params:
+          pattern: "engulfing"
+          max_drop_from_close_pct: 0.6
+
+      # 6. Bull close — candle closed in the upper 55%+ of its own range.
+      #    Even a red candle that closes near its high shows buyers absorbed
+      #    sell pressure. Fires earlier than engulfing and catches the
+      #    pullback low more precisely.
+      - type: "reversal_candle"
+        params:
+          pattern: "bull_close"
+          min_close_pct: 0.55
+          max_drop_from_close_pct: 0.6
+
+      # 7. Higher low — most recent closed candle's low is above the prior low.
+      #    Selling pressure is waning: each dip finds support slightly higher.
+      #    Works even when both candles are red — the low is what matters.
+      #    Complements bull_close: bull_close catches the candle body turning,
+      #    higher_low catches the wick structure turning.
+      - type: "reversal_candle"
+        params:
+          pattern: "higher_low"
+          require_bull: false
+          max_drop_from_close_pct: 0.6
+
+    # 4 hard stops + 1 candle confirmation = 5 minimum
+    # Passes if all hard stops pass + at least 1 candle pattern fires
+    min_entry_indicators_required: 6
+
     use_atr_filter: false
      # Trend-based exit (intelligent)
     use_trend_invalidation_exit: true
     trend_invalidation_indicators: entry #trend or entry
     min_position_age_for_trend_check: 60  # minutes
     # Time-based invalidation and max position backstop (last resort)
-    max_position_hours: 12  # Force exit if stuck
+    max_position_hours: 18  # Force exit if stuck
 
   profile3:
     display_name: "swing_4h1h_simple"
@@ -291,6 +363,7 @@ profiles:
         params:
           pattern: "hammer"
           min_body_pct: 0.08    
+          max_drop_from_close_pct: 0.5
 
     min_entry_indicators_required: 4  # Need 4/5 or 4/6
     # ATR filter (volatility)
@@ -367,6 +440,7 @@ profiles:
         params:
           pattern: "hammer"
           min_body_pct: 0.08    # Candle structure confirms buyer
+          max_drop_from_close_pct: 0.5
       - type: "bollinger_bands"
         params:
           band: "lower"
@@ -543,44 +617,3 @@ profiles:
     max_position_hours: 4  # Force exit if stuck
 
 
-
-# =============================================================================
-# SUMMARY OF YAML CONFIGS THAT NOW WORK CORRECTLY
-# =============================================================================
-#
-# Bollinger Bands — pct_b mode (best for range trading):
-#
-#   - type: "bollinger_bands"
-#     params:
-#       band: "lower"
-#       mode: "pct_b"
-#       max_pct_b: 0.25    # Price in lower 25% of band = near lower band
-#
-#   - type: "bollinger_bands"
-#     params:
-#       band: "upper"
-#       mode: "pct_b"
-#       min_pct_b: 0.75    # Block if price already in upper 25% of band
-#       hard_stop: true
-#
-# Bollinger Bands — touch mode:
-#
-#   - type: "bollinger_bands"
-#     params:
-#       band: "lower"
-#       mode: "touch"
-#       tolerance_pct: 0.3   # Within 0.3% of lower band
-#
-# Reversal candle — hammer:
-#
-#   - type: "reversal_candle"
-#     params:
-#       pattern: "hammer"
-#       min_body_pct: 0.1    # Body must be at least 10% of total candle range
-#
-# Reversal candle — doji (useful for range trading — indecision at range low):
-#
-#   - type: "reversal_candle"
-#     params:
-#       pattern: "doji"
-#       max_body_pct: 0.2    # Body must be <= 20% of range to qualify as doji

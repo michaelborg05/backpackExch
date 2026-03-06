@@ -76,8 +76,8 @@ def run_sweep(args, profile_config: dict):
 
         # Take-profit / stop-loss ratio sweep
         "tp_sl": {
-            "take_profit_pct": [0.5, 0.8, 1.0, 1.5, 2.0],
-            "stop_loss_pct":   [0.4, 0.6, 0.7, 0.8, 1.0],
+            "take_profit_pct": [0.8, 1.0, 1.5, 2.0,2.5,3],
+            "stop_loss_pct":   [0.7, 0.8, 1.0,1.5,2.5,3],
         },
 
         # Trailing stop sensitivity
@@ -104,15 +104,15 @@ def run_sweep(args, profile_config: dict):
 def main():
     import sys
     parser = argparse.ArgumentParser(description="Run strategy backtests")
-    parser.add_argument("--profile",    default="profile3",       help="Profile name from YAML")
-    parser.add_argument("--symbol",     default="SOL_USDC",      help="Trading pair")
+    parser.add_argument("--profile",    default="default",       help="Profile name from YAML")
+    parser.add_argument("--symbol",     default="BTC_USDC",      help="Trading pair")
     parser.add_argument("--days",       type=int, default=7,     help="Lookback window in days")
     parser.add_argument("--yaml",       default="config/trading_profiles.yaml", help="Path to profiles YAML")
     parser.add_argument("--sweep",      action="store_true",     help="Run parameter sweep", default=False)
     parser.add_argument("--sweep-grid", default="tp_sl",
                         choices=["confidence_volume", "tp_sl", "trailing"],
                         help="Which parameter grid to sweep")
-    parser.add_argument("--trades",     action="store_true",     help="Print per-trade log (single run only)", default=True)
+    parser.add_argument("--trades",     action="store_true",     help="Print per-trade log (single run only)", default=False)
     parser.add_argument("--verbose",    action="store_true",     help="Print per-candle debug")
     parser.add_argument("--csv",        action="store_true",     help="Export sweep results to CSV", default=False)
     args = parser.parse_args()

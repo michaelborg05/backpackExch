@@ -152,12 +152,12 @@ class SignalGenerator:
             )
 
             if not can_trade:
-                self.logger.debug(
+                self.logger.info(
                     f"{symbol}: Market regime blocked - {regime_reason}"
                 )
                 return None
         else:
-            self.logger.debug(
+            self.logger.info(
                 f"{symbol}: Market regime filter not applied"
             )
             regime_reason = "Regime filter disabled"
@@ -178,12 +178,12 @@ class SignalGenerator:
             )
             
             if not can_enter:
-                self.logger.debug(
+                self.logger.info(
                     f"{symbol}: Re-entry blocked - {reentry_reason}"
                 )
                 return None
             else:
-                self.logger.debug(
+                self.logger.info(
                     f"{symbol}: Re-entry OK - {reentry_reason}"
                 )
                        
@@ -220,11 +220,15 @@ class SignalGenerator:
             validation.trend_validation.summary = trend_reason
 
             if not trend_check:
-                self.logger.debug(
+                self.logger.info(
                     f"{symbol}: ❌ Trend filter failed ({self.trend_timeframe}m) - {trend_reason}"
                 )
                 return None
-            
+            else:
+                self.logger.info(
+                    f"{symbol}: ✅ Trend filter passed ({self.trend_timeframe}m) - {trend_reason}"
+                )
+
             reasons.append(f"✅ Trend ({self.trend_timeframe}m): {trend_reason}")
             confidence_score += self.trend_weight
 
