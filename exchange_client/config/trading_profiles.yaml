@@ -32,7 +32,6 @@ profiles:
 
     use_trend_filter: true
     trend_timeframe: "60"
-
     trend_indicators:
 
       # 1. EMA20 must be actively rising on 1h — not just flat.
@@ -409,27 +408,48 @@ profiles:
     min_signal_confidence: 70.0       # Only trade signals >= 75% confidence
     min_volume_ratio: 1.1             # Require 10% above average volume
 
-    # Trend filters
-    use_trend_filter: false
-    trend_timeframe: "60"  # Check 60 (1hr) trend for 15m trades
+    use_trend_filter: true
+    trend_timeframe: "60"
     trend_indicators:
-      - type: "ema_slope"  # NEW: Ensure 60m trend is rising
+
+      # 1. EMA20 must be actively rising on 1h — not just flat.
+      - type: "ema_slope"
         params:
           ema: 20
-          direction: "rising"
-          min_slope_pct: 0.02
-      - type: "rsi_threshold"
-        params: 
-          period: 14
-          min_value: 52
-          use_momentum: true
-          early_threshold: 40
-      - type: "price_vs_vwap"
-        params: {}
-    min_indicators_required: 2  # Require 3/4 (stricter)
+          direction: "not_falling"
+          min_slope_pct: 0.01
+          hard_stop: true
+      - type: "bollinger_bands"
+        params:
+          band: "lower"
+          mode: "pct_b"
+          min_pct_b: -0.05
+          max_pct_b: 0.95
+          hard_stop: true
+
+      # 2. EMA cross: EMA20 must be above EMA50 on the 1h.
+      #- type: "ema_cross"
+      #  params:
+      #    hard_stop: true
+
+      # 3. ADX >= 20 on 1h confirms a real trend exists (not ranging).
+      - type: "adx_regime"
+        params:
+          min_adx: 20
+          max_adx: 60             # No ceiling — strong trends are fine
+          hard_stop: true
+      # 4. 60m trend filter — replace existing rsi_overbought with lookback version:
+      - type: "rsi_overbought"
+        params:
+          min_value: 68
+          lookback_candles: 5     # Blocks T3 (69.3 in history), passes T1 (max 65.0)
+          hard_stop: true
+    
+    min_indicators_required: 4
 
     use_entry_filter: true
-    entry_timeframe: "15"  # Same as signal_timeframe for single-TF strategy
+    entry_timeframe: "15"
+
     entry_indicators:
       - type: "price_vs_ema"  # NEW: Price must be at/above EMA20
         params:
