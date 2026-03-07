@@ -315,10 +315,10 @@ profiles:
       # 1. RSI oversold and turning up
       - type: "rsi_reversal_momentum"
         params:
-          lookback_candles: 3        # Last X candles
+          lookback_candles: 6        # Last X candles
           oversold_threshold: 33      # was below this in past X candles
           current_min: 38             # Currently above this 
-          min_jump: 3.0               # Jumped by at least this much in 1 candle
+          min_jump: 4.0               # Jumped by at least this much in 1 candle
           require_sustained: true     # Last 2 candles have risen
           hard_stop: true
 
