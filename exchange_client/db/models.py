@@ -1,5 +1,5 @@
 # db/models.py
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint, text
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from utils.constants import TradeReason, PositionCloseReason
@@ -47,7 +47,7 @@ class Trade(Base):
     quantity = Column(Numeric(20, 8), nullable=False)
     price = Column(Numeric(20, 8), nullable=False)
     exchange = Column(String, default="backpack")
-    reason = Column(String, default=TradeReason.MANUAL) 
+    reason = Column(String, default=TradeReason.MANUAL, server_default=text("'MANUAL'")) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     reason_summary = Column(JSON, nullable=True)
 
@@ -63,13 +63,13 @@ class Position(Base):
     profile_name = Column(String, index=True)
     symbol = Column(String, nullable=False)
     
-    quantity = Column(Numeric(20, 8), nullable=False)  # Original quantity
-    remaining_quantity = Column(Numeric(20, 8), nullable=False)  # Amount still open
+    quantity = Column(Numeric(20, 8), nullable=False, server_default=text("0"))  # Original quantity
+    remaining_quantity = Column(Numeric(20, 8), nullable=False, server_default=text("0"))  # Amount still open
     
-    buy_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=False)
+    buy_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
     sell_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
     
-    entry_price = Column(Numeric(20, 8), nullable=False)
+    entry_price = Column(Numeric(20, 8), nullable=False, server_default=text("0"))
     exit_price = Column(Numeric(20, 8), nullable=True)
 
     tp_price = Column(Numeric(20, 8), nullable=True)
@@ -78,12 +78,11 @@ class Position(Base):
     highest_price = Column(Numeric(20, 8), nullable=True)
     lowest_price = Column(Numeric(20, 8), nullable=True)
 
-    trailing_stop_armed = Column(Boolean, default=False)
+    trailing_stop_armed = Column(Boolean, default=False, server_default=text("false"))
         
     profit = Column(Numeric(20, 8), nullable=True)
-    status = Column(String, nullable=False)
     status = Column(String, default="OPEN")  # OPEN or CLOSED or PARTIALLY_CLOSED
-    close_reason = Column(String, nullable=True) 
+    close_reason = Column(String, nullable=True, server_default=text("'MANUAL'")) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     closed_at = Column(DateTime(timezone=True))
 
@@ -286,7 +285,7 @@ class TradeValidationResults(Base):
     id = Column(Integer, primary_key=True)
     trade_id = Column(Integer, ForeignKey('trades.id'), nullable=False)
     profile_name = Column(String, nullable=False)
-    side = Column(String, nullable=False)
+    side = Column(String, nullable=True)
     symbol = Column(String, nullable=False)
     validation_summary = Column(String)
 
