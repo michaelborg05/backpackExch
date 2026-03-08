@@ -145,7 +145,7 @@ SWING_VARIANTS = {
                 "lookback_candles":    8,
                 "oversold_threshold":  45,
                 "current_min":         36,
-                "min_jump":            4.0,
+                "min_jump":            3,
                 "require_sustained":   True,
                 "sustained_rise_mode": "net",
                 "hard_stop":           True,

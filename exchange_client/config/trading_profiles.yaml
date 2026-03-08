@@ -205,7 +205,7 @@ profiles:
           lookback_candles: 8        # Last 20 hours (5 x 4H)
           oversold_threshold: 45      # stretched to 45 to catch more swings
           current_min: 36             # Current must be >35
-          min_jump: 2.9               # Must have jumped >5 at some point
+          min_jump: 3                 # Must have jumped >5 at some point
           require_sustained: true     # Must be rising for 2+ candles
           sustained_rise_mode: "net"
           hard_stop: true             # BLOCK if fails
@@ -316,7 +316,7 @@ profiles:
       - type: "rsi_reversal_momentum"
         params:
           lookback_candles: 6        # Last X candles
-          oversold_threshold: 33      # was below this in past X candles
+          oversold_threshold: 35      # was below this in past X candles
           current_min: 38             # Currently above this 
           min_jump: 4.0               # Jumped by at least this much in 1 candle
           require_sustained: true     # Last 2 candles have risen
