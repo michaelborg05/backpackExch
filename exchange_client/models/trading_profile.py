@@ -109,10 +109,7 @@ class TradingProfile(BaseModel):
             f"threshold={self.atr_threshold}, "
             f"mode={self.atr_filter_mode}"
         )
-        
-        if self.atr_max_threshold:
-            summary += f", max={self.atr_max_threshold}"
-        
+                
         return summary
     
  

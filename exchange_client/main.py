@@ -5,8 +5,9 @@ from services.alerting import initialize_health_alerting_service
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
-from services.profile_manager import load_profiles, set_profile_manager
+from services.profile_manager import load_profiles_from_db, set_profile_manager
 from cache.settings_cache import initialize_settings_cache
+from db.utils import get_db_session
 
 project_root = Path(__file__).parent
 config = Config()
@@ -21,9 +22,10 @@ if __name__ == "__main__":
 
     # Load and set profile manager
     main_logger.info("Loading trading profiles...")
-    profile_manager = load_profiles()
-    set_profile_manager(profile_manager)
-    main_logger.info(f"Loaded {len(profile_manager._profiles)} trading profiles")
+    with get_db_session() as db:
+        profile_manager = load_profiles_from_db(db)
+        set_profile_manager(profile_manager)
+        main_logger.info(f"Loaded {len(profile_manager._profiles)} trading profiles")
 
     # Initialize and start monitoring service
     monitoring = MonitoringService()

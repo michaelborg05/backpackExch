@@ -23,7 +23,7 @@ from models.trading_signal import TradingSignal
 from models.trade import OrderResponse
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
-from services.profile_manager import get_profile_manager
+from services.profile_manager import get_profile_manager, load_profiles_from_db
 from services.signal_generator import get_signal_generator
 from utils.position_calculator import get_position_size_calculator
 from cache.trend_cache import initialize_trend_cache_with_db
@@ -94,6 +94,7 @@ class MonitoringService:
 
         self._trend_invalidation_counter = 0
         self.position_validation_counter = 0
+        self._profile_refresh_counter = 0
 
     def start(self):
         """Start the monitoring loop in a background thread"""
@@ -157,8 +158,14 @@ class MonitoringService:
                 self._dust_conversion_counter += 1
                 self._signal_check_counter += 1
                 self._trend_invalidation_counter += 1
+                self._profile_refresh_counter += 1
                 self.logger.debug(f"Beginning loop #{self.call_count}")
-                
+
+                #refresh profiles from db every X cycles
+                if self._profile_refresh_counter >= self.settings.profile_refresh_interval:
+                    self._refresh_profiles()
+                    self._profile_refresh_counter = 0                
+
                 # Monitor prices for all tickers
                 self._monitor_prices()
                 
@@ -239,6 +246,42 @@ class MonitoringService:
         except Exception as e:
             self.logger.error(f"Error getting balances: {e}")
 
+    def _refresh_profiles(self) -> None:
+        """
+        Reload all active trading profiles from the database and hot-swap them
+        into the existing ProfileManager instance without restarting the service.
+
+        Design notes:
+        - Uses ProfileManager.replace_profiles() so all existing references
+        (cached locally in other services) continue to point at the same
+        ProfileManager object — only its internal dict is swapped.
+        - Failures are caught and logged; the previous profiles remain active,
+        so a transient DB hiccup never kills live trading.
+        - Added/removed profiles take effect on the next loop after the refresh.
+        """
+        try:
+            with get_db_session() as db:
+                new_pm = load_profiles_from_db(db)
+
+            current_pm = get_profile_manager()
+            old_names  = set(current_pm.get_profile_names())
+            new_names  = set(new_pm.get_profile_names())
+
+            added   = new_names - old_names
+            removed = old_names - new_names
+
+            # Hot-swap: replace the dict inside the existing singleton
+            current_pm.replace_profiles(new_pm.get_profiles_dict())
+
+            if added:
+                self.logger.info(f"[ProfileRefresh] Added profiles: {', '.join(sorted(added))}")
+            if removed:
+                self.logger.info(f"[ProfileRefresh] Removed profiles: {', '.join(sorted(removed))}")
+            if not added and not removed:
+                self.logger.debug("[ProfileRefresh] Profiles unchanged")
+
+        except Exception as e:
+            self.logger.error(f"[ProfileRefresh] Failed to reload profiles — keeping existing: {e}", exc_info=True)
 
 
     def _convert_balances_to_dict(self, balances) -> Dict[str, Dict]:

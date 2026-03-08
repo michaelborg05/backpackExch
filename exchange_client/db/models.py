@@ -31,10 +31,51 @@ class TradingProfileDB(Base):
     max_position_size_pct = Column(Numeric, nullable=True)
     max_open_positions = Column(Numeric, nullable=True)
     max_portfolio_exposure_pct = Column(Numeric, nullable=True)
+
+    strategy_type = Column(String, default="trend_following")
+    
+    # Timing & Signal Generation
+    signal_timeframe = Column(String, default="15")
+    signal_cooldown_seconds = Column(Integer, default=900)
+    min_signal_confidence = Column(Float, default=72.0)
+    min_volume_ratio = Column(Float, default=1.0)
+    
+    # Filter Toggles
+    use_market_regime_filter = Column(Boolean, default=True)
+    use_trend_filter = Column(Boolean, default=True)
+    use_entry_filter = Column(Boolean, default=True)
+    use_atr_filter = Column(Boolean, default=False)
+    
+    # Logic Settings
+    trend_timeframe = Column(String, default="60")
+    entry_timeframe = Column(String, default="15")
+    min_indicators_required = Column(Integer, default=3)
+    min_entry_indicators_required = Column(Integer, default=6)
+    
+    # Relationship to Indicators
+    indicators = relationship("IndicatorDB", back_populates="profile", cascade="all, delete-orphan")
     # Metadata
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class IndicatorDB(Base):
+    __tablename__ = "indicators"
+    
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(Integer, ForeignKey("trading_profiles.id", ondelete="CASCADE"))
+    
+    category = Column(String)  # 'trend', 'entry', or 'exit'
+    indicator_type = Column(String)  # 'ema_slope', 'rsi_overbought', etc.
+    
+    # Store all YAML 'params' here as JSON
+    params = Column(JSON, nullable=False) 
+    
+    is_hard_stop = Column(Boolean, default=True)
+    enabled = Column(Boolean, default=True)
+    
+    profile = relationship("TradingProfileDB", back_populates="indicators")
 
 class Trade(Base):
     __tablename__ = "trades"

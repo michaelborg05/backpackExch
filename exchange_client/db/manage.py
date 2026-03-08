@@ -8,7 +8,7 @@ sys.path.insert(0, str(project_root))
 
 from db.models import Trade, Position
 from db.session import engine,SessionLocal
-from db.models import Base,TradingProfileDB
+from db.models import Base,TradingProfileDB, IndicatorDB
 from utils.logging import log_manager
 import yaml
 from db.crud import create_profile, create_daily_snapshot
@@ -106,19 +106,28 @@ def setup_appusers():
     assign_profile(db, user.id, "15m_no_trend")
     assign_profile(db, user.id, "15m_MB")
 
-def migrate_yaml_profiles():
+def migrate_yaml_profiles(dry_run: bool = False) -> None:
+    """
+    One-time migration: load profiles + indicators from YAML into the database.
 
+    Safe to re-run — profiles and indicators that already exist are skipped,
+    not duplicated.  Disabled profiles in YAML are skipped entirely.
+
+    Args:
+        dry_run: When True, prints what *would* happen without writing to DB.
+                 Trigger with:  python manage.py migrate-profiles --dry-run
+    """
     from db.session import SessionLocal
-    from db.models import TradingProfileDB
+    from db.models import TradingProfileDB, IndicatorDB
     from utils.secrets import encrypt_secret, is_encrypted
 
-    """One-time migration: Load profiles from YAML into database"""
-    yaml_path = Path(__file__).parent.parent / "config/trading_profiles.yaml"
-    
+    tag = "[DRY-RUN] " if dry_run else ""
+
+    yaml_path = Path(__file__).parent.parent / "config/trading_profilesa.yaml"
     if not yaml_path.exists():
-        print(f"✗ trading_profiles.yaml not found in path {yaml_path}")
+        print(f"✗ trading_profiles.yaml not found: {yaml_path}")
         return
-    
+
     if not os.environ.get("DB_ENCRYPTION_KEY"):
         print(
             "ERROR: DB_ENCRYPTION_KEY is not set.\n"
@@ -128,61 +137,240 @@ def migrate_yaml_profiles():
             file=sys.stderr,
         )
         sys.exit(1)
+
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
-    
+
+    profiles_cfg: dict = data.get("profiles", {})
+
+    migrated = skipped = failed = 0
+    indicator_counts: dict[str, int] = {}  # profile_name → indicators inserted
+
     db = SessionLocal()
     try:
-        for name, config in data.get("profiles", {}).items():
-            raw_key = os.getenv((config.get("api_key_env") )) 
-            raw_secret = os.getenv((config.get("secret_env") )) 
-            if not raw_key or not raw_secret:
-                print(f"  SKIP  {name} — missing api_key or secret")
+        for name, cfg in profiles_cfg.items():
+
+            # ── Skip disabled profiles ────────────────────────────────────
+            if not cfg.get("enabled", False):
+                print(f"  SKIP  {name!r} — disabled in YAML")
                 skipped += 1
                 continue
-							
-            # Encrypt only if not already encrypted (idempotent)
+
+            # ── Resolve credentials ───────────────────────────────────────
+            raw_key    = os.getenv(cfg.get("api_key_env", ""))
+            raw_secret = os.getenv(cfg.get("secret_env", ""))
+
+            if not raw_key or not raw_secret:
+                print(f"  SKIP  {name!r} — missing env var "
+                      f"({cfg.get('api_key_env')} / {cfg.get('secret_env')})")
+                skipped += 1
+                continue
+
             enc_key    = raw_key    if is_encrypted(raw_key)    else encrypt_secret(raw_key)
             enc_secret = raw_secret if is_encrypted(raw_secret) else encrypt_secret(raw_secret)
 
-            # Get credentials from environment
-            profile = TradingProfileDB(
-                name=name,
-                display_name=str(config.get("display_name", name)),
-                api_key=enc_key,
-                secret=enc_secret,
-                take_profit_pct=Decimal(str(config.get("take_profit_pct", 0.5))),
-                stop_loss_pct=Decimal(str(config.get("stop_loss_pct", 0.5))),
-                trailing_stop_pct=Decimal(str(config.get("trailing_stop_pct", 0.25))),
-                arm_trailing_stop_pct=Decimal(str(config.get("arm_trailing_stop_pct", 0.25))),
-                use_trailing_stop=bool(str(config.get("use_trailing_stop", False))),
-
-                max_risk_pct=Decimal(str(config.get("max_risk_pct", 0.25))),
-                default_order_size_usdc=Decimal(str(config.get("default_order_size_usdc", 100))),
-                max_position_size_pct=Decimal(str(config.get("max_position_size_pct", 40))),
-                max_open_positions=Decimal(str(config.get("max_open_positions", 1))),
-                max_portfolio_exposure_pct=Decimal(str(config.get("max_portfolio_exposure_pct", 80))),
-
-                is_active=bool(str(config.get("enabled", True))),
-
+            # ── Check for existing profile (idempotency) ──────────────────
+            existing: TradingProfileDB | None = (
+                db.query(TradingProfileDB).filter_by(name=name).first()
             )
 
-            try:
-                create_profile(db, profile)
-                print(f"✓ Migrated profile: {name}")
-            except Exception as e:
-                print(f"✗ Failed to migrate {name}: {e}")
+            if existing:
+                print(f"    {name!r} — profile already exists in DB (id={existing.id}) - Updating")
+                skipped += 1
+                # Still attempt to migrate indicators in case they're missing
+                existing.strategy_type = str(cfg.get("strategy_type","trend_following"))
+                existing.signal_timeframe = str(cfg.get("signal_timeframe",15))
+                existing.signal_cooldown_seconds = int(cfg.get("signal_cooldown_seconds",900))
+                existing.min_signal_confidence = Decimal(cfg.get("min_signal_confidence",70))
+                existing.min_volume_ratio = Decimal(cfg.get("min_volume_ratio",1))
+                existing.use_market_regime_filter = bool(cfg.get("use_market_regime_filter", False))
+                existing.use_trend_filter = bool(cfg.get("use_trend_filter", False))
+                existing.use_entry_filter = bool(cfg.get("use_entry_filter", False))
+                existing.use_atr_filter = bool(cfg.get("use_atr_filter", False))
+                existing.trend_timeframe = str(cfg.get("trend_timeframe","60"))
+                existing.entry_timeframe = str(cfg.get("entry_timeframe","15"))
+                existing.min_indicators_required = int(cfg.get("min_indicators_required",0))
+                existing.min_entry_indicators_required = int(cfg.get("min_entry_indicators_required",0))
+                
+                profile_row = existing
+                if not dry_run:
+                    db.commit()
+                    db.refresh(existing)
+            else:
+                # ── Build TradingProfileDB row ────────────────────────────
+                profile_row = TradingProfileDB(
+                    name=name,
+                    display_name=str(cfg.get("display_name", name)),
+                    api_key=enc_key,
+                    secret=enc_secret,
 
-            # Show last 6 chars of encrypted token as a sanity hint
-            hint = enc_key[-6:]
-            print(f"  {name!r:20}  key=...{hint}")
+                    # Position management
+                    take_profit_pct=Decimal(str(cfg.get("take_profit_pct", 0))),
+                    stop_loss_pct=Decimal(str(cfg.get("stop_loss_pct", 0))),
+                    trailing_stop_pct=Decimal(str(cfg.get("trailing_stop_pct", 0))),
+                    arm_trailing_stop_pct=Decimal(str(cfg.get("arm_trailing_stop_pct", 0))),
+                    use_trailing_stop=bool(cfg.get("use_trailing_stop", False)),  # direct bool, not bool(str())
 
+                    # Risk / sizing
+                    max_risk_pct=Decimal(str(cfg.get("max_risk_pct", 0.25))),
+                    default_order_size_usdc=Decimal(str(cfg.get("default_order_size_usdc", 100))),
+                    max_position_size_pct=Decimal(str(cfg.get("max_position_size_pct", 40))),
+                    max_open_positions=int(cfg.get("max_open_positions", 1)),
+                    max_portfolio_exposure_pct=Decimal(str(cfg.get("max_portfolio_exposure_pct", 80))),
 
-        
+                    # Strategy
+                    strategy_type=cfg.get("strategy_type", "trend_following"),
+
+                    # Signal generation
+                    signal_timeframe=str(cfg.get("signal_timeframe", "15")),
+                    signal_cooldown_seconds=int(cfg.get("signal_cooldown_seconds", 900)),
+                    min_signal_confidence=float(cfg.get("min_signal_confidence", 72.0)),
+                    min_volume_ratio=float(cfg.get("min_volume_ratio", 1.0)),
+
+                    # Filter toggles
+                    use_market_regime_filter=bool(cfg.get("use_market_regime_filter", False)),
+                    use_trend_filter=bool(cfg.get("use_trend_filter", False)),
+                    use_entry_filter=bool(cfg.get("use_entry_filter", False)),
+                    use_atr_filter=bool(cfg.get("use_atr_filter", False)),
+
+                    # Timeframes & thresholds
+                    trend_timeframe=str(cfg.get("trend_timeframe", "60")),
+                    entry_timeframe=str(cfg.get("entry_timeframe", "15")),
+                    min_indicators_required=int(cfg.get("min_indicators_required", 2)),
+                    min_entry_indicators_required=int(cfg.get("min_entry_indicators_required", 2)),
+
+                    is_active=bool(cfg.get("enabled", True)),
+                )
+
+                if not dry_run:
+                    db.add(profile_row)
+                    db.flush()  # gives us profile_row.id before commit
+
+                migrated += 1
+                hint = enc_key[-6:]
+                print(f"  {tag}✓ Profile {name!r}  key=...{hint}")
+
+            #── Migrate indicators ────────────────────────────────────────
+            ind_count = _migrate_indicators(
+                db=db,
+                profile_row=profile_row,
+                cfg=cfg,
+                dry_run=dry_run,
+                tag=tag,
+            )
+            indicator_counts[name] = ind_count
+
+        # ── Commit everything in one transaction ──────────────────────────
+        if not dry_run:
+            db.commit()
+            print(f"\n✓ Committed to database")
+        else:
+            print(f"\n[DRY-RUN] No changes written.")
+
+        # ── Summary ───────────────────────────────────────────────────────
+        total_indicators = sum(indicator_counts.values())
+        print(f"\n{'='*55}")
+        print(f"  Migration summary")
+        print(f"{'='*55}")
+        print(f"  Profiles migrated : {migrated}")
+        print(f"  Profiles skipped  : {skipped}")
+        print(f"  Profiles failed   : {failed}")
+        print(f"  Indicators written: {total_indicators}")
+        for pname, cnt in indicator_counts.items():
+            if cnt:
+                print(f"    └─ {pname}: {cnt} indicator(s)")
+        print(f"{'='*55}")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Migration failed, rolled back: {e}", exc_info=True)
+        print(f"✗ Migration failed, rolled back: {e}")
     finally:
         db.close()
 
-# Add to manage.py
+
+
+def _migrate_indicators(
+    db,
+    profile_row: "TradingProfileDB",
+    cfg: dict,
+    dry_run: bool,
+    tag: str,
+) -> int:
+    """
+    Insert IndicatorDB rows for all trend + entry indicators in `cfg`.
+    Skips any indicator whose (profile_id, category, indicator_type, params)
+    combination already exists, so it's safe to re-run.
+
+    Returns the number of new indicators inserted (or that would be inserted).
+    """
+    inserted = 0
+
+    indicator_groups = [
+        ("trend", cfg.get("trend_indicators") or []),
+        ("entry", cfg.get("entry_indicators") or []),
+    ]
+
+    for category, indicators in indicator_groups:
+        if not indicators:
+            continue
+
+        for ind_cfg in indicators:
+            if not isinstance(ind_cfg, dict) or "type" not in ind_cfg:
+                print(f"    WARNING: skipping malformed indicator in {profile_row.name!r}: {ind_cfg}")
+                continue
+
+            indicator_type = ind_cfg["type"]
+
+            # Params = everything except 'type'; hard_stop lives as its own column
+            params = {k: v for k, v in ind_cfg.get("params", {}).items()}
+
+            # Some YAML configs put hard_stop at the top level of the indicator
+            # dict rather than nested inside params — handle both shapes.
+            is_hard_stop = bool(
+                ind_cfg.get("hard_stop", params.pop("hard_stop", False))
+            )
+
+            # ── Idempotency check ─────────────────────────────────────────
+            # Skip if this exact indicator already exists for this profile
+            if profile_row.id is not None:
+                already_exists = (
+                    db.query(IndicatorDB)
+                    .filter_by(
+                        profile_id=profile_row.id,
+                        category=category,
+                        indicator_type=indicator_type,
+                    )
+                    .first()
+                )
+                if already_exists:
+                    print(f"    SKIP  [{category}] {indicator_type!r} — already in DB")
+                    continue
+
+            print(f"    {tag}+ [{category}] {indicator_type!r}  hard_stop={is_hard_stop}  params={params}")
+
+            if not dry_run:
+                ind_row = IndicatorDB(
+                    profile_id=profile_row.id,
+                    category=category,
+                    indicator_type=indicator_type,
+                    params=params,
+                    is_hard_stop=is_hard_stop,
+                    enabled=True,
+                )
+                db.add(ind_row)
+
+            inserted += 1
+
+    return inserted
+
+def _migrate_yaml_profiles_cli():
+    """Wrapper that checks for --dry-run flag before calling the real function."""
+    dry_run = "--dry-run" in sys.argv
+    if dry_run:
+        print("*** DRY-RUN MODE — no changes will be written ***\n")
+    migrate_yaml_profiles(dry_run=dry_run)
+
 
 def migrate_circuit_breaker():
     """Initialize circuit breaker configs for existing profiles"""
@@ -434,13 +622,10 @@ def populate_default_settings():
                 'alert_price_max_age': '300',       #  max age for price cache before i raise an alert - in seconds
                 'alert_re_alert_cooldown': '900',   # time between raising the same alert
                 'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
+                'profile_refresh_interval': '30',      # how many cycles to refresh profile from db - 30 x 30 seconds = 10 mins
             }
             new_settings = {
-                'alert_trend_max_age': '1200',      # max age for trend cache before i raise an alert - in seconds
-                'alert_price_max_age': '300',       #  max age for price cache before i raise an alert - in seconds
-                'alert_re_alert_cooldown': '900',   # time between raising the same alert
-                'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
-                'alert_healthcheck_interval': '60', # interval between performing health/alert checks
+                'profile_refresh_interval': '30',
 
             }
             created = initialize_default_settings(db, default_settings=new_settings)
@@ -476,7 +661,7 @@ commands = {
     "create": create_tables,
     "drop": drop_tables,
     "reset": reset_tables,
-    "migrate-profiles": migrate_yaml_profiles,
+    "migrate-profiles": _migrate_yaml_profiles_cli,
     "load-dummy": load_dummy_data,
     "migrate_circuit_breaker": migrate_circuit_breaker,
     "setup-symbols": setup_symbol_configs,
@@ -495,6 +680,7 @@ if __name__ == "__main__":
          print("  drop   - Drop all tables (destructive)")
          print("  reset  - Drop and recreate tables (destructive)")
          print("  migrate-profiles - Load profiles from YAML into database")
+         print("  migrate-profiles --dry-run  Preview migration without writing")
          print("  load-dummy - Load dummy data into database")
          print("  migrate-circuit-breaker - Migrate circuit breaker configurations")
          print("  setup-symbols - Set up symbol-specific configurations")
