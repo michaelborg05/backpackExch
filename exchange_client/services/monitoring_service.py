@@ -24,7 +24,7 @@ from models.trade import OrderResponse
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
 from services.profile_manager import get_profile_manager, load_profiles_from_db
-from services.signal_generator import get_signal_generator
+from services.signal_generator import get_signal_generator, invalidate_all_signal_generators
 from utils.position_calculator import get_position_size_calculator
 from cache.trend_cache import initialize_trend_cache_with_db
 from cache.trend_cache_warmup import warmup_trend_cache
@@ -273,6 +273,10 @@ class MonitoringService:
             # Hot-swap: replace the dict inside the existing singleton
             current_pm.replace_profiles(new_pm.get_profiles_dict())
 
+            # Invalidate SignalGenerator cache so instances are rebuilt
+            # with the new TradingProfile objects on next _check_signals call
+            invalidate_all_signal_generators()
+            
             if added:
                 self.logger.info(f"[ProfileRefresh] Added profiles: {', '.join(sorted(added))}")
             if removed:
@@ -984,9 +988,7 @@ class MonitoringService:
     
     def _process_signals_for_profile(self, profile: TradingProfile):
         """Process trading signals for a specific profile"""
-        
-        from services.signal_generator import get_signal_generator
-        
+                
         signal_gen = get_signal_generator(profile)
         
         # Scan all monitored tickers
@@ -1031,7 +1033,7 @@ class MonitoringService:
                     continue
                 
                 # Execute trade
-                self._execute_signal(signal, profile)
+                self._execute_signal(signal, profile, trading=signal_gen._trading)
                 
                 # Update last signal time
                 self._last_signals[cooldown_key] = time.time()
@@ -1042,10 +1044,11 @@ class MonitoringService:
                     exc_info=True
                 )
     
-    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile):
+    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile, trading: TradingService = None):
         """Execute a trading signal"""
-        from api_builders.trading_builder import TradingService
-        
+        if trading is None:
+            trading = TradingService(profile)  # fallback for direct calls
+
         if signal.action != "BUY":
             self.logger.debug(f"[{profile.name}] Ignoring non-BUY signal")
             return
@@ -1054,9 +1057,6 @@ class MonitoringService:
             f"[{profile.name}] 🎯 EXECUTING SIGNAL: {signal.symbol} "
             f"({signal.strength.name}, {signal.confidence:.1f}%)"
         )
-        
-        # Create trading service
-        trading = TradingService(profile)
         
         try:
 

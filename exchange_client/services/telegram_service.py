@@ -379,9 +379,10 @@ class TelegramService:
             return False
         
         try:
-            import html
-            safe_text = html.escape(message)
-            
+            #import html
+            #safe_text = html.escape(message)
+            safe_text = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
             emoji = self._get_priority_emoji(priority)
             formatted_message = f"{emoji} {safe_text}"
 

@@ -38,6 +38,7 @@ class SignalGenerator:
     
     def __init__(self, profile: TradingProfile):
         self.profile = profile
+        self._trading = TradingService(profile) 
         self.logger = log_manager.get_logger(f"SignalGenerator[{profile.display_name}]")
         self.trend_cache = get_trend_cache()
         self.atr_cache = get_atr_cache()
@@ -120,8 +121,6 @@ class SignalGenerator:
             TradingSignal or None if no signal
         """
         
-        # Create trading service
-        trading = TradingService(self.profile)
         # Get current price
         current_price = self.price_cache.get_price(symbol)
         if current_price is None or current_price <= 0:
@@ -129,7 +128,7 @@ class SignalGenerator:
             return None
 
         # 1. BALANCE CHECK
-        is_valid, balance_error = trading.validate_balance_for_trade(
+        is_valid, balance_error = self._trading.validate_balance_for_trade(
             sale_action="BUY", 
             symbol=symbol
         )
@@ -1055,7 +1054,6 @@ class SignalGenerator:
 # Global instances per profile
 _signal_generators: Dict[str, SignalGenerator] = {}
 
-
 def get_signal_generator(profile: TradingProfile) -> SignalGenerator:
     """Get or create signal generator for a profile"""
     global _signal_generators
@@ -1065,7 +1063,18 @@ def get_signal_generator(profile: TradingProfile) -> SignalGenerator:
     
     return _signal_generators[profile.name]
 
+def invalidate_signal_generator(profile_name: str) -> None:
+    """Remove a cached SignalGenerator so it is recreated with the latest profile on next call"""
+    global _signal_generators
+    _signal_generators.pop(profile_name, None)
+
+
+def invalidate_all_signal_generators() -> None:
+    """Clear all cached SignalGenerators — called after a profile refresh"""
+    global _signal_generators
+    _signal_generators.clear()
 
 def get_all_signal_generators() -> Dict[str, SignalGenerator]:
     """Get all signal generators"""
     return _signal_generators.copy()
+
