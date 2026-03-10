@@ -365,12 +365,13 @@ async def place_order(
             )
         
         if telegram:
+            id = result.id if result else None
             await telegram.send_order_notification(
                 order_type="Market",
                 symbol=request.symbol,
                 side=request.side,
                 quantity=request.quantity,
-                order_id=result.id
+                order_id=id
             )
 
         return result.model_dump()

@@ -706,10 +706,19 @@ class TradingService:
         return None
 
     def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None, validation_summary: str = None) -> OrderResponse:
+        
+        order_response = None  
+        db = None
         try:
             db = SessionLocal()
             #execute order
-            order_response = self.ExecuteOrder(order)
+            try:
+                order_response = self.ExecuteOrder(order)
+            except ExchangeAPIError as e:
+                self.logger.error(f"Order rejected by exchange: {e.message}")
+                # Caller (monitoring_service) will handle notification
+                return None
+            
             if order_response is None:
                 return None
             
@@ -845,12 +854,10 @@ class TradingService:
         except Exception as db_error:
             self.logger.error(f"Failed to save trade to database: {db_error}")
         finally:
-            db.close()
+            if db:
+                db.close()
         
-        if order_response:
-            return order_response
-        else:
-            return None    
+        return order_response
 
     def ExecuteOrder(self, order: OrderExecuteRequest) -> OrderResponse:
         url = APIEndpoints.backpack_ExecuteOrder()
@@ -881,19 +888,12 @@ class TradingService:
                 raise ExchangeAPIError("Empty response from exchange")
             
         except ExchangeAPIError as e:
-            # Log and re-raise as HTTPException for FastAPI
-            self.logger.error(f"Exchange API error: {e.message}")
-            raise HTTPException(
-                status_code=e.status_code or 500,
-                detail=f"Exchange API error: {e.message}"
-            )
+            # Let ProcessMarketOrder handle it — don't swallow or rewrap
+            raise
         except Exception as e:
             # Handle other errors
             self.logger.error(f"Unexpected error: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Trading service error: {str(e)}"
-            )
+            raise ExchangeAPIError(f"Trading service error: {str(e)}")
         
         
     def _refresh_balance_cache_after_trade(self, order_response: OrderResponse):
