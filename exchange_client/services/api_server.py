@@ -9,6 +9,7 @@ from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from models.webhook import TrendUpdateAlert, TrendData
 from models.symbol import SymbolConfigRequest
+from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorOut
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService, process_tradingview_alert
@@ -140,8 +141,17 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     Catches ALL HTTPExceptions across the entire app
     Sends Telegram notification automatically
     """
-    # Send Telegram notification for errors
-    if telegram and exc.status_code >= 400:
+    # 1. Define conditions for skipping the Telegram alert
+    is_auth_error = exc.status_code in [401, 403]
+    is_auth_path = request.url.path.startswith("/auth") or request.url.path == "/"
+    
+    # 2. Only send Telegram notification if it's NOT a common auth/redirect error
+    should_notify = telegram and exc.status_code >= 400
+    
+    if is_auth_error and is_auth_path:
+        should_notify = False
+
+    if should_notify:
         await telegram.send_error_notification(
             error_type=f"HTTP {exc.status_code}",
             error_message=exc.detail,
@@ -1377,6 +1387,163 @@ async def test_position_sizing(profile_name: str, symbol: str):
     except Exception as e:
         apiserver_logger.error(f"Error testing position sizing: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _ind_profile_or_404(db, profile_name: str):
+    from db.models import TradingProfileDB
+    prof = db.query(TradingProfileDB).filter(
+        TradingProfileDB.name == profile_name,
+        TradingProfileDB.is_active == True
+    ).first()
+    if not prof:
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+    return prof
+
+def _ind_or_404(db, indicator_id: int, profile_id: int):
+    from db.models import IndicatorDB
+    ind = db.query(IndicatorDB).filter(
+        IndicatorDB.id == indicator_id,
+        IndicatorDB.profile_id == profile_id
+    ).first()
+    if not ind:
+        raise HTTPException(status_code=404, detail=f"Indicator {indicator_id} not found")
+    return ind
+
+
+@app.get("/indicators/{profile_name}", dependencies=[Depends(require_read_permission)])
+async def list_indicators(profile_name: str, category: Optional[str] = None):
+    """
+    List all indicators for a profile.
+    Optionally filter by category: ?category=trend or ?category=entry
+    """
+    from db.utils import get_db_session
+    from db.models import IndicatorDB
+
+    try:
+        with get_db_session() as db:
+            prof = _ind_profile_or_404(db, profile_name)
+            q = db.query(IndicatorDB).filter(IndicatorDB.profile_id == prof.id)
+            if category:
+                q = q.filter(IndicatorDB.category == category)
+            indicators = q.order_by(IndicatorDB.category, IndicatorDB.id).all()
+            return [IndicatorOut.model_validate(i) for i in indicators]
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error listing indicators: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/indicators/{profile_name}", dependencies=[Depends(require_admin_permission)])
+async def create_indicator(profile_name: str, body: IndicatorCreate):
+    """Add a new indicator to a profile."""
+    from db.utils import get_db_session
+    from db.models import IndicatorDB
+
+    try:
+        with get_db_session() as db:
+            prof = _ind_profile_or_404(db, profile_name)
+            ind = IndicatorDB(
+                profile_id=prof.id,
+                category=body.category,
+                indicator_type=body.indicator_type,
+                params=body.params,
+                is_hard_stop=body.is_hard_stop,
+                enabled=body.enabled,
+            )
+            db.add(ind)
+            db.commit()
+            db.refresh(ind)
+            apiserver_logger.info(
+                f"Created indicator [{body.indicator_type}] ({body.category}) "
+                f"for profile '{profile_name}' (id={ind.id})"
+            )
+            return IndicatorOut.model_validate(ind)
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error creating indicator: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/indicators/{profile_name}/{indicator_id}", dependencies=[Depends(require_admin_permission)])
+async def update_indicator(profile_name: str, indicator_id: int, body: IndicatorUpdate):
+    """
+    Full replace of an indicator row — overwrites category, indicator_type,
+    params, is_hard_stop, and enabled. Keeps the same id and profile_id.
+    """
+    from db.utils import get_db_session
+
+    try:
+        with get_db_session() as db:
+            prof = _ind_profile_or_404(db, profile_name)
+            ind = _ind_or_404(db, indicator_id, prof.id)
+
+            ind.category       = body.category
+            ind.indicator_type = body.indicator_type
+            ind.params         = body.params
+            ind.is_hard_stop   = body.is_hard_stop
+            ind.enabled        = body.enabled
+
+            db.commit()
+            db.refresh(ind)
+            apiserver_logger.info(
+                f"Updated indicator id={indicator_id} [{body.indicator_type}] "
+                f"for profile '{profile_name}'"
+            )
+            return IndicatorOut.model_validate(ind)
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error updating indicator: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/indicators/{profile_name}/{indicator_id}/toggle", dependencies=[Depends(require_admin_permission)])
+async def toggle_indicator(profile_name: str, indicator_id: int):
+    """Quick enable/disable toggle without a full PUT."""
+    from db.utils import get_db_session
+
+    try:
+        with get_db_session() as db:
+            prof = _ind_profile_or_404(db, profile_name)
+            ind = _ind_or_404(db, indicator_id, prof.id)
+            ind.enabled = not ind.enabled
+            db.commit()
+            db.refresh(ind)
+            apiserver_logger.info(
+                f"Toggled indicator id={indicator_id} enabled={ind.enabled} "
+                f"for profile '{profile_name}'"
+            )
+            return IndicatorOut.model_validate(ind)
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error toggling indicator: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/indicators/{profile_name}/{indicator_id}", dependencies=[Depends(require_admin_permission)])
+async def delete_indicator(profile_name: str, indicator_id: int):
+    """Permanently delete an indicator."""
+    from db.utils import get_db_session
+
+    try:
+        with get_db_session() as db:
+            prof = _ind_profile_or_404(db, profile_name)
+            ind = _ind_or_404(db, indicator_id, prof.id)
+            db.delete(ind)
+            db.commit()
+            apiserver_logger.info(
+                f"Deleted indicator id={indicator_id} for profile '{profile_name}'"
+            )
+            return {"success": True, "message": f"Indicator {indicator_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error deleting indicator: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 app.include_router(auth_router)
 

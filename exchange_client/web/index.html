@@ -135,6 +135,73 @@ main{padding:20px 24px;position:relative;z-index:1}
 .s1{animation-delay:.05s}.s2{animation-delay:.1s}.s3{animation-delay:.15s}.s4{animation-delay:.2s}
 @media(max-width:1100px){.kr{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}}
 @media(max-width:768px){.g2{grid-template-columns:1fr}main{padding:12px}}
+
+/* ── Indicators panel ─────────────────────────────────────────────────── */
+.ind-toolbar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--brd);background:var(--bg2)}
+.ind-cat-tabs{display:flex;gap:0;border:1px solid var(--brd)}
+.ict{padding:5px 14px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-right:1px solid var(--brd);transition:all .15s;user-select:none}
+.ict:last-child{border-right:none}
+.ict.on{color:var(--acc);background:rgba(0,212,255,.07)}
+.ict:hover:not(.on){color:var(--tx)}
+.ind-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;padding:16px}
+.ind-card{background:var(--bg3);border:1px solid var(--brd);position:relative;transition:border-color .2s}
+.ind-card.disabled{opacity:.45}
+.ind-card:hover{border-color:var(--bb)}
+.ind-card-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--brd)}
+.ind-type{font-family:'Syne',sans-serif;font-weight:700;font-size:12px;letter-spacing:.08em;color:var(--txb);flex:1}
+.ind-badge{font-size:9px;padding:2px 7px;border:1px solid;letter-spacing:.1em;text-transform:uppercase;flex-shrink:0}
+.ind-badge.hard{border-color:rgba(255,60,90,.4);color:var(--red);background:rgba(255,60,90,.07)}
+.ind-badge.soft{border-color:rgba(255,204,0,.35);color:var(--warn);background:rgba(255,204,0,.06)}
+.ind-params{padding:10px 14px;display:flex;flex-wrap:wrap;gap:6px}
+.ind-param{background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.12);padding:3px 8px;font-size:10px}
+.ind-param span{color:var(--txd);margin-right:4px}
+.ind-param b{color:var(--txb)}
+.ind-actions{display:flex;gap:0;border-top:1px solid var(--brd)}
+.ind-actions button{flex:1;background:transparent;border:none;border-right:1px solid var(--brd);color:var(--txd);padding:7px 0;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.ind-actions button:last-child{border-right:none}
+.ind-actions button:hover{color:var(--acc);background:rgba(0,212,255,.04)}
+.ind-actions button.dng:hover{color:var(--red);background:rgba(255,60,90,.04)}
+.ind-empty{color:var(--txd);text-align:center;padding:48px;grid-column:1/-1;font-size:12px}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:900;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.modal{background:var(--bg2);border:1px solid var(--brd);width:100%;max-width:520px;max-height:90vh;overflow-y:auto;position:relative}
+.modal::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--brd)}
+.modal-title{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;letter-spacing:.1em;color:var(--txb)}
+.modal-close{background:transparent;border:none;color:var(--txd);font-size:18px;cursor:pointer;line-height:1;padding:0 4px}
+.modal-close:hover{color:var(--tx)}
+.modal-body{padding:20px}
+.mf{margin-bottom:16px}
+.mlab{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--txd);margin-bottom:7px}
+.msel,.minp,.mtarea{width:100%;background:var(--bg3);border:1px solid var(--brd);color:var(--txb);padding:9px 12px;font-family:'Space Mono',monospace;font-size:12px;outline:none;transition:border-color .2s}
+.msel:focus,.minp:focus,.mtarea:focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(0,212,255,.07)}
+.mtarea{resize:vertical;min-height:120px;line-height:1.6}
+.mtarea.err{border-color:var(--red)}
+.mrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mchk{display:flex;align-items:center;gap:10px;cursor:pointer}
+.mchk input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer}
+.mchk-lab{font-size:11px;color:var(--tx)}
+.modal-foot{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--brd)}
+.mbtn{flex:1;padding:10px;border:1px solid var(--acc);color:var(--acc);background:transparent;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;transition:all .2s}
+.mbtn:hover{background:var(--acc);color:var(--bg)}
+.mbtn.sec{border-color:var(--brd);color:var(--txd)}
+.mbtn.sec:hover{background:var(--brd);color:var(--tx)}
+.mbtn.dng{border-color:var(--red);color:var(--red)}
+.mbtn.dng:hover{background:var(--red);color:#fff}
+.mtabs{display:flex;margin-bottom:12px;border-bottom:1px solid var(--brd)}
+.mtab{padding:6px 14px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.mtab.on{color:var(--acc);border-bottom-color:var(--acc)}
+.merr{color:var(--red);font-size:11px;margin-top:6px;min-height:16px}
+
+/* Structured param rows */
+.param-rows{display:flex;flex-direction:column;gap:8px}
+.param-row{display:grid;grid-template-columns:140px 1fr;gap:8px;align-items:center}
+.param-key{font-size:11px;color:var(--txd);letter-spacing:.06em}
+.param-val{background:var(--bg3);border:1px solid var(--brd);color:var(--txb);padding:6px 10px;font-family:'Space Mono',monospace;font-size:12px;outline:none;width:100%;transition:border-color .2s}
+.param-val:focus{border-color:var(--acc)}
+.param-val[type=checkbox]{width:auto;accent-color:var(--acc)}
+.param-val select{background:var(--bg3);color:var(--txb)}
 </style>
 </head>
 <body>
@@ -173,6 +240,7 @@ main{padding:20px 24px;position:relative;z-index:1}
     <div class="nt" onclick="st('balances',this)">Balances</div>
     <div class="nt" onclick="st('market',this)">Market</div>
     <div class="nt" onclick="st('api',this)">API Explorer</div>
+    <div class="nt" onclick="st('indicators',this)">Indicators</div>
   </nav>
   <main>
     <div class="panel on" id="p-overview">
@@ -247,7 +315,76 @@ main{padding:20px 24px;position:relative;z-index:1}
         <div id="eplist"></div>
       </div>
     </div>
+
+    <div class="panel" id="p-indicators">
+      <div class="card fi">
+        <div class="ind-toolbar">
+          <div class="ind-cat-tabs">
+            <div class="ict on" onclick="setIndCat('all',this)">All</div>
+            <div class="ict" onclick="setIndCat('trend',this)">Trend</div>
+            <div class="ict" onclick="setIndCat('entry',this)">Entry</div>
+          </div>
+          <span style="flex:1"></span>
+          <span id="ind-count" style="font-size:10px;color:var(--txd);letter-spacing:.1em"></span>
+          <button class="bsm a" onclick="openAddIndicator()">+ ADD</button>
+        </div>
+        <div class="ind-grid" id="ind-grid">
+          <div class="ind-empty">Select a profile and load indicators</div>
+        </div>
+      </div>
+    </div>
   </main>
+</div>
+
+<!-- ── Indicator modal ───────────────────────────────────────────────────── -->
+<div class="modal-bg" id="ind-modal" style="display:none" onclick="if(event.target===this)closeIndModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="imod-title">Add Indicator</div>
+      <button class="modal-close" onclick="closeIndModal()">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <div class="mrow" style="margin-bottom:16px">
+        <div class="mf" style="margin-bottom:0">
+          <label class="mlab">Category</label>
+          <select class="msel" id="imod-cat">
+            <option value="trend">Trend</option>
+            <option value="entry">Entry</option>
+            <option value="exit">Exit</option>
+          </select>
+        </div>
+        <div class="mf" style="margin-bottom:0">
+          <label class="mlab">Indicator Type</label>
+          <select class="msel" id="imod-type" onchange="onIndTypeChange()"></select>
+        </div>
+      </div>
+      <div class="mf">
+        <div class="mrow" style="margin-bottom:0">
+          <label class="mchk"><input type="checkbox" id="imod-hardstop"><span class="mchk-lab">Hard Stop</span></label>
+          <label class="mchk"><input type="checkbox" id="imod-enabled" checked><span class="mchk-lab">Enabled</span></label>
+        </div>
+      </div>
+      <div class="mf">
+        <label class="mlab">Parameters</label>
+        <div class="mtabs">
+          <div class="mtab on" id="itab-form" onclick="switchParamTab('form')">Form</div>
+          <div class="mtab" id="itab-json" onclick="switchParamTab('json')">JSON</div>
+        </div>
+        <!-- Structured form -->
+        <div id="iparam-form"><div class="param-rows" id="iparam-rows"></div></div>
+        <!-- Raw JSON editor -->
+        <div id="iparam-json" style="display:none">
+          <textarea class="mtarea" id="iparam-raw" placeholder='{"key": value}'></textarea>
+          <div class="merr" id="ijson-err"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn sec" onclick="closeIndModal()">Cancel</button>
+      <button class="mbtn dng" id="imod-del-btn" style="display:none" onclick="deleteIndicatorConfirm()">Delete</button>
+      <button class="mbtn" onclick="saveIndicator()">Save</button>
+    </div>
+  </div>
 </div>
 <div id="toast">&#9888; Session expiring &mdash; <a href="#" onclick="sref()" style="color:var(--warn)">refresh</a></div>
 
@@ -538,6 +675,11 @@ const EPS=[
   {m:'GET',p:'/circuit-breaker/daily-summary/{profile_name}',d:'Daily P&L summary'},
   {m:'GET',p:'/signals/status/{profile_name}',d:'Signal generator status'},
   {m:'GET',p:'/signals/check/{profile_name}/{symbol}',d:'Check signal for symbol'},
+  {m:'GET',p:'/indicators/{profile_name}',d:'List indicators for profile'},
+  {m:'POST',p:'/indicators/{profile_name}',d:'Add indicator to profile'},
+  {m:'PUT',p:'/indicators/{profile_name}/{indicator_id}',d:'Full replace of indicator'},
+  {m:'PATCH',p:'/indicators/{profile_name}/{indicator_id}/toggle',d:'Toggle enabled/disabled'},
+  {m:'DELETE',p:'/indicators/{profile_name}/{indicator_id}',d:'Delete indicator'},
   {m:'GET',p:'/config/symbols/{profile_name}',d:'All symbol configs'},
   {m:'POST',p:'/config/symbol/{profile_name}/{symbol}',d:'Set symbol config'},
   {m:'DELETE',p:'/config/symbol/{profile_name}/{symbol}',d:'Delete symbol config'},
@@ -559,19 +701,310 @@ function st(name,el){
   document.getElementById('p-'+name).classList.add('on');el.classList.add('on');
   loadPanel(name);
 }
-function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull',false),balances:loadBal,market:loadMkt,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
+function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull',false),balances:loadBal,market:loadMkt,indicators:loadIndicators,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
 function startAR(){
   if(_ar)clearInterval(_ar);
   setInterval(checkHealth,30000);
-  _ar=setInterval(()=>{const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api'};if(t&&m[t])loadPanel(m[t]);},20000);
+  _ar=setInterval(()=>{const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api',indicators:'indicators'};if(t&&m[t])loadPanel(m[t]);},20000);
 }
-function refAll(){checkHealth();const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api'};if(m[t])loadPanel(m[t]);}
+function refAll(){checkHealth();const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api',indicators:'indicators'};if(m[t])loadPanel(m[t]);}
 
 const fusd=n=>'$'+(parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fpr=n=>{const v=parseFloat(n)||0;return v>=1000?v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):v>=1?v.toFixed(4):v.toFixed(6);};
 const fnum=n=>(parseFloat(n)||0).toLocaleString('en-US',{maximumFractionDigits:6});
 function mkSp(pos){let v=50;return Array.from({length:20},()=>{v+=(Math.random()-(pos?.35:.65))*6;return Math.max(10,Math.min(90,v));});}
 function spP(data,pos){if(!data?.length)return'';const w=80,h=26,mn=Math.min(...data),rng=Math.max(...data)-mn||1;return'<polyline points="'+data.map((v,i)=>(i/(data.length-1)*w)+','+(h-((v-mn)/rng)*(h-4)-2)).join(' ')+'" fill="none" stroke="'+(pos?'var(--grn)':'var(--red)')+'" stroke-width="1.5" stroke-linejoin="round"/>';}
+
+// ── Indicators ──────────────────────────────────────────────────────────────
+
+// Known indicator types and their param schemas.
+// Each param: { key, type: 'number'|'string'|'bool'|'select', options?, default }
+const IND_SCHEMAS = {
+  ema_slope:              [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01}],
+  bollinger_bands:        [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:0.8},{k:'lookback_candles',t:'number',d:null}],
+  adx_regime:             [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
+  rsi_overbought:         [{k:'min_value',t:'number',d:65},{k:'lookback_candles',t:'number',d:null}],
+  rsi_threshold:          [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
+  rsi_range:              [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
+  rsi_reversal_momentum:  [{k:'lookback_candles',t:'number',d:10},{k:'oversold_threshold',t:'number',d:45},{k:'current_min',t:'number',d:36},{k:'min_jump',t:'number',d:3},{k:'require_sustained',t:'bool',d:false},{k:'sustained_rise_mode',t:'select',o:['net','strict'],d:'net'}],
+  ema_gap:                [{k:'min_gap_pct',t:'number',d:0.15},{k:'mode',t:'select',o:['min','max','abs'],d:'min'}],
+  price_vs_ema:           [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-1.5},{k:'max_gap_pct',t:'number',d:2}],
+  price_below_vwap:       [{k:'min_gap_pct',t:'number',d:-0.15},{k:'max_gap_pct',t:'number',d:-2}],
+  price_extended_below_ema:[{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-0.7},{k:'max_gap_pct',t:'number',d:-10}],
+  price_vs_vwap:          [],
+  volume_spike:           [{k:'min_ratio',t:'number',d:1},{k:'max_ratio',t:'number',d:8}],
+  reversal_candle:        [{k:'pattern',t:'select',o:['hammer','doji','bull_close','higher_low','engulfing'],d:'hammer'},{k:'min_body_pct',t:'number',d:null},{k:'max_body_pct',t:'number',d:null},{k:'min_close_pct',t:'number',d:null},{k:'require_bull',t:'bool',d:null},{k:'max_drop_from_close_pct',t:'number',d:0.5}],
+};
+const IND_TYPES = Object.keys(IND_SCHEMAS);
+
+// State
+let _indData = [];      // current loaded indicators
+let _indCat = 'all';    // current category filter
+let _imodId = null;     // null = create, number = edit
+let _paramTab = 'form'; // 'form' | 'json'
+
+// ── Load & Render ────────────────────────────────────────────────────────────
+
+async function loadIndicators() {
+  const prof = S.active; if (!prof) return;
+  const data = await api('/indicators/' + prof);
+  _indData = data ?? [];
+  renderIndGrid();
+}
+
+function setIndCat(cat, el) {
+  _indCat = cat;
+  document.querySelectorAll('.ict').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  renderIndGrid();
+}
+
+function renderIndGrid() {
+  const grid = document.getElementById('ind-grid');
+  const countEl = document.getElementById('ind-count');
+  const filtered = _indCat === 'all' ? _indData : _indData.filter(i => i.category === _indCat);
+  countEl.textContent = filtered.length + ' indicator' + (filtered.length !== 1 ? 's' : '');
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="ind-empty">No indicators' + (_indCat !== 'all' ? ' in ' + _indCat : '') + ' — click + ADD to create one</div>';
+    return;
+  }
+
+  // Group by category for "all" view
+  const groups = _indCat === 'all'
+    ? ['trend', 'entry', 'exit'].filter(c => filtered.some(i => i.category === c))
+    : [_indCat];
+
+  grid.innerHTML = groups.map(cat => {
+    const items = filtered.filter(i => i.category === cat);
+    if (!items.length) return '';
+    const header = _indCat === 'all'
+      ? `<div style="grid-column:1/-1;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--acc);padding:4px 2px;margin-top:4px">${cat}</div>`
+      : '';
+    return header + items.map(renderIndCard).join('');
+  }).join('');
+}
+
+function renderIndCard(ind) {
+  const params = Object.entries(ind.params ?? {})
+    .filter(([,v]) => v !== null && v !== undefined)
+    .map(([k,v]) => `<div class="ind-param"><span>${k}</span><b>${v}</b></div>`)
+    .join('');
+  const badge = ind.is_hard_stop
+    ? '<span class="ind-badge hard">Hard Stop</span>'
+    : '<span class="ind-badge soft">Soft</span>';
+  const enabledLabel = ind.enabled ? 'Disable' : 'Enable';
+  return `<div class="ind-card${ind.enabled ? '' : ' disabled'}" id="icard-${ind.id}">
+    <div class="ind-card-head">
+      <div class="ind-type">${ind.indicator_type}</div>
+      ${badge}
+    </div>
+    <div class="ind-params">${params || '<span style="color:var(--txd);font-size:10px">No params</span>'}</div>
+    <div class="ind-actions">
+      <button onclick="openEditIndicator(${ind.id})">&#9998; Edit</button>
+      <button onclick="quickToggle(${ind.id})">${enabledLabel}</button>
+      <button class="dng" onclick="deleteIndicatorById(${ind.id})">&#10006; Del</button>
+    </div>
+  </div>`;
+}
+
+// ── Modal: open/close ────────────────────────────────────────────────────────
+
+function openAddIndicator() {
+  _imodId = null;
+  document.getElementById('imod-title').textContent = 'Add Indicator';
+  document.getElementById('imod-del-btn').style.display = 'none';
+  document.getElementById('imod-cat').value = _indCat === 'all' ? 'trend' : _indCat;
+  document.getElementById('imod-hardstop').checked = true;
+  document.getElementById('imod-enabled').checked = true;
+  populateTypeSelect();
+  switchParamTab('form');
+  buildParamForm({});
+  document.getElementById('ind-modal').style.display = 'flex';
+}
+
+function openEditIndicator(id) {
+  const ind = _indData.find(i => i.id === id);
+  if (!ind) return;
+  _imodId = id;
+  document.getElementById('imod-title').textContent = 'Edit Indicator';
+  document.getElementById('imod-del-btn').style.display = 'block';
+  document.getElementById('imod-cat').value = ind.category;
+  document.getElementById('imod-hardstop').checked = ind.is_hard_stop;
+  document.getElementById('imod-enabled').checked = ind.enabled;
+  populateTypeSelect(ind.indicator_type);
+  switchParamTab('form');
+  buildParamForm(ind.params ?? {});
+  document.getElementById('iparam-raw').value = JSON.stringify(ind.params ?? {}, null, 2);
+  document.getElementById('ind-modal').style.display = 'flex';
+}
+
+function closeIndModal() {
+  document.getElementById('ind-modal').style.display = 'none';
+  document.getElementById('ijson-err').textContent = '';
+}
+
+// ── Modal: type selector & param form ───────────────────────────────────────
+
+function populateTypeSelect(selected) {
+  const sel = document.getElementById('imod-type');
+  sel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t === selected ? ' selected' : ''}>${t}</option>`).join('');
+  if (!selected) buildParamForm({});
+}
+
+function onIndTypeChange() {
+  const type = document.getElementById('imod-type').value;
+  buildParamForm({});
+  if (_paramTab === 'json') {
+    // Pre-fill JSON with schema defaults
+    const defaults = schemaDefaults(type);
+    document.getElementById('iparam-raw').value = JSON.stringify(defaults, null, 2);
+  }
+}
+
+function schemaDefaults(type) {
+  const schema = IND_SCHEMAS[type] ?? [];
+  const out = {};
+  schema.forEach(p => { if (p.d !== null) out[p.k] = p.d; });
+  return out;
+}
+
+function buildParamForm(existing) {
+  const type = document.getElementById('imod-type').value;
+  const schema = IND_SCHEMAS[type] ?? [];
+  const rows = document.getElementById('iparam-rows');
+
+  if (!schema.length) {
+    rows.innerHTML = '<div style="color:var(--txd);font-size:11px;padding:4px 0">No parameters for this indicator type.</div>';
+    return;
+  }
+
+  rows.innerHTML = schema.map(p => {
+    const val = existing[p.k] !== undefined ? existing[p.k] : (p.d !== null ? p.d : '');
+    let input;
+    if (p.t === 'bool') {
+      input = `<input type="checkbox" class="param-val" id="pp-${p.k}" ${val ? 'checked' : ''}>`;
+    } else if (p.t === 'select') {
+      const opts = (p.o ?? []).map(o => `<option${o === val ? ' selected' : ''}>${o}</option>`).join('');
+      input = `<select class="param-val msel" id="pp-${p.k}" style="padding:6px 10px">${opts}</select>`;
+    } else {
+      const placeholder = p.d !== null ? String(p.d) : 'optional';
+      input = `<input type="number" step="any" class="param-val" id="pp-${p.k}" value="${val !== '' && val !== null ? val : ''}" placeholder="${placeholder}">`;
+    }
+    return `<div class="param-row"><div class="param-key">${p.k}</div>${input}</div>`;
+  }).join('');
+}
+
+function switchParamTab(tab) {
+  _paramTab = tab;
+  document.getElementById('itab-form').classList.toggle('on', tab === 'form');
+  document.getElementById('itab-json').classList.toggle('on', tab === 'json');
+  document.getElementById('iparam-form').style.display = tab === 'form' ? '' : 'none';
+  document.getElementById('iparam-json').style.display = tab === 'json' ? '' : 'none';
+
+  if (tab === 'json') {
+    // Sync form → JSON
+    document.getElementById('iparam-raw').value = JSON.stringify(readParamForm(), null, 2);
+  } else {
+    // Sync JSON → form
+    try {
+      const parsed = JSON.parse(document.getElementById('iparam-raw').value || '{}');
+      buildParamForm(parsed);
+      document.getElementById('ijson-err').textContent = '';
+    } catch { /* leave form as-is */ }
+  }
+}
+
+function readParamForm() {
+  const type = document.getElementById('imod-type').value;
+  const schema = IND_SCHEMAS[type] ?? [];
+  const out = {};
+  schema.forEach(p => {
+    const el = document.getElementById('pp-' + p.k);
+    if (!el) return;
+    if (p.t === 'bool') {
+      out[p.k] = el.checked;
+    } else if (p.t === 'select') {
+      out[p.k] = el.value;
+    } else {
+      const v = el.value.trim();
+      if (v !== '') out[p.k] = parseFloat(v);
+    }
+  });
+  return out;
+}
+
+function readParams() {
+  if (_paramTab === 'json') {
+    try {
+      const parsed = JSON.parse(document.getElementById('iparam-raw').value || '{}');
+      document.getElementById('ijson-err').textContent = '';
+      return { ok: true, params: parsed };
+    } catch (e) {
+      document.getElementById('ijson-err').textContent = 'Invalid JSON: ' + e.message;
+      document.getElementById('iparam-raw').classList.add('err');
+      return { ok: false };
+    }
+  }
+  return { ok: true, params: readParamForm() };
+}
+
+// ── Save / Delete ────────────────────────────────────────────────────────────
+
+async function saveIndicator() {
+  const { ok, params } = readParams();
+  if (!ok) return;
+  const prof = S.active;
+  const body = {
+    category: document.getElementById('imod-cat').value,
+    indicator_type: document.getElementById('imod-type').value,
+    params,
+    is_hard_stop: document.getElementById('imod-hardstop').checked,
+    enabled: document.getElementById('imod-enabled').checked,
+  };
+
+  let result;
+  if (_imodId === null) {
+    result = await api('/indicators/' + prof, { method: 'POST', body: JSON.stringify(body) });
+  } else {
+    result = await api('/indicators/' + prof + '/' + _imodId, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
+  if (result) {
+    closeIndModal();
+    await loadIndicators();
+  }
+}
+
+async function quickToggle(id) {
+  const prof = S.active;
+  const result = await api('/indicators/' + prof + '/' + id + '/toggle', { method: 'PATCH' });
+  if (result) {
+    const idx = _indData.findIndex(i => i.id === id);
+    if (idx >= 0) _indData[idx] = result;
+    renderIndGrid();
+  }
+}
+
+async function deleteIndicatorById(id) {
+  if (!confirm('Delete this indicator? This cannot be undone.')) return;
+  const prof = S.active;
+  const r = await fetch(BASE + '/indicators/' + prof + '/' + id, {
+    method: 'DELETE', credentials: 'include',
+    headers: { 'X-API-Key': akey() ?? '' },
+  });
+  if (r.ok || r.status === 204) {
+    _indData = _indData.filter(i => i.id !== id);
+    renderIndGrid();
+  }
+}
+
+function deleteIndicatorConfirm() {
+  if (_imodId !== null) {
+    closeIndModal();
+    deleteIndicatorById(_imodId);
+  }
+}
 
 chkExist();
 </script>
