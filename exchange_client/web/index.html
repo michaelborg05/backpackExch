@@ -1089,7 +1089,7 @@ function renderSymTable() {
   }
   tbody.innerHTML = _symData.map(s => {
     const enabled = !!s.enabled;
-    const rowStyle = enabled ? '' : 'opacity:0.45';
+    const rowStyle = enabled ? '' : 'opacity:0.6';
     const enBadge = enabled
       ? '<span class="bs bl2">ACTIVE</span>'
       : '<span class="bs bsh">DISABLED</span>';

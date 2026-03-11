@@ -45,6 +45,7 @@ class RegimeFilter:
         # 1. CHOP DETECTION
         self.chop_ema_range_pct = 0.5       # EMAs within 0.5% = choppy
         self.chop_rsi_neutral = (45, 55)    # RSI stuck here = no momentum
+        self.adx_trending_threshold = 22    # ADX above this = trending (suppress compression flags)
         
         # 2. EXTREME CONDITIONS  
         self.rsi_panic = 30                 # Panic selling
@@ -277,22 +278,57 @@ class RegimeFilter:
             
 
         # 1. EMA COMPRESSION - Tight range indicates indecision
+        # IMPORTANT: Gap alone is not enough. A compressing gap during a trend
+        # recovery (EMA20 rising toward EMA50 from below) is NOT chop — it's
+        # structural consolidation before continuation. We check two extra conditions:
+        #   a) EMA20 slope must be flat or falling (a rising slope = recovering trend)
+        #   b) ADX must be below trending threshold (high ADX = real trend, not chop)
         ema_diff_pct = abs(((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100)
-        if ema_diff_pct < self.chop_ema_range_pct:
-            issues.append(f"60m EMAs compressed ({ema_diff_pct:.2f}% - no clear direction)")
 
-        # NEW: Check 15m compression too
+        # Get 60m EMA20 slope and ADX for context
+        ema20_slope_pct, ema20_slope_dir = self.trend_cache._get_ema_slope(
+            symbol, primary_timeframe, "ema20"
+        )
+        adx_value = getattr(primary_trend, "adx", None)
+        adx_is_trending = (
+            adx_value is not None and float(adx_value) > self.adx_trending_threshold
+        )
+
+        if ema_diff_pct < self.chop_ema_range_pct:
+            # Suppress if EMA20 is rising — gap is closing because trend is recovering,
+            # not because market is oscillating flatly
+            ema_rising = ema20_slope_dir == "rising"
+
+            if ema_rising:
+                # Gap is closing due to upward recovery — not chop, skip this issue
+                pass
+            elif adx_is_trending:
+                # ADX confirms a real trend is in play — tight gap is structural, not chop
+                pass
+            else:
+                issues.append(
+                    f"60m EMAs compressed ({ema_diff_pct:.2f}% - no clear direction)"
+                )
+
+        # Check 15m compression too, but only flag "both TFs compressed" when
+        # ADX is also low (confirming genuine range/chop, not a trending structure)
         if confirm_trend is not None:
-            confirm_ema_diff = abs(((confirm_trend.ema20 - confirm_trend.ema50) / 
+            confirm_ema_diff = abs(((confirm_trend.ema20 - confirm_trend.ema50) /
                                     confirm_trend.ema50) * 100)
-            
-            if confirm_ema_diff < self.chop_ema_range_pct:
-                # Both compressed = definitely choppy
-                if ema_diff_pct < self.chop_ema_range_pct:
+
+            if confirm_ema_diff < self.chop_ema_range_pct and ema_diff_pct < self.chop_ema_range_pct:
+                if adx_is_trending:
+                    # High ADX: both EMAs compressed because a trend is underway and
+                    # EMAs are catching up — do NOT call this choppy
+                    pass
+                elif ema20_slope_dir == "rising":
+                    # Rising 60m EMA20 slope: trend recovering, gap closing naturally
+                    pass
+                else:
                     issues.append(
                         f"Both TFs compressed (60m: {ema_diff_pct:.2f}%, "
                         f"15m: {confirm_ema_diff:.2f}%)"
-                    )        
+                    )
         # 2. RSI STUCK IN NEUTRAL - No momentum
         rsi_low, rsi_high = self.chop_rsi_neutral
         if rsi_low < primary_trend.rsi < rsi_high:
