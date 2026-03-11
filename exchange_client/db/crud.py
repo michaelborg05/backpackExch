@@ -807,13 +807,19 @@ def get_recently_expired_circuit_breaker(
 
 # Add to db/crud.py
 
-def get_symbol_config(db: Session, profile_name: str, symbol: str) -> Optional[SymbolConfig]:
+def get_symbol_config(db: Session, profile_name: str, symbol: str, return_all: bool = False) -> Optional[SymbolConfig]:
     """Get symbol-specific configuration"""
-    return db.query(SymbolConfig).filter(
-        SymbolConfig.profile_name == profile_name,
-        SymbolConfig.symbol == symbol,
-        SymbolConfig.enabled == True
-    ).first()
+    if return_all:
+        return db.query(SymbolConfig).filter(
+            SymbolConfig.profile_name == profile_name,
+            SymbolConfig.symbol == symbol,
+        ).first()
+    else:
+        return db.query(SymbolConfig).filter(
+            SymbolConfig.profile_name == profile_name,
+            SymbolConfig.symbol == symbol,
+            SymbolConfig.enabled == True
+        ).first()
 
 
 def upsert_symbol_config(
@@ -825,7 +831,7 @@ def upsert_symbol_config(
     enabled: bool = True
 ) -> SymbolConfig:
     """Create or update symbol configuration"""
-    config = get_symbol_config(db, profile_name, symbol)
+    config = get_symbol_config(db, profile_name, symbol, return_all = True)
 
     if config:
         # Update existing
@@ -854,7 +860,7 @@ def get_all_symbol_configs(db: Session, profile_name: str) -> List[SymbolConfig]
     """Get all symbol configs for a profile"""
     return db.query(SymbolConfig).filter(
         SymbolConfig.profile_name == profile_name,
-        SymbolConfig.enabled == True
+
     ).all()
 
 
@@ -862,7 +868,7 @@ def delete_symbol_config(db: Session, profile_name: str, symbol: str) -> bool:
     """Delete (disable) a symbol configuration"""
     config = get_symbol_config(db, profile_name, symbol)
     if config:
-        config.enabled = False
+        db.delete(config)
         db.commit()
         return True
     return False

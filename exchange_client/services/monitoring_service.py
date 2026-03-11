@@ -121,19 +121,7 @@ class MonitoringService:
         if self.thread:
             self.thread.join(timeout=5)
         self.logger.info("Monitoring service stopped")
-        
-    def add_ticker(self, ticker: str):
-        """Add a ticker to monitor"""
-        if ticker not in self.tickers:
-            self.tickers.append(ticker)
-            self.logger.info(f"Added ticker: {ticker}")
-        
-    def remove_ticker(self, ticker: str):
-        """Remove a ticker from monitoring"""
-        if ticker in self.tickers:
-            self.tickers.remove(ticker)
-            self.logger.info(f"Removed ticker: {ticker}")
-        
+               
     def get_status(self) -> dict:
         """Get current monitoring status"""
         return {
@@ -165,7 +153,7 @@ class MonitoringService:
                 if self._profile_refresh_counter >= self.settings.profile_refresh_interval:
                     self._refresh_profiles()
                     self._profile_refresh_counter = 0                
-
+                    
                 # Monitor prices for all tickers
                 self._monitor_prices()
                 

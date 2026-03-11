@@ -286,28 +286,6 @@ def get_cached_asset_balance(profile_name: str, asset: str):
         "cache_info": cache.get_cache_info()
     }
 
-#Requires trade permission
-@app.post("/monitoring/add-ticker", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
-def add_ticker(request: TickerRequest):
-    """Add a ticker to monitor"""
-    service = get_monitoring_service()
-    service.add_ticker(request.ticker)
-    return {
-        "message": f"Added ticker {request.ticker}",
-        "tickers": service.tickers
-    }
-
-@app.post("/monitoring/remove-ticker", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
-def remove_ticker(request: TickerRequest):
-    """Remove a ticker from monitoring"""
-    service = get_monitoring_service()
-    service.remove_ticker(request.ticker)
-    return {
-        "message": f"Removed ticker {request.ticker}",
-        "tickers": service.tickers
-    }
-
-
 @app.post("/monitoring/stop", dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
 def stop_monitoring():
     """Stop the monitoring service"""
@@ -1058,9 +1036,12 @@ async def scan_for_signals(profile_name: str):
     signal_gen = get_signal_generator(profile)
     
     # Get monitored tickers
-    monitoring = get_monitoring_service()
-    symbols = monitoring.tickers
-    
+    from db.crud import get_active_symbols
+    from db.utils import get_db_session
+    with get_db_session() as db:
+        db_tickers = get_active_symbols(db)
+    symbols = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "BTC_USDC"]
+
     # Generate signals
     signals = signal_gen.scan_symbols(symbols)
     

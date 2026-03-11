@@ -241,6 +241,7 @@ main{padding:20px 24px;position:relative;z-index:1}
     <div class="nt" onclick="st('market',this)">Market</div>
     <div class="nt" onclick="st('api',this)">API Explorer</div>
     <div class="nt" onclick="st('indicators',this)">Indicators</div>
+    <div class="nt" onclick="st('symbols',this)">Symbols</div>
   </nav>
   <main>
     <div class="panel on" id="p-overview">
@@ -333,6 +334,31 @@ main{padding:20px 24px;position:relative;z-index:1}
         </div>
       </div>
     </div>
+    <div class="panel" id="p-symbols">
+      <div class="card fi">
+        <div class="ind-toolbar">
+          <span style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--txd)">Symbol Configs — <span id="sym-profile-label" style="color:var(--acc)">—</span></span>
+          <span style="flex:1"></span>
+          <span id="sym-count" style="font-size:10px;color:var(--txd);letter-spacing:.1em"></span>
+          <button class="bsm a" onclick="openAddSymbol()">+ ADD</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="dt" id="sym-table">
+            <thead><tr>
+              <th>Symbol</th>
+              <th>Order Size (USDC)</th>
+              <th>Max Position %</th>
+              <th>Enabled</th>
+              <th>Updated</th>
+              <th></th>
+            </tr></thead>
+            <tbody id="sym-tbody">
+              <tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">Select a profile to load symbol configs</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -386,7 +412,38 @@ main{padding:20px 24px;position:relative;z-index:1}
     </div>
   </div>
 </div>
-<div id="toast">&#9888; Session expiring &mdash; <a href="#" onclick="sref()" style="color:var(--warn)">refresh</a></div>
+<div id="sym-modal" class="modal-bg" style="display:none" onclick="if(event.target===this)closeSymModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="smod-title">Add Symbol Config</div>
+      <button class="modal-close" onclick="closeSymModal()">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <div class="mf">
+        <label class="mlab">Symbol</label>
+        <input class="minp" id="smod-symbol" placeholder="e.g. SOL_USDC" style="text-transform:uppercase">
+      </div>
+      <div class="mrow">
+        <div class="mf" style="margin-bottom:0">
+          <label class="mlab">Order Size (USDC)</label>
+          <input type="number" step="0.01" min="0" class="minp" id="smod-order-size" placeholder="e.g. 150">
+        </div>
+        <div class="mf" style="margin-bottom:0">
+          <label class="mlab">Max Position % <span style="color:var(--txd)">(0–100)</span></label>
+          <input type="number" step="0.01" min="0" max="100" class="minp" id="smod-max-pos" placeholder="e.g. 40">
+        </div>
+      </div>
+      <div class="mf" style="margin-top:16px;margin-bottom:0">
+        <label class="mchk"><input type="checkbox" id="smod-enabled" checked><span class="mchk-lab">Enabled</span></label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn sec" onclick="closeSymModal()">Cancel</button>
+      <button class="mbtn dng" id="smod-del-btn" style="display:none" onclick="deleteSymbolConfirm()">Delete</button>
+      <button class="mbtn" onclick="saveSymbol()">Save</button>
+    </div>
+  </div>
+</div>&#9888; Session expiring &mdash; <a href="#" onclick="sref()" style="color:var(--warn)">refresh</a></div>
 
 <script>
 'use strict';
@@ -701,13 +758,13 @@ function st(name,el){
   document.getElementById('p-'+name).classList.add('on');el.classList.add('on');
   loadPanel(name);
 }
-function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull',false),balances:loadBal,market:loadMkt,indicators:loadIndicators,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
+function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull',false),balances:loadBal,market:loadMkt,indicators:loadIndicators,symbols:loadSymbols,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
 function startAR(){
   if(_ar)clearInterval(_ar);
   setInterval(checkHealth,30000);
-  _ar=setInterval(()=>{const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api',indicators:'indicators'};if(t&&m[t])loadPanel(m[t]);},20000);
+  _ar=setInterval(()=>{const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api',indicators:'indicators',symbols:'symbols'};if(t&&m[t])loadPanel(m[t]);},20000);
 }
-function refAll(){checkHealth();const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api',indicators:'indicators'};if(m[t])loadPanel(m[t]);}
+function refAll(){checkHealth();const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api',indicators:'indicators',symbols:'symbols'};if(m[t])loadPanel(m[t]);}
 
 const fusd=n=>'$'+(parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fpr=n=>{const v=parseFloat(n)||0;return v>=1000?v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):v>=1?v.toFixed(4):v.toFixed(6);};
@@ -1004,6 +1061,110 @@ function deleteIndicatorConfirm() {
     closeIndModal();
     deleteIndicatorById(_imodId);
   }
+}
+
+
+// ── Symbol Configs ───────────────────────────────────────────────────────────
+
+let _symData = [];    // loaded symbol configs
+let _smodId = null;   // null = create, string = edit (symbol name used as key)
+
+async function loadSymbols() {
+  const prof = S.active;
+  if (!prof) return;
+  document.getElementById('sym-profile-label').textContent = S.profiles[prof]?.display_name ?? prof;
+  const data = await api('/config/symbols/' + prof);
+  _symData = Array.isArray(data) ? data : (data?.configs ?? []);
+  renderSymTable();
+}
+
+function renderSymTable() {
+  const tbody = document.getElementById('sym-tbody');
+  const count = document.getElementById('sym-count');
+  if (!tbody) return;
+  count.textContent = _symData.length + ' symbol' + (_symData.length !== 1 ? 's' : '');
+  if (!_symData.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">No symbol configs for this profile</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _symData.map(s => {
+    const enabled = !!s.enabled;
+    const rowStyle = enabled ? '' : 'opacity:0.45';
+    const enBadge = enabled
+      ? '<span class="bs bl2">ACTIVE</span>'
+      : '<span class="bs bsh">DISABLED</span>';
+    const updated = s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—';
+    return `<tr style="${rowStyle}">
+      <td class="ts tm">${s.symbol}</td>
+      <td class="tm">$${parseFloat(s.order_size_usdc ?? 0).toFixed(2)}</td>
+      <td class="tm">${s.max_position_size_pct != null ? parseFloat(s.max_position_size_pct).toFixed(1) + '%' : '—'}</td>
+      <td class="tm">${enBadge}</td>
+      <td class="tm td2">${updated}</td>
+      <td style="text-align:right;padding-right:12px">
+        <button class="bsm" style="font-size:10px" onclick="openEditSymbol(${JSON.stringify(s).replace(/"/g,'&quot;')})">EDIT</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddSymbol() {
+  _smodId = null;
+  document.getElementById('smod-title').textContent = 'Add Symbol Config';
+  document.getElementById('smod-symbol').value = '';
+  document.getElementById('smod-symbol').disabled = false;
+  document.getElementById('smod-order-size').value = '';
+  document.getElementById('smod-max-pos').value = '';
+  document.getElementById('smod-enabled').checked = true;
+  document.getElementById('smod-del-btn').style.display = 'none';
+  document.getElementById('sym-modal').style.display = 'flex';
+}
+
+function openEditSymbol(sym) {
+  _smodId = sym.symbol;
+  document.getElementById('smod-title').textContent = 'Edit Symbol Config';
+  document.getElementById('smod-symbol').value = sym.symbol;
+  document.getElementById('smod-symbol').disabled = true;
+  document.getElementById('smod-order-size').value = sym.order_size_usdc != null ? parseFloat(sym.order_size_usdc) : '';
+  document.getElementById('smod-max-pos').value = sym.max_position_size_pct != null ? parseFloat(sym.max_position_size_pct) : '';
+  document.getElementById('smod-enabled').checked = !!sym.enabled;
+  document.getElementById('smod-del-btn').style.display = '';
+  document.getElementById('sym-modal').style.display = 'flex';
+}
+
+function closeSymModal() {
+  document.getElementById('sym-modal').style.display = 'none';
+}
+
+async function saveSymbol() {
+  const prof = S.active;
+  const symbol = _smodId ?? document.getElementById('smod-symbol').value.trim().toUpperCase();
+  if (!symbol) { alert('Symbol is required.'); return; }
+  const orderSize = document.getElementById('smod-order-size').value.trim();
+  if (!orderSize) { alert('Order size is required.'); return; }
+  const body = {
+    order_size_usdc: parseFloat(orderSize),
+    max_position_size_pct: document.getElementById('smod-max-pos').value.trim()
+      ? parseFloat(document.getElementById('smod-max-pos').value.trim())
+      : null,
+    enabled: document.getElementById('smod-enabled').checked,
+  };
+  const result = await api('/config/symbol/' + prof + '/' + symbol, {
+    method: 'POST', body: JSON.stringify(body),
+  });
+  if (result) { closeSymModal(); await loadSymbols(); }
+}
+
+function deleteSymbolConfirm() {
+  if (!_smodId) return;
+  if (!confirm('Delete config for ' + _smodId + '? This cannot be undone.')) return;
+  const prof = S.active;
+  closeSymModal();
+  fetch(BASE + '/config/symbol/' + prof + '/' + _smodId, {
+    method: 'DELETE', credentials: 'include',
+    headers: { 'X-API-Key': akey() ?? '' },
+  }).then(r => {
+    if (r.ok || r.status === 204) loadSymbols();
+  });
 }
 
 chkExist();
