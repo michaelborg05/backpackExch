@@ -878,3 +878,10 @@ def get_active_symbols(db: Session) -> List[str]:
     symbols = db.query(SymbolConfig.symbol).filter(SymbolConfig.enabled == True).distinct().all()
     return [s.symbol for s in symbols]
 
+def get_active_symbols_per_profile(db: Session, profile_name: str) -> List[str]:
+    """Get all symbol configs for a profile"""
+    symbols = db.query(SymbolConfig.symbol).filter(
+        SymbolConfig.profile_name == profile_name,
+        SymbolConfig.enabled == True,
+    ).distinct().all()
+    return [s.symbol for s in symbols]

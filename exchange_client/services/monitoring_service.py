@@ -33,15 +33,12 @@ from utils.settings_helper import get_settings_helper
 from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
-    save_limit_trade,
-    save_trade,
     update_position_trailing_stop,
     close_invalid_position,
     update_high_low,
     get_active_symbols,
+    get_active_symbols_per_profile,
     get_active_orders,
-    update_order,
-    add_validation_result
 )
 
 class MonitoringService:
@@ -152,6 +149,13 @@ class MonitoringService:
                 #refresh profiles from db every X cycles
                 if self._profile_refresh_counter >= self.settings.profile_refresh_interval:
                     self._refresh_profiles()
+                    
+                    #also refresh tickers each time profile is refreshed  - no need for separate loop just for tickers
+                    with get_db_session() as db:
+                            db_tickers = get_active_symbols(db)
+                            # Fallback to a hardcoded list ONLY if the DB is empty
+                            self.tickers = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "BTC_USDC"]
+
                     self._profile_refresh_counter = 0                
                     
                 # Monitor prices for all tickers
@@ -978,9 +982,11 @@ class MonitoringService:
         """Process trading signals for a specific profile"""
                 
         signal_gen = get_signal_generator(profile)
-        
+        with get_db_session() as db:
+            profile_tickers = get_active_symbols_per_profile(db,profile.name)
+
         # Scan all monitored tickers
-        signals = signal_gen.scan_symbols(self.tickers)
+        signals = signal_gen.scan_symbols(profile_tickers)
         
         if not signals:
             self.logger.debug(f"[{profile.name}] No signals generated")
