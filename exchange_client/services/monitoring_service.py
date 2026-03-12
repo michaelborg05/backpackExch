@@ -575,13 +575,14 @@ class MonitoringService:
 
     def _execute_close(self, db, position, profile, reason: str, reason_summary: list[str] = None):
         """
-        Execute a close order for a position
-        
+        Execute a close order for a position.
+
         Args:
-            db: Database session
-            position: Position object to close
-            profile: TradingProfile for this position
-            reason: Reason for closing (TAKE_PROFIT, STOP_LOSS, TRAILING_STOP)
+            db            : Database session
+            position      : Position object to close
+            profile       : TradingProfile for this position
+            reason        : TAKE_PROFIT | STOP_LOSS | TRAILING_STOP | TREND_INVALIDATION | ...
+            reason_summary: Optional list of reason strings for trade record
         """
         try:
             # Create TradingService instance for this profile
@@ -622,6 +623,20 @@ class MonitoringService:
                 quantity_sold = float(result.executed_quantity)
                 profit = (exit_price - entry_price) * quantity_sold
                 profit_pct = ((exit_price - entry_price) / entry_price) * 100
+
+                # ← NEW: resolve the AI signal outcome if this position was
+                # opened from an AI_AGENT signal
+                if position.ai_log_id is not None:
+                    from db.crud_ai import resolve_ai_signal_outcome
+                    from datetime import datetime, timezone
+                    resolve_ai_signal_outcome(
+                        db=db,
+                        ai_log_id=position.ai_log_id,
+                        exit_price=exit_price,
+                        entry_price=entry_price,
+                        close_reason=reason,
+                        closed_at=datetime.now(timezone.utc),
+                    )
 
                 icon = "🟢" if profit_pct >= 0 else "🛑"
                 
@@ -1111,9 +1126,18 @@ class MonitoringService:
                     f"Qty: {result.executed_quantity}, "
                     f"Price: ${executed_price:.4f}"
                 )
-                
-                # Send Telegram notification
-                
+
+                # ← NEW: if this signal came from the AI agent, stamp the
+                # ai_log_id onto the freshly-opened position so we can
+                # resolve the outcome when it closes.
+                ai_log_id = getattr(signal, 'ai_log_id', None)
+                if ai_log_id is not None:
+                    self._stamp_ai_log_id_on_position(
+                        symbol=signal.symbol,
+                        profile_name=profile.name,
+                        ai_log_id=ai_log_id,
+                    )
+
                 self._send_telegram(
                     f"🎯 Signal Trade Executed [{profile.display_name if profile.display_name else profile.name}]\n"
                     f"Symbol: {signal.symbol}\n"
@@ -1136,6 +1160,54 @@ class MonitoringService:
                 f"Symbol: {signal.symbol}\n"
                 f"Error: {str(e)}",
                 MessagePriority.HIGH
+            )
+
+
+    # ← NEW helper — called right after order_buy fills
+    def _stamp_ai_log_id_on_position(
+        self,
+        symbol: str,
+        profile_name: str,
+        ai_log_id: int,
+    ) -> None:
+        """
+        Find the freshly-opened OPEN position for this symbol/profile and
+        write ai_log_id onto it.
+
+        We query for the most-recently-created OPEN position rather than
+        relying on a position_id returned from order_buy, which avoids
+        needing to change TradingService's return contract.
+        """
+        try:
+            from db.models import Position
+            with get_db_session() as db:
+                position = (
+                    db.query(Position)
+                    .filter(
+                        Position.profile_name == profile_name,
+                        Position.symbol == symbol,
+                        Position.status == "OPEN",
+                        Position.ai_log_id.is_(None),   # don't overwrite if already set
+                    )
+                    .order_by(Position.created_at.desc())
+                    .first()
+                )
+                if position:
+                    position.ai_log_id = ai_log_id
+                    db.commit()
+                    self.logger.info(
+                        f"[{profile_name}] Stamped ai_log_id={ai_log_id} "
+                        f"onto position id={position.id} ({symbol})"
+                    )
+                else:
+                    self.logger.warning(
+                        f"[{profile_name}] Could not find open position for {symbol} "
+                        f"to stamp ai_log_id={ai_log_id}"
+                    )
+        except Exception as e:
+            self.logger.error(
+                f"Failed to stamp ai_log_id={ai_log_id} onto position: {e}",
+                exc_info=True
             )
 
 def set_monitoring_service(service: MonitoringService):

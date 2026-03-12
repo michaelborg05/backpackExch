@@ -120,7 +120,18 @@ class Position(Base):
     lowest_price = Column(Numeric(20, 8), nullable=True)
 
     trailing_stop_armed = Column(Boolean, default=False, server_default=text("false"))
-        
+
+    # ── NEW: links this position back to the AI signal that triggered it ──────
+    # Null for non-AI-AGENT profiles. Set in monitoring_service._execute_signal()
+    # after the buy order is confirmed. Used by _execute_close() to resolve the
+    # AI outcome in ai_signal_log.
+    ai_log_id = Column(
+        Integer,
+        ForeignKey("ai_signal_log.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     profit = Column(Numeric(20, 8), nullable=True)
     status = Column(String, default="OPEN")  # OPEN or CLOSED or PARTIALLY_CLOSED
     close_reason = Column(String, nullable=True, server_default=text("'MANUAL'")) 

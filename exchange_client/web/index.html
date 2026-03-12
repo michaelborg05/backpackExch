@@ -202,6 +202,61 @@ main{padding:20px 24px;position:relative;z-index:1}
 .param-val:focus{border-color:var(--acc)}
 .param-val[type=checkbox]{width:auto;accent-color:var(--acc)}
 .param-val select{background:var(--bg3);color:var(--txb)}
+
+/* ── AI Monitor panel ──────────────────────────────────────────────────── */
+.ai-verdict{margin-bottom:20px;background:rgba(0,255,157,.04);border:1px solid rgba(0,255,157,.15);border-left:3px solid var(--grn);padding:14px 18px}
+.ai-verdict-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--grn);margin-bottom:5px}
+.ai-verdict-text{color:#c8e6c9;font-size:12px;line-height:1.6;margin-bottom:4px}
+.ai-verdict-rec{color:var(--txd);font-size:11px}
+.ai-pair-tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.ai-pair-tab{background:transparent;border:1px solid var(--brd);color:var(--txd);padding:4px 14px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all .15s;border-radius:99px}
+.ai-pair-tab:hover{color:var(--tx);border-color:var(--txd)}
+.ai-pair-tab.on{background:rgba(0,255,157,.08);border-color:var(--grn);color:var(--grn)}
+.ai-subtabs{display:flex;border-bottom:1px solid var(--brd);margin-bottom:16px}
+.ai-subtab{padding:8px 18px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none}
+.ai-subtab:hover{color:var(--tx)}
+.ai-subtab.on{color:var(--acc);border-bottom-color:var(--acc)}
+.ai-stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.ai-stat-box{background:var(--bg3);border:1px solid var(--brd);padding:14px 18px;flex:1;min-width:130px}
+.ai-stat-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);margin-bottom:6px}
+.ai-stat-val{font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--txb);line-height:1;margin-bottom:3px}
+.ai-stat-sub{font-size:11px;color:var(--txd)}
+.ai-delta-pos{color:var(--grn)}.ai-delta-neg{color:var(--red)}.ai-delta-neu{color:var(--txd)}
+.ai-pair-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+.ai-pair-card{background:var(--bg2);border:1px solid var(--brd)}
+.ai-pair-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--brd)}
+.ai-pair-name{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;letter-spacing:.08em;color:var(--txb)}
+.ai-pair-badges{display:flex;gap:6px;align-items:center}
+.ai-badge{font-size:10px;padding:2px 8px;border:1px solid;letter-spacing:.06em;font-weight:700}
+.ai-badge-g{border-color:rgba(0,255,157,.35);color:var(--grn);background:rgba(0,255,157,.07)}
+.ai-badge-r{border-color:rgba(255,60,90,.35);color:var(--red);background:rgba(255,60,90,.07)}
+.ai-badge-b{border-color:rgba(0,212,255,.35);color:var(--acc);background:rgba(0,212,255,.07)}
+.ai-badge-y{border-color:rgba(255,204,0,.35);color:var(--warn);background:rgba(255,204,0,.07)}
+.ai-pair-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:0;border-bottom:1px solid var(--brd)}
+.ai-pair-stat{padding:12px 16px;border-right:1px solid var(--brd)}
+.ai-pair-stat:last-child{border-right:none}
+.ai-ps-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--txd);margin-bottom:4px}
+.ai-ps-val{font-size:15px;font-weight:700;color:var(--txb)}
+.ai-ps-rules{font-size:11px;color:var(--txd);margin-top:2px}
+.ai-conf-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}
+.ai-conf-bar{flex:1;background:var(--brd);border-radius:99px;height:5px;overflow:hidden}
+.ai-conf-fill{height:100%;border-radius:99px;transition:width .5s}
+.ai-conf-pct{font-size:10px;color:var(--txd);min-width:30px;font-family:'Space Mono',monospace}
+.ai-pair-extra{padding:10px 16px;display:flex;gap:16px;font-size:11px;color:var(--txd)}
+.ai-signal-row{display:grid;grid-template-columns:55px 95px 80px 80px 80px 95px 1fr;gap:8px;padding:10px 16px;border-bottom:1px solid rgba(30,42,56,.5);align-items:center;cursor:pointer;transition:background .12s}
+.ai-signal-row:hover{background:rgba(0,212,255,.025)}
+.ai-signal-row:last-child{border-bottom:none}
+.ai-signal-head{display:grid;grid-template-columns:55px 95px 80px 80px 80px 95px 1fr;gap:8px;padding:7px 16px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);border-bottom:1px solid var(--brd);background:rgba(255,255,255,.02)}
+.ai-reasoning-expand{padding:12px 16px;background:var(--bg3);border-top:1px solid rgba(30,42,56,.5);font-size:11px;color:var(--txd);line-height:1.7;display:none}
+.ai-reasoning-expand.on{display:block}
+.ai-checklist{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.ai-check-item{display:flex;align-items:center;gap:12px}
+.ai-check-box{width:18px;height:18px;border-radius:3px;border:1px solid var(--brd);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}
+.ai-check-box.pass{background:rgba(0,255,157,.08);border-color:rgba(0,255,157,.4);color:var(--grn)}
+.ai-check-box.fail{background:rgba(30,42,56,.5);border-color:var(--brd);color:transparent}
+.ai-check-lab{font-size:12px;color:var(--txd)}
+.ai-check-lab.pass{color:var(--tx)}
+.ai-empty{color:var(--txd);text-align:center;padding:40px;font-size:12px}
 </style>
 </head>
 <body>
@@ -242,6 +297,7 @@ main{padding:20px 24px;position:relative;z-index:1}
     <div class="nt" onclick="st('api',this)">API Explorer</div>
     <div class="nt" onclick="st('indicators',this)">Indicators</div>
     <div class="nt" onclick="st('symbols',this)">Symbols</div>
+    <div class="nt" onclick="st('ai',this)">AI Monitor</div>
   </nav>
   <main>
     <div class="panel on" id="p-overview">
@@ -356,6 +412,46 @@ main{padding:20px 24px;position:relative;z-index:1}
               <tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">Select a profile to load symbol configs</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-ai">
+      <div class="card fi" style="margin-bottom:16px">
+        <div class="ch">
+          <span class="ct">AI vs Rules — Shadow Monitor</span>
+          <span class="cb" id="ai-period-badge">30d window</span>
+        </div>
+        <div id="ai-verdict-box" style="padding:14px 18px">
+          <div class="ai-empty">Loading AI monitor data...</div>
+        </div>
+      </div>
+      <div class="ai-pair-tabs" id="ai-pair-tabs"></div>
+      <div class="card fi">
+        <div class="ai-subtabs">
+          <div class="ai-subtab on" onclick="aiTab('overview',this)">Overview</div>
+          <div class="ai-subtab" onclick="aiTab('signals',this)">Signal Log</div>
+          <div class="ai-subtab" onclick="aiTab('promote',this)">Promotion</div>
+        </div>
+        <div id="ai-sub-overview" style="padding:16px">
+          <div class="ai-stat-row" id="ai-global-stats"></div>
+          <div class="ai-pair-grid" id="ai-pair-grid">
+            <div class="ai-empty">Select a profile to load AI monitor data</div>
+          </div>
+        </div>
+        <div id="ai-sub-signals" style="display:none">
+          <div class="ai-signal-head">
+            <span>Time</span><span>Pair</span><span>AI</span><span>Rules</span><span>Conf</span><span>Outcome</span><span>Reasoning</span>
+          </div>
+          <div id="ai-signal-list">
+            <div class="ai-empty">No signals logged yet</div>
+          </div>
+        </div>
+        <div id="ai-sub-promote" style="display:none;padding:20px">
+          <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);margin-bottom:16px">Promotion Checklist</div>
+          <div class="ai-checklist" id="ai-checklist">
+            <div class="ai-empty">Load AI data to see checklist</div>
+          </div>
         </div>
       </div>
     </div>
@@ -758,7 +854,7 @@ function st(name,el){
   document.getElementById('p-'+name).classList.add('on');el.classList.add('on');
   loadPanel(name);
 }
-function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull',false),balances:loadBal,market:loadMkt,indicators:loadIndicators,symbols:loadSymbols,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
+function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull',false),balances:loadBal,market:loadMkt,indicators:loadIndicators,symbols:loadSymbols,ai:loadAI,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
 function startAR(){
   if(_ar)clearInterval(_ar);
   setInterval(checkHealth,30000);
@@ -1165,6 +1261,250 @@ function deleteSymbolConfirm() {
   }).then(r => {
     if (r.ok || r.status === 204) loadSymbols();
   });
+}
+
+
+
+// ── AI Monitor ───────────────────────────────────────────────────────────────
+
+const AI = {
+  data: null,          // last fetched report
+  pairFilter: 'ALL',
+  subTab: 'overview',
+  expandedRow: null,
+};
+
+// Called from the tab switcher (st function)
+async function loadAI() {
+  const prof = S.active;
+  if (!prof) return;
+  // Fetch from your analytics endpoint — adjust path to match your FastAPI routes
+  const data = await api('/ai-monitor/report/' + prof + '?days=30');
+  if (!data) {
+    // Fall back to mock data so the UI is useful during development
+    AI.data = aiMockData();
+  } else {
+    AI.data = data;
+  }
+  renderAIVerdict();
+  renderAIPairTabs();
+  renderAIOverview();
+  renderAISignals();
+  renderAIChecklist();
+}
+
+function aiMockData() {
+  return {
+    period_days: 30,
+    verdict: 'AI entry agent outperforming rule-based system: +7.3% win rate, +0.18 avg R:R across 3 pairs.',
+    recommendation: 'Consider promoting AI profile to live trading with 10–20% of normal position size. Monitor for 2 more weeks before full allocation.',
+    pairs: ['SOL_USDC', 'ETH_USDC', 'HYPE_USDC'],
+    stats: [
+      { pair:'SOL_USDC',  ai:{total:48,entries:21,win_rate:66.7,avg_rr:1.82,avg_pnl:1.24,avg_conf:0.74,skip_acc:71.4,hc_win_rate:78.6}, rules:{total:48,entries:31,win_rate:58.1,avg_rr:1.61,avg_pnl:0.87} },
+      { pair:'ETH_USDC',  ai:{total:39,entries:17,win_rate:64.7,avg_rr:1.74,avg_pnl:1.08,avg_conf:0.71,skip_acc:63.6,hc_win_rate:75.0}, rules:{total:39,entries:26,win_rate:57.7,avg_rr:1.55,avg_pnl:0.72} },
+      { pair:'HYPE_USDC', ai:{total:29,entries:11,win_rate:72.7,avg_rr:1.91,avg_pnl:1.61,avg_conf:0.79,skip_acc:77.8,hc_win_rate:83.3}, rules:{total:29,entries:20,win_rate:60.0,avg_rr:1.63,avg_pnl:0.94} },
+    ],
+    recent_signals: [
+      { id:1, time:'11:45', pair:'SOL_USDC',  ai_decision:'ENTER', rules_decision:'ENTER', ai_confidence:0.82, outcome:'WIN',  pnl_pct:2.1,  reasoning:'Strong hammer at RSI 44 with 60m uptrend intact. Volume 1.4x avg. Clean structure low for SL.' },
+      { id:2, time:'10:30', pair:'ETH_USDC',  ai_decision:'SKIP',  rules_decision:'ENTER', ai_confidence:0.31, outcome:'LOSS', pnl_pct:-1.2, reasoning:'RSI 48 but only 2 candles since peak. Drop from close 0.9%. Momentum not sufficiently cooled.' },
+      { id:3, time:'09:15', pair:'HYPE_USDC', ai_decision:'ENTER', rules_decision:'ENTER', ai_confidence:0.88, outcome:'WIN',  pnl_pct:3.4,  reasoning:'Bull engulfing with volume surge 1.8x. RSI 41 with 6 candles post-peak. Ideal rsi_reversal_momentum setup.' },
+      { id:4, time:'08:00', pair:'SOL_USDC',  ai_decision:'WAIT',  rules_decision:'ENTER', ai_confidence:0.55, outcome:'WIN',  pnl_pct:1.8,  reasoning:'WAIT issued — entered next candle at better price.' },
+      { id:5, time:'07:30', pair:'ETH_USDC',  ai_decision:'SKIP',  rules_decision:'SKIP',  ai_confidence:0.22, outcome:'LOSS', pnl_pct:-0.9, reasoning:'Both systems agreed: RSI peak too recent, price dropped 1.1% from close.' },
+    ]
+  };
+}
+
+function aiTab(tab, el) {
+  AI.subTab = tab;
+  document.querySelectorAll('.ai-subtab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('ai-sub-overview').style.display = tab === 'overview' ? '' : 'none';
+  document.getElementById('ai-sub-signals').style.display  = tab === 'signals'  ? '' : 'none';
+  document.getElementById('ai-sub-promote').style.display  = tab === 'promote'  ? '' : 'none';
+}
+
+function setAIPair(pair, el) {
+  AI.pairFilter = pair;
+  document.querySelectorAll('.ai-pair-tab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  renderAIOverview();
+  renderAISignals();
+}
+
+function renderAIVerdict() {
+  const d = AI.data;
+  if (!d) return;
+  document.getElementById('ai-period-badge').textContent = d.period_days + 'd window';
+  document.getElementById('ai-verdict-box').innerHTML =
+    '<div class="ai-verdict">' +
+      '<div class="ai-verdict-label">Verdict</div>' +
+      '<div class="ai-verdict-text">' + (d.verdict || '—') + '</div>' +
+      '<div class="ai-verdict-rec">→ ' + (d.recommendation || '') + '</div>' +
+    '</div>';
+}
+
+function renderAIPairTabs() {
+  const d = AI.data;
+  if (!d) return;
+  const pairs = ['ALL', ...(d.pairs || [])];
+  document.getElementById('ai-pair-tabs').innerHTML = pairs.map((p,i) =>
+    '<button class="ai-pair-tab' + (i===0?' on':'') + '" onclick="setAIPair(' + p + ',this)">' + p + '</button>'
+  ).join('');
+}
+
+function renderAIOverview() {
+  const d = AI.data;
+  if (!d) return;
+  const stats = AI.pairFilter === 'ALL' ? d.stats : d.stats.filter(s => s.pair === AI.pairFilter);
+
+  // Global aggregate stat boxes
+  const totAI    = stats.reduce((a,s)=>({wr:a.wr+s.ai.win_rate, rr:a.rr+s.ai.avg_rr, n:a.n+1}), {wr:0,rr:0,n:0});
+  const totRules = stats.reduce((a,s)=>({wr:a.wr+s.rules.win_rate, rr:a.rr+s.rules.avg_rr, n:a.n+1}), {wr:0,rr:0,n:0});
+  const avgAIWR    = totAI.n    ? totAI.wr/totAI.n       : 0;
+  const avgRulesWR = totRules.n ? totRules.wr/totRules.n : 0;
+  const avgAIRR    = totAI.n    ? totAI.rr/totAI.n       : 0;
+  const avgRulesRR = totRules.n ? totRules.rr/totRules.n : 0;
+  const wrDelta = avgAIWR - avgRulesWR;
+  const rrDelta = avgAIRR - avgRulesRR;
+
+  const deltaClass = d => d > 0.5 ? 'ai-delta-pos' : d < -0.5 ? 'ai-delta-neg' : 'ai-delta-neu';
+  const deltaStr   = (d, fmt) => (d > 0 ? '▲' : '▼') + fmt(Math.abs(d));
+
+  document.getElementById('ai-global-stats').innerHTML = [
+    { label:'AI Win Rate',  val:avgAIWR.toFixed(1)+'%',   sub:'rules: '+avgRulesWR.toFixed(1)+'%',  delta:wrDelta, dfmt:v=>v.toFixed(1)+'%' },
+    { label:'AI Avg R:R',   val:avgAIRR.toFixed(2),        sub:'rules: '+avgRulesRR.toFixed(2),       delta:rrDelta, dfmt:v=>v.toFixed(2) },
+    { label:'Pairs Tracked',val:stats.length,               sub:d.period_days+'d window',              delta:null },
+  ].map(s =>
+    '<div class="ai-stat-box">' +
+      '<div class="ai-stat-label">' + s.label + '</div>' +
+      '<div class="ai-stat-val">' + s.val + (s.delta !== null ? ' <span class="' + deltaClass(s.delta) + '" style="font-size:13px">' + deltaStr(s.delta, s.dfmt) + '</span>' : '') + '</div>' +
+      '<div class="ai-stat-sub">' + s.sub + '</div>' +
+    '</div>'
+  ).join('');
+
+  // Per-pair cards
+  document.getElementById('ai-pair-grid').innerHTML = stats.map(s => {
+    const wrD = s.ai.win_rate - s.rules.win_rate;
+    const rrD = s.ai.avg_rr  - s.rules.avg_rr;
+    const confPct = (s.ai.avg_conf || 0) * 100;
+    const confColor = confPct > 75 ? 'var(--grn)' : confPct > 55 ? 'var(--warn)' : 'var(--red)';
+    const wrdBadge = wrD > 0
+      ? '<span class="ai-badge ai-badge-g">+'+wrD.toFixed(1)+'% WR</span>'
+      : '<span class="ai-badge ai-badge-r">'+wrD.toFixed(1)+'% WR</span>';
+
+    return '<div class="ai-pair-card">' +
+      '<div class="ai-pair-head">' +
+        '<span class="ai-pair-name">' + s.pair + '</span>' +
+        '<div class="ai-pair-badges">' +
+          '<span class="ai-badge ai-badge-g">AI ' + s.ai.win_rate.toFixed(1) + '%</span>' +
+          '<span class="ai-badge" style="border-color:var(--brd);color:var(--txd)">RULES ' + s.rules.win_rate.toFixed(1) + '%</span>' +
+          wrdBadge +
+        '</div>' +
+      '</div>' +
+      '<div class="ai-pair-stats">' +
+        aiPairStat('Entries', s.ai.entries, 'rules: '+s.rules.entries) +
+        aiPairStat('Win Rate', s.ai.win_rate.toFixed(1)+'%', 'rules: '+s.rules.win_rate.toFixed(1)+'%', wrD > 0 ? 'var(--grn)' : 'var(--red)') +
+        aiPairStat('Avg R:R', s.ai.avg_rr.toFixed(2), 'rules: '+s.rules.avg_rr.toFixed(2)) +
+        aiPairStat('Avg PnL', (s.ai.avg_pnl > 0 ? '+' : '') + s.ai.avg_pnl.toFixed(2)+'%', 'rules: '+(s.rules.avg_pnl>0?'+':'')+s.rules.avg_pnl.toFixed(2)+'%') +
+        '<div class="ai-pair-stat">' +
+          '<div class="ai-ps-label">AI Confidence</div>' +
+          '<div class="ai-conf-bar-wrap">' +
+            '<div class="ai-conf-bar"><div class="ai-conf-fill" style="width:'+confPct+'%;background:'+confColor+'"></div></div>' +
+            '<span class="ai-conf-pct">'+confPct.toFixed(0)+'%</span>' +
+          '</div>' +
+          (s.ai.hc_win_rate ? '<div class="ai-ps-rules">high-conf WR: <span style="color:var(--warn)">'+s.ai.hc_win_rate.toFixed(1)+'%</span></div>' : '') +
+        '</div>' +
+        (s.ai.skip_acc != null ? aiPairStat('Skip Accuracy', s.ai.skip_acc.toFixed(0)+'%', 'of skips→losses', s.ai.skip_acc > 60 ? 'var(--grn)' : 'var(--red)') : '') +
+      '</div>' +
+    '</div>';
+  }).join('') || '<div class="ai-empty">No data for selected pair</div>';
+}
+
+function aiPairStat(label, val, sub, color) {
+  return '<div class="ai-pair-stat">' +
+    '<div class="ai-ps-label">' + label + '</div>' +
+    '<div class="ai-ps-val"' + (color ? ' style="color:'+color+'"' : '') + '>' + val + '</div>' +
+    '<div class="ai-ps-rules">' + (sub || '') + '</div>' +
+  '</div>';
+}
+
+function renderAISignals() {
+  const d = AI.data;
+  if (!d || !d.recent_signals) return;
+  const sigs = AI.pairFilter === 'ALL' ? d.recent_signals : d.recent_signals.filter(s => s.pair === AI.pairFilter);
+  if (!sigs.length) {
+    document.getElementById('ai-signal-list').innerHTML = '<div class="ai-empty">No signals for selected pair</div>';
+    return;
+  }
+
+  document.getElementById('ai-signal-list').innerHTML = sigs.map(sig => {
+    const aiBadge  = aiDecisionBadge(sig.ai_decision);
+    const rulBadge = aiDecisionBadge(sig.rules_decision);
+    const outBadge = aiOutcomeBadge(sig.outcome, sig.pnl_pct);
+    const confPct  = Math.round((sig.ai_confidence || 0) * 100);
+    const confColor = confPct > 75 ? 'var(--grn)' : confPct > 55 ? 'var(--warn)' : 'var(--red)';
+    const shortReason = (sig.reasoning || '').substring(0, 80) + ((sig.reasoning||'').length > 80 ? '…' : '');
+
+    return '<div>' +
+      '<div class="ai-signal-row" onclick="toggleAIReasoning(' + sig.id + ')">' +
+        '<span style="color:var(--txd);font-size:11px">' + sig.time + '</span>' +
+        '<span style="color:var(--txb);font-weight:700;font-size:12px">' + sig.pair + '</span>' +
+        aiBadge + rulBadge +
+        '<div class="ai-conf-bar-wrap" style="min-width:60px">' +
+          '<div class="ai-conf-bar"><div class="ai-conf-fill" style="width:'+confPct+'%;background:'+confColor+'"></div></div>' +
+          '<span class="ai-conf-pct">'+confPct+'%</span>' +
+        '</div>' +
+        outBadge +
+        '<span style="color:var(--txd);font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + shortReason + '</span>' +
+      '</div>' +
+      '<div class="ai-reasoning-expand" id="ai-reason-' + sig.id + '">' +
+        '<span style="color:var(--txd);font-size:10px;text-transform:uppercase;letter-spacing:.1em">AI Reasoning — </span>' + (sig.reasoning || '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function toggleAIReasoning(id) {
+  const el = document.getElementById('ai-reason-' + id);
+  if (!el) return;
+  el.classList.toggle('on');
+}
+
+function aiDecisionBadge(d) {
+  const map = {
+    ENTER: 'ai-badge-g', SKIP: 'ai-badge-r', WAIT: 'ai-badge-y'
+  };
+  return '<span class="ai-badge ' + (map[d] || '') + '">' + (d || '—') + '</span>';
+}
+
+function aiOutcomeBadge(outcome, pnl) {
+  const cls = outcome === 'WIN' ? 'ai-badge-g' : outcome === 'LOSS' ? 'ai-badge-r' : '';
+  const pnlStr = pnl != null ? ' ' + (pnl > 0 ? '+' : '') + pnl.toFixed(1) + '%' : '';
+  return '<span class="ai-badge ' + cls + '">' + (outcome || '—') + pnlStr + '</span>';
+}
+
+function renderAIChecklist() {
+  const d = AI.data;
+  if (!d || !d.stats) {
+    document.getElementById('ai-checklist').innerHTML = '<div class="ai-empty">Load AI data to see checklist</div>';
+    return;
+  }
+  const stats = d.stats;
+  const checks = [
+    [stats.every(s => s.ai.entries >= 15),                     '≥15 resolved AI entries per pair'],
+    [stats.every(s => s.ai.win_rate > s.rules.win_rate),       'AI win rate exceeds rules on all pairs'],
+    [stats.every(s => s.ai.avg_rr > 1.5),                     'AI avg R:R above 1.5 on all pairs'],
+    [stats.every(s => (s.ai.skip_acc||0) > 60),               'Skip accuracy > 60% on all pairs'],
+    [stats.every(s => (s.ai.avg_conf||0) > 0.65),             'Avg confidence > 0.65 on all pairs'],
+    [false,                                                      'Manual review of all LOSS trades completed'],
+    [false,                                                      'Promoted with max 20% of normal position size'],
+  ];
+  document.getElementById('ai-checklist').innerHTML = checks.map(([pass, label]) =>
+    '<div class="ai-check-item">' +
+      '<div class="ai-check-box ' + (pass ? 'pass' : 'fail') + '">' + (pass ? '✓' : '') + '</div>' +
+      '<span class="ai-check-lab ' + (pass ? 'pass' : '') + '">' + label + '</span>' +
+    '</div>'
+  ).join('');
 }
 
 chkExist();
