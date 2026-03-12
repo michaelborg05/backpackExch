@@ -1527,6 +1527,461 @@ async def delete_indicator(profile_name: str, indicator_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+# ── AI Monitor ────────────────────────────────────────────────────────────────
+
+@app.get("/ai-monitor/report/{profile_name}", dependencies=[Depends(require_read_permission)])
+async def get_ai_monitor_report(profile_name: str, days: int = 30):
+    """
+    Returns AI vs rules-based signal comparison report for the dashboard.
+
+    Queries ai_signal_log for all resolved signals in the last N days,
+    computes per-pair win rates, R:R, confidence stats, and skip accuracy,
+    then returns the shape expected by the AI Monitor panel in index.html.
+
+    Query params:
+        days  - lookback window (default 30)
+    """
+    from db.utils import get_db_session
+    from db.models import AISignalLog
+    from sqlalchemy import func, case, and_
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        with get_db_session() as session:
+
+            # ── 1. Per-pair aggregated stats ──────────────────────────────────
+            rows = session.query(
+                AISignalLog.pair,
+
+                # AI stats
+                func.count(AISignalLog.id).label("total"),
+                func.count(
+                    case((AISignalLog.ai_decision == "ENTER", 1))
+                ).label("ai_entries"),
+                func.count(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.outcome_result == "WIN"), 1))
+                ).label("ai_wins"),
+                func.count(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.outcome_result == "LOSS"), 1))
+                ).label("ai_losses"),
+                func.avg(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.outcome_resolved == True),
+                          AISignalLog.outcome_pnl_pct))
+                ).label("ai_avg_pnl"),
+                func.avg(
+                    case((AISignalLog.ai_decision == "ENTER",
+                          AISignalLog.ai_confidence))
+                ).label("ai_avg_conf"),
+
+                # High-confidence AI stats (conf > 0.75)
+                func.count(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.ai_confidence > 0.75,
+                               AISignalLog.outcome_result == "WIN"), 1))
+                ).label("hc_wins"),
+                func.count(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.ai_confidence > 0.75), 1))
+                ).label("hc_entries"),
+
+                # Skip accuracy: AI=SKIP, rules=ENTER → how many were losses?
+                func.count(
+                    case((and_(AISignalLog.ai_decision == "SKIP",
+                               AISignalLog.rules_decision == "ENTER"), 1))
+                ).label("ai_skips_over_rules"),
+                func.count(
+                    case((and_(AISignalLog.ai_decision == "SKIP",
+                               AISignalLog.rules_decision == "ENTER",
+                               AISignalLog.outcome_result == "LOSS"), 1))
+                ).label("ai_skips_correct"),
+
+                # Rules stats
+                func.count(
+                    case((AISignalLog.rules_decision == "ENTER", 1))
+                ).label("rules_entries"),
+                func.count(
+                    case((and_(AISignalLog.rules_decision == "ENTER",
+                               AISignalLog.outcome_result == "WIN"), 1))
+                ).label("rules_wins"),
+                func.count(
+                    case((and_(AISignalLog.rules_decision == "ENTER",
+                               AISignalLog.outcome_result == "LOSS"), 1))
+                ).label("rules_losses"),
+                func.avg(
+                    case((and_(AISignalLog.rules_decision == "ENTER",
+                               AISignalLog.outcome_resolved == True),
+                          AISignalLog.outcome_pnl_pct))
+                ).label("rules_avg_pnl"),
+
+            ).filter(
+                AISignalLog.profile_name == profile_name,
+                AISignalLog.timestamp >= since,
+                AISignalLog.outcome_resolved == True,
+            ).group_by(AISignalLog.pair).all()
+
+            # ── 2. Avg R:R per pair (win_avg / abs(loss_avg)) ─────────────────
+            rr_rows = session.query(
+                AISignalLog.pair,
+                func.avg(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.outcome_result == "WIN"),
+                          AISignalLog.outcome_pnl_pct))
+                ).label("ai_avg_win"),
+                func.avg(
+                    case((and_(AISignalLog.ai_decision == "ENTER",
+                               AISignalLog.outcome_result == "LOSS"),
+                          AISignalLog.outcome_pnl_pct))
+                ).label("ai_avg_loss"),
+                func.avg(
+                    case((and_(AISignalLog.rules_decision == "ENTER",
+                               AISignalLog.outcome_result == "WIN"),
+                          AISignalLog.outcome_pnl_pct))
+                ).label("rules_avg_win"),
+                func.avg(
+                    case((and_(AISignalLog.rules_decision == "ENTER",
+                               AISignalLog.outcome_result == "LOSS"),
+                          AISignalLog.outcome_pnl_pct))
+                ).label("rules_avg_loss"),
+            ).filter(
+                AISignalLog.profile_name == profile_name,
+                AISignalLog.timestamp >= since,
+                AISignalLog.outcome_resolved == True,
+            ).group_by(AISignalLog.pair).all()
+
+            rr_map = {r.pair: r for r in rr_rows}
+
+            # ── 3. Recent signals (last 50, unresolved or resolved) ───────────
+            recent = session.query(AISignalLog).filter(
+                AISignalLog.profile_name == profile_name,
+                AISignalLog.timestamp >= since,
+            ).order_by(AISignalLog.timestamp.desc()).limit(50).all()
+
+            # ── 4. Build per-pair stat objects ────────────────────────────────
+            stats = []
+            pairs = []
+
+            for r in rows:
+                rr = rr_map.get(r.pair)
+
+                ai_entries  = int(r.ai_entries    or 0)
+                ai_wins     = int(r.ai_wins       or 0)
+                ai_losses   = int(r.ai_losses     or 0)
+                hc_wins     = int(r.hc_wins       or 0)
+                hc_entries  = int(r.hc_entries    or 0)
+                skips       = int(r.ai_skips_over_rules or 0)
+                skips_right = int(r.ai_skips_correct    or 0)
+
+                rules_entries = int(r.rules_entries or 0)
+                rules_wins    = int(r.rules_wins    or 0)
+
+                ai_wr    = round(ai_wins    / ai_entries    * 100, 1) if ai_entries    else 0.0
+                rules_wr = round(rules_wins / rules_entries * 100, 1) if rules_entries else 0.0
+                hc_wr    = round(hc_wins    / hc_entries    * 100, 1) if hc_entries    else None
+                skip_acc = round(skips_right / skips * 100, 1)        if skips         else None
+
+                # R:R = avg_win / abs(avg_loss)
+                def _rr(avg_win, avg_loss):
+                    if avg_win is None or avg_loss is None or float(avg_loss) == 0:
+                        return 0.0
+                    return round(float(avg_win) / abs(float(avg_loss)), 2)
+
+                ai_rr    = _rr(rr.ai_avg_win,    rr.ai_avg_loss)    if rr else 0.0
+                rules_rr = _rr(rr.rules_avg_win, rr.rules_avg_loss) if rr else 0.0
+
+                pairs.append(r.pair)
+                stats.append({
+                    "pair": r.pair,
+                    "ai": {
+                        "total":        int(r.total or 0),
+                        "entries":      ai_entries,
+                        "win_rate":     ai_wr,
+                        "avg_rr":       ai_rr,
+                        "avg_pnl":      round(float(r.ai_avg_pnl), 3) if r.ai_avg_pnl else 0.0,
+                        "avg_conf":     round(float(r.ai_avg_conf), 3) if r.ai_avg_conf else None,
+                        "hc_win_rate":  hc_wr,
+                        "skip_acc":     skip_acc,
+                    },
+                    "rules": {
+                        "total":        int(r.total or 0),
+                        "entries":      rules_entries,
+                        "win_rate":     rules_wr,
+                        "avg_rr":       rules_rr,
+                        "avg_pnl":      round(float(r.rules_avg_pnl), 3) if r.rules_avg_pnl else 0.0,
+                    },
+                })
+
+            # ── 5. Verdict ────────────────────────────────────────────────────
+            verdict, recommendation = _ai_generate_verdict(stats)
+
+            # ── 6. Recent signals payload ─────────────────────────────────────
+            recent_payload = [
+                {
+                    "id":             sig.id,
+                    "time":           sig.timestamp.strftime("%H:%M") if sig.timestamp else "—",
+                    "pair":           sig.pair,
+                    "ai_decision":    sig.ai_decision,
+                    "rules_decision": sig.rules_decision,
+                    "ai_confidence":  float(sig.ai_confidence) if sig.ai_confidence else None,
+                    "outcome":        sig.outcome_result,
+                    "pnl_pct":        float(sig.outcome_pnl_pct) if sig.outcome_pnl_pct else None,
+                    "reasoning":      sig.ai_reasoning or "",
+                    "risk_flags":     sig.ai_risk_flags or [],
+                }
+                for sig in recent
+            ]
+
+            return {
+                "profile_name":    profile_name,
+                "period_days":     days,
+                "generated_at":    datetime.now(timezone.utc).isoformat(),
+                "verdict":         verdict,
+                "recommendation":  recommendation,
+                "pairs":           pairs,
+                "stats":           stats,
+                "recent_signals":  recent_payload,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error building AI monitor report: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ai-monitor/signals/{profile_name}", dependencies=[Depends(require_read_permission)])
+async def get_ai_signal_log(
+    profile_name: str,
+    days: int = 7,
+    pair: Optional[str] = None,
+    decision: Optional[str] = None,
+    outcome: Optional[str] = None,
+    limit: int = 100,
+):
+    """
+    Paginated signal log with optional filters.
+    Useful for drilling into specific pairs or outcomes from the dashboard.
+
+    Query params:
+        days      - lookback window (default 7)
+        pair      - filter by pair e.g. SOL_USDC
+        decision  - filter ai_decision: ENTER | SKIP | WAIT
+        outcome   - filter outcome_result: WIN | LOSS | BREAKEVEN
+        limit     - max rows returned (default 100, max 500)
+    """
+    from db.utils import get_db_session
+    from db.models import AISignalLog
+    from datetime import datetime, timedelta, timezone
+
+    limit = min(limit, 500)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    try:
+        with get_db_session() as session:
+            q = session.query(AISignalLog).filter(
+                AISignalLog.profile_name == profile_name,
+                AISignalLog.timestamp    >= since,
+            )
+            if pair:
+                q = q.filter(AISignalLog.pair == pair.upper())
+            if decision:
+                q = q.filter(AISignalLog.ai_decision == decision.upper())
+            if outcome:
+                q = q.filter(AISignalLog.outcome_result == outcome.upper())
+
+            sigs = q.order_by(AISignalLog.timestamp.desc()).limit(limit).all()
+
+            return {
+                "profile_name": profile_name,
+                "filters": {"days": days, "pair": pair, "decision": decision, "outcome": outcome},
+                "count": len(sigs),
+                "signals": [
+                    {
+                        "id":               sig.id,
+                        "pair":             sig.pair,
+                        "timestamp":        sig.timestamp.isoformat() if sig.timestamp else None,
+                        "candle_time":      sig.candle_time.isoformat() if sig.candle_time else None,
+                        "ai_decision":      sig.ai_decision,
+                        "ai_confidence":    float(sig.ai_confidence)   if sig.ai_confidence   else None,
+                        "ai_reasoning":     sig.ai_reasoning,
+                        "ai_risk_flags":    sig.ai_risk_flags or [],
+                        "ai_entry_price":   float(sig.ai_entry_price)  if sig.ai_entry_price  else None,
+                        "ai_stop_loss":     float(sig.ai_stop_loss)    if sig.ai_stop_loss    else None,
+                        "ai_take_profit":   float(sig.ai_take_profit)  if sig.ai_take_profit  else None,
+                        "ai_pos_size_pct":  float(sig.ai_position_size_pct) if sig.ai_position_size_pct else None,
+                        "rules_decision":   sig.rules_decision,
+                        "rules_entry_price":float(sig.rules_entry_price) if sig.rules_entry_price else None,
+                        "gate_60m_data":    sig.gate_60m_data,
+                        "outcome_resolved": sig.outcome_resolved,
+                        "outcome_result":   sig.outcome_result,
+                        "outcome_pnl_pct":  float(sig.outcome_pnl_pct) if sig.outcome_pnl_pct else None,
+                        "outcome_exit_price":float(sig.outcome_exit_price) if sig.outcome_exit_price else None,
+                        "outcome_candles_held": sig.outcome_candles_held,
+                    }
+                    for sig in sigs
+                ],
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error fetching AI signal log: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ai-monitor/resolve-outcomes/{profile_name}", dependencies=[Depends(require_admin_permission)])
+async def trigger_outcome_resolution(profile_name: str, background_tasks: BackgroundTasks):
+    """
+    Manually trigger OutcomeResolver for a profile.
+    Normally runs on a schedule — this lets you force a resolution pass
+    from the dashboard or for testing.
+    """
+    from services.ai_signal_handler import get_ai_signal_handler
+
+    async def _run():
+        try:
+            from db.utils import get_db_session
+            from db.models import AISignalLog
+            from datetime import datetime, timezone
+            from cache.price_cache import get_price_cache
+
+            price_cache = get_price_cache()
+
+            def _fetch_candles(pair, from_time):
+                # Adapt to however you query historical OHLCV in your system.
+                # trend_cache stores recent candle history, so we use that as a fallback.
+                trend_cache = get_trend_cache()
+                key = f"{pair}_15"
+                return trend_cache._candle_history.get(key, [])
+
+            with get_db_session() as session:
+                pending = session.query(AISignalLog).filter(
+                    AISignalLog.profile_name    == profile_name,
+                    AISignalLog.outcome_resolved == False,
+                    AISignalLog.ai_decision      == "ENTER",
+                ).order_by(AISignalLog.candle_time.asc()).limit(100).all()
+
+                resolved = 0
+                for sig in pending:
+                    if not sig.ai_entry_price or not sig.ai_stop_loss or not sig.ai_take_profit:
+                        continue
+                    candles = _fetch_candles(sig.pair, sig.candle_time)
+                    entry = float(sig.ai_entry_price)
+                    sl    = float(sig.ai_stop_loss)
+                    tp    = float(sig.ai_take_profit)
+
+                    for i, c in enumerate(candles):
+                        lo = float(c.get("low",  entry))
+                        hi = float(c.get("high", entry))
+                        if lo <= sl:
+                            pnl = round((sl - entry) / entry * 100, 4)
+                            sig.outcome_resolved     = True
+                            sig.outcome_result       = "LOSS"
+                            sig.outcome_pnl_pct      = pnl
+                            sig.outcome_exit_price   = sl
+                            sig.outcome_candles_held = i + 1
+                            resolved += 1
+                            break
+                        if hi >= tp:
+                            pnl = round((tp - entry) / entry * 100, 4)
+                            sig.outcome_resolved     = True
+                            sig.outcome_result       = "WIN"
+                            sig.outcome_pnl_pct      = pnl
+                            sig.outcome_exit_price   = tp
+                            sig.outcome_candles_held = i + 1
+                            resolved += 1
+                            break
+
+                session.commit()
+                apiserver_logger.info(
+                    f"[AI Outcome Resolver] {profile_name}: resolved {resolved}/{len(pending)} pending signals"
+                )
+
+        except Exception as e:
+            apiserver_logger.error(f"Outcome resolution error: {e}", exc_info=True)
+
+    background_tasks.add_task(_run)
+    return {"message": "Outcome resolution started in background", "profile": profile_name}
+
+
+def _ai_generate_verdict(stats: list) -> tuple[str, str]:
+    """
+    Generates a plain-English verdict + recommendation from per-pair stats.
+    Mirrors the logic in signal_analytics.py but runs inline in the API.
+    """
+    if not stats:
+        return (
+            "No resolved AI signals yet.",
+            "Deploy an AI_AGENT profile and let it run in shadow mode for 2–4 weeks to collect data."
+        )
+
+    # Only consider pairs with enough data to be meaningful
+    qualified = [
+        s for s in stats
+        if s["ai"]["entries"] >= 5 and s["rules"]["entries"] >= 5
+    ]
+
+    if not qualified:
+        total_entries = sum(s["ai"]["entries"] for s in stats)
+        return (
+            f"Collecting data — {total_entries} AI entry signal(s) resolved so far.",
+            "Need at least 5 resolved AI entries per pair before comparison is meaningful. Keep running in shadow mode."
+        )
+
+    avg_wr_delta = sum(
+        s["ai"]["win_rate"] - s["rules"]["win_rate"] for s in qualified
+    ) / len(qualified)
+
+    avg_rr_delta = sum(
+        s["ai"]["avg_rr"] - s["rules"]["avg_rr"] for s in qualified
+    ) / len(qualified)
+
+    n = len(qualified)
+
+    if avg_wr_delta > 5 and avg_rr_delta > 0.1:
+        verdict = (
+            f"AI entry agent outperforming rule-based system: "
+            f"+{avg_wr_delta:.1f}% win rate, +{avg_rr_delta:.2f} avg R:R across {n} pair(s)."
+        )
+        recommendation = (
+            "Consider promoting AI profile to live trading with 10–20% of normal position size. "
+            "Monitor for 2 more weeks before full allocation."
+        )
+    elif avg_wr_delta > 5:
+        verdict = (
+            f"AI shows higher win rate (+{avg_wr_delta:.1f}%) but similar R:R. "
+            "May be taking more selective entries."
+        )
+        recommendation = (
+            "Promising. Review whether AI is being too conservative on sizing. "
+            "Check high-confidence trades specifically."
+        )
+    elif avg_wr_delta < -5:
+        verdict = (
+            f"Rule-based system outperforming AI by {abs(avg_wr_delta):.1f}% win rate across {n} pair(s)."
+        )
+        recommendation = (
+            "Review AI reasoning logs for losing trades. "
+            "Consider refining the system prompt with specific failure patterns observed."
+        )
+    else:
+        verdict = (
+            f"Systems performing similarly (win rate delta: {avg_wr_delta:+.1f}%, "
+            f"R:R delta: {avg_rr_delta:+.2f}) across {n} pair(s)."
+        )
+        recommendation = (
+            "Check skip accuracy — if AI correctly identifies losers, it may add value "
+            "even at similar win rates. Extend data collection period."
+        )
+
+    return verdict, recommendation
+
 app.include_router(auth_router)
 
 # Mount static files directory

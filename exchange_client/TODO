@@ -9,6 +9,8 @@ smarter TP/SL - Different per token. Maybe variable based on market
 # add backtest to web UI
 #review choppy conditions logic - When EMAs are close together it classes as choppy but doesnt take into acct the slope. I.e. If ema20 was way below and is now climbing, once it gets close it will say choppy when it actually is in recovery
 #Review mean reversion profile. Need to be able to catch higher falls. I.e. Based on percent or something other than just a hard rsi
+#build solution to add a new profile cleanly
+# add an audit log on indicators table so i can trace back to a change in behaviour to a specific edit
 
 No need
  # split into separate modules so i can migrate to Azure

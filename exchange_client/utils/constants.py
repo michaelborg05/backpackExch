@@ -153,5 +153,6 @@ class StrategyType(Enum):
     TREND_FOLLOWING = "trend_following"
     MEAN_REVERSION = "mean_reversion"
     RANGE_TRADING = "range_trading"
+    AI_AGENT = "ai_agent"
 
 

@@ -13,6 +13,7 @@ from models.trading_signal import TradingSignal, SignalStrength
 from api_builders.trading_builder import TradingService
 from cache.regime_filter import get_regime_filter
 from models.signal_validation import SignalValidationResult, ValidationGroup, MarketContext, IndicatorResult
+from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
 
 class SignalGenerator:
     """
@@ -66,6 +67,9 @@ class SignalGenerator:
             # Trend following: regime checks higher TF + lower TF
             self.regime_primary_tf = self.trend_timeframe    # 60m
             self.regime_confirm_tf = self.entry_timeframe    # 15m
+
+        # AI_AGENT: lazy-load handler (only instantiated if strategy_type matches)
+        self._ai_handler: Optional[AISignalHandler] = None
         
         # Thresholds
         self.min_volume_ratio = getattr(profile, 'min_volume_ratio', 1.5)
@@ -236,6 +240,18 @@ class SignalGenerator:
             confidence_score += self.trend_weight
 
         # 5. ENTRY FILTER (Execution Timeframe)
+        # ── AI_AGENT: bypass indicator entry filter, call agent instead ──────
+        if self.strategy_type == StrategyType.AI_AGENT:
+            return self._generate_ai_agent_signal(
+                symbol=symbol,
+                current_price=current_price,
+                confidence_score=confidence_score,
+                regime_reason=regime_reason,
+                validation=validation,
+                reasons=reasons,
+                indicators=indicators,
+            )
+
         if self.use_entry_filter:
             entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
             indicators['entry_filter'] = entry_check
@@ -450,6 +466,154 @@ class SignalGenerator:
         
         return signal
     
+    # ── AI_AGENT strategy helpers ─────────────────────────────────────────────
+
+    @property
+    def ai_handler(self) -> "AISignalHandler":
+        """Lazy-load the AI handler so it's only instantiated for AI_AGENT profiles."""
+        if self._ai_handler is None:
+            self._ai_handler = get_ai_signal_handler()
+        return self._ai_handler
+
+    def _generate_ai_agent_signal(
+        self,
+        symbol: str,
+        current_price: float,
+        confidence_score: float,
+        regime_reason: str,
+        validation: SignalValidationResult,
+        reasons: list,
+        indicators: dict,
+    ) -> Optional[TradingSignal]:
+        """
+        Called instead of the normal entry-filter path when strategy_type == AI_AGENT.
+
+        The 60m trend gate has already passed at this point. We hand off to
+        AISignalHandler which:
+          1. Assembles EntryContext from trend_cache data
+          2. Calls the AI entry agent
+          3. Logs the decision + the parallel rules decision to ai_signal_log
+          4. Returns (ai_result, rules_would_have_entered) for comparison
+
+        Shadow mode (default): rules decision controls live execution.
+        AI_LIVE mode: AI decision controls live execution.
+        """
+        shadow_mode = getattr(self.profile, 'ai_shadow_mode', True)
+
+        # Build gate context from what we already have in cache
+        trend_60m = self.trend_cache.get(symbol, self.trend_timeframe)
+        gate_data = {
+            "rsi_60m":          float(trend_60m.rsi)          if trend_60m else None,
+            "trend_direction":  getattr(trend_60m, 'trend_direction', 'unknown') if trend_60m else None,
+            "ema20":            float(trend_60m.ema20)         if trend_60m else None,
+            "ema50":            float(trend_60m.ema50)         if trend_60m else None,
+        }
+
+        # Parallel rules decision (what the rule-based entry filter would have said)
+        # We run the normal entry filter quietly to get the comparison signal
+        rules_would_enter = False
+        if self.use_entry_filter:
+            try:
+                entry_check, _, _ = self._check_entry_filter(symbol, self.entry_timeframe)
+                rules_would_enter = entry_check
+            except Exception as e:
+                self.logger.warning(f"{symbol}: rules entry check error in shadow mode: {e}")
+
+        # Call the AI agent
+        ai_result, log_id = self.ai_handler.evaluate_and_log(
+            symbol=symbol,
+            profile=self.profile,
+            trend_cache=self.trend_cache,
+            current_price=current_price,
+            trend_timeframe=self.trend_timeframe,
+            entry_timeframe=self.entry_timeframe,
+            gate_data=gate_data,
+            rules_would_enter=rules_would_enter,
+        )
+
+        if ai_result is None:
+            self.logger.warning(f"{symbol}: AI agent returned no result, skipping signal")
+            return None
+
+        from services.ai_signal_handler import EntryDecision
+
+        # Determine which decision controls live execution
+        if shadow_mode:
+            # Shadow: rules control live, AI is paper only
+            live_decision = rules_would_enter
+            mode_label = "SHADOW"
+        else:
+            # AI_LIVE: AI controls live execution
+            live_decision = (ai_result.decision == EntryDecision.ENTER)
+            mode_label = "AI_LIVE"
+
+        self.logger.info(
+            f"[AI_AGENT/{mode_label}] {symbol} | "
+            f"AI={ai_result.decision.value} (conf={ai_result.confidence:.0%}) | "
+            f"Rules={'ENTER' if rules_would_enter else 'SKIP'} | "
+            f"Live={'ENTER' if live_decision else 'SKIP'} | "
+            f"log_id={log_id}"
+        )
+
+        if not live_decision:
+            return None
+
+        # Map AI result onto a TradingSignal
+        # AI confidence (0.0–1.0) scaled to match existing confidence_pct range (0–100)
+        confidence_pct = ai_result.confidence * 100.0
+
+        if confidence_pct >= 85:
+            strength = SignalStrength.STRONG
+        elif confidence_pct >= 70:
+            strength = SignalStrength.MEDIUM
+        else:
+            strength = SignalStrength.WEAK
+
+        reasons.append(f"🤖 AI Agent [{mode_label}]: {ai_result.reasoning[:120]}")
+        if ai_result.risk_flags:
+            reasons.append(f"⚠️  Risk flags: {', '.join(ai_result.risk_flags)}")
+        reasons.append(f"Score {confidence_pct:.1f}% ({strength.value})")
+
+        # AI-provided TP/SL override profile defaults when in AI_LIVE mode
+        # In shadow mode we keep profile defaults for live sizing
+        tp_price = ai_result.suggested_take_profit if not shadow_mode else None
+        sl_price = ai_result.suggested_stop_loss   if not shadow_mode else None
+        position_size_scalar = (
+            ai_result.suggested_position_size_pct / 100.0
+            if not shadow_mode and ai_result.suggested_position_size_pct
+            else 1.0
+        )
+
+        validation.score = confidence_pct
+        validation.overall_passed = True
+        validation.human_readable = (
+            f"🤖 AI {ai_result.decision.value} | "
+            f"conf={ai_result.confidence:.0%} | "
+            f"{'shadow' if shadow_mode else 'live'}"
+        )
+
+        signal = TradingSignal(
+            symbol=symbol,
+            action=TradeSide.BUY,
+            strength=strength,
+            confidence=confidence_pct,
+            timeframe=self.trading_timeframe,
+            trend_timeframe=self.trend_timeframe,
+            indicators=indicators,
+            timestamp=time.time(),
+            reasons=reasons,
+            validation_details=validation.to_json(),
+            regime_confidence=regime_reason,
+            position_size_scalar=position_size_scalar,
+        )
+
+        # Attach AI metadata as extra context (picked up by order executor if needed)
+        signal.ai_tp_price = tp_price
+        signal.ai_sl_price = sl_price
+        signal.ai_log_id   = log_id
+
+        return signal
+
     def _check_trend(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Check trend conditions using YAML-configured trend_indicators"""
         if not self.profile.use_trend_filter:

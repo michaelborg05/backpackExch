@@ -2,7 +2,7 @@
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint, text
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
-from utils.constants import TradeReason, PositionCloseReason
+from utils.constants import TradeReason, PositionCloseReason, StrategyType
 
 
 
@@ -570,4 +570,128 @@ class UserProfileMapping(Base):
         return (
             f"<UserProfileMapping user_id={self.user_id} "
             f"profile={self.profile_name!r} active={self.is_active}>"
+        )
+
+
+class AISignalLog(Base):
+    """
+    Logs every AI agent entry decision alongside the rule-based system decision
+    made at the same moment. Used for shadow/paper comparison (Option C).
+
+    Lifecycle:
+      1. Row inserted at signal time with ai_decision + rules_decision.
+      2. OutcomeResolver fills outcome_* columns once SL or TP is hit.
+      3. signal_analytics.py queries this table for comparison reports.
+
+    signal_source values:
+      'SHADOW'  – both systems evaluated; only rules decision goes live
+      'AI_LIVE' – AI decision promoted to live execution (future)
+    """
+    __tablename__ = "ai_signal_log"
+
+    id = Column(Integer, primary_key=True)
+    pair              = Column(String(20),  nullable=False, index=True)
+    profile_name      = Column(String(50),  nullable=False, index=True)
+    signal_source     = Column(String(10),  nullable=False, default="SHADOW")  # SHADOW | AI_LIVE
+    candle_time       = Column(DateTime(timezone=True), nullable=False)
+    timeframe         = Column(String(5),   nullable=False)
+    timestamp         = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # ── 60m gate results ───────────────────────────────────────────────
+    gate_60m_passed   = Column(Boolean, nullable=False)
+    gate_60m_data     = Column(JSON)   # RSI, trend direction, strength etc.
+
+    # ── AI agent decision ──────────────────────────────────────────────
+    ai_decision             = Column(String(10))   # ENTER | SKIP | WAIT
+    ai_confidence           = Column(Numeric(4, 3))
+    ai_reasoning            = Column(String)
+    ai_risk_flags           = Column(JSON)
+    ai_entry_price          = Column(Numeric(20, 8))
+    ai_stop_loss            = Column(Numeric(20, 8))
+    ai_take_profit          = Column(Numeric(20, 8))
+    ai_position_size_pct    = Column(Numeric(5, 2))  # AI-suggested sizing (% of portfolio)
+
+    # ── Rule-based system decision at the same moment ──────────────────
+    rules_decision    = Column(String(10))          # ENTER | SKIP
+    rules_entry_price = Column(Numeric(20, 8))
+
+    # ── Outcome (filled in by OutcomeResolver after trade resolves) ────
+    outcome_resolved      = Column(Boolean, default=False, nullable=False, index=True)
+    outcome_result        = Column(String(10))          # WIN | LOSS | BREAKEVEN | MISSED
+    outcome_pnl_pct       = Column(Numeric(8, 4))
+    outcome_exit_price    = Column(Numeric(20, 8))
+    outcome_exit_time     = Column(DateTime(timezone=True))
+    outcome_candles_held  = Column(Integer)
+
+    # ── Raw context snapshot (for replay / debugging) ──────────────────
+    context_snapshot  = Column(JSON)
+
+    __table_args__ = (
+        CheckConstraint(
+            "ai_decision IN ('ENTER', 'SKIP', 'WAIT')",
+            name="valid_ai_decision"
+        ),
+        CheckConstraint(
+            "rules_decision IN ('ENTER', 'SKIP')",
+            name="valid_rules_decision"
+        ),
+        CheckConstraint(
+            "outcome_result IN ('WIN', 'LOSS', 'BREAKEVEN', 'MISSED') OR outcome_result IS NULL",
+            name="valid_outcome_result"
+        ),
+        Index('ix_ai_signal_log_pair_time',    'pair', 'timestamp'),
+        Index('ix_ai_signal_log_unresolved',   'outcome_resolved', 'ai_decision'),
+    )
+
+    def __repr__(self):
+        return (
+            f"<AISignalLog id={self.id} pair={self.pair!r} "
+            f"ai={self.ai_decision} rules={self.rules_decision} "
+            f"outcome={self.outcome_result!r}>"
+        )
+
+
+class AIVsRulesStats(Base):
+    """
+    Materialised weekly comparison stats between the AI agent and the
+    rule-based system. Populated by signal_analytics.weekly_summary_upsert().
+
+    Keeps a rolling history so you can chart improvement over time.
+    """
+    __tablename__ = "ai_vs_rules_stats"
+
+    id           = Column(Integer, primary_key=True)
+    computed_at  = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end   = Column(DateTime(timezone=True), nullable=False)
+    pair         = Column(String(20), nullable=False, index=True)
+    profile_name = Column(String(50), nullable=False)
+
+    # ── AI performance ─────────────────────────────────────────────────
+    ai_total_signals      = Column(Integer)
+    ai_entries_taken      = Column(Integer)
+    ai_win_rate           = Column(Numeric(5, 2))
+    ai_avg_rr             = Column(Numeric(6, 3))
+    ai_avg_confidence     = Column(Numeric(4, 3))
+    ai_skipped_correct    = Column(Integer)   # SKIP and price moved against
+    ai_skipped_wrong      = Column(Integer)   # SKIP but would have been a win
+
+    # ── Rule-based performance (same period) ───────────────────────────
+    rules_total_signals   = Column(Integer)
+    rules_win_rate        = Column(Numeric(5, 2))
+    rules_avg_rr          = Column(Numeric(6, 3))
+
+    # ── Delta (positive = AI better) ──────────────────────────────────
+    win_rate_delta        = Column(Numeric(5, 2))
+    rr_delta              = Column(Numeric(6, 3))
+
+    __table_args__ = (
+        Index('ix_ai_stats_pair_period', 'pair', 'period_start'),
+    )
+
+    def __repr__(self):
+        return (
+            f"<AIVsRulesStats pair={self.pair!r} "
+            f"period={self.period_start} "
+            f"wr_delta={self.win_rate_delta}>"
         )
