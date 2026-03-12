@@ -27,17 +27,19 @@ _RANGE_BASE = {
     "trend_indicators": [
         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False,}},
-        {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+        {"type": "rsi_overbought",  "params": {"min_value": 60, "hard_stop": True}},
         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
     ],
-    "min_indicators_required": 3,
+    "min_indicators_required": 4,
     # Entry filter (15m)
     "entry_indicators": [
-        {"type": "rsi_oversold", "params": {"max_value": 48,  "require_rising": True, "min_momentum": 1, "hard_stop": True}},
-        {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0}},
-        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.05, "max_pct_b": 0.4}},
-        {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 4.0}},
-        {"type": "reversal_candle", "params": {"pattern": "engulfing", "max_body_pct": 0.25}},
+        {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True,}},
+        {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+        {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},
+        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.05, "max_pct_b": 0.45, "hard_stop": True}},
+        {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False,"max_drop_from_close_pct": 0.5}},
+        {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55,"max_drop_from_close_pct": 0.5}},
+        {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.2,"max_drop_from_close_pct": 0.5}},
     ],
     "min_entry_indicators_required": 4,
 }
@@ -107,27 +109,16 @@ RANGE_VARIANTS = {
     # Tightening to 0.20 means we only enter when price is in the bottom 20%
     # of the band — a more convincing range-low signal.
     # -------------------------------------------------------------------------
-    "range_v4_reversal_candles": {
+    "range_v4_claude_trendchange": {
         **_RANGE_BASE,
         "trend_indicators": [
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01,"hard_stop": True}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 4, "oversold_threshold": 48, "min_jump": 2,"current_min":35, "sustained_rise": False}},
             {"type": "rsi_overbought",  "params": {"min_value": 60, "hard_stop": True}},
             {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
         ],
-        "min_indicators_required": 4,
-        "entry_indicators": [
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.05, "max_pct_b": 0.45, "hard_stop": True}},
-            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False}},
-            {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55}},
-            {"type": "reversal_candle", "params": {"pattern": "doji", "min_close_pct": 0.35}},
-        ],
-        "min_entry_indicators_required": 5,        
+        "min_indicators_required": 3,
     },
-
 
     # -------------------------------------------------------------------------
     # V5: Add EMA proximity gate — block if EMA20 is too far above price
