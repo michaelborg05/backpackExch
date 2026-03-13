@@ -502,12 +502,16 @@ class SignalGenerator:
 
         # Build gate context from what we already have in cache
         trend_60m = self.trend_cache.get(symbol, self.trend_timeframe)
+        ema_slope_pct, ema_direction = self.trend_cache._get_ema_slope(
+            symbol, self.trend_timeframe, 'ema20'
+        )
         gate_data = {
-            "rsi_60m":          float(trend_60m.rsi)          if trend_60m else None,
-            "trend_direction":  getattr(trend_60m, 'trend_direction', 'unknown') if trend_60m else None,
-            "ema20":            float(trend_60m.ema20)         if trend_60m else None,
-            "ema50":            float(trend_60m.ema50)         if trend_60m else None,
-        }
+            "rsi_60m":         float(trend_60m.rsi) if trend_60m else None,
+            "trend_direction": ema_direction,          # "rising" | "falling" | "flat"
+            "ema_slope_pct":   round(ema_slope_pct, 4) if ema_slope_pct else None,
+            "ema20":           float(trend_60m.ema20) if trend_60m else None,
+            "ema50":           float(trend_60m.ema50) if trend_60m else None,
+        }        
 
         # Parallel rules decision (what the rule-based entry filter would have said)
         # We run the normal entry filter quietly to get the comparison signal

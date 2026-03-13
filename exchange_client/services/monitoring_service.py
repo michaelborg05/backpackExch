@@ -996,12 +996,59 @@ class MonitoringService:
     def _process_signals_for_profile(self, profile: TradingProfile):
         """Process trading signals for a specific profile"""
                 
-        signal_gen = get_signal_generator(profile)
+        # Check circuit breakers
+        circuit_breaker = get_circuit_breaker()
+        can_trade, breaker_reason = circuit_breaker.check_circuit_breakers(
+            profile_name=profile.name,
+            alert_action="buy"
+        )
+        
+        if not can_trade:
+            self.logger.warning(
+                f"[{profile.name}] 🚨 Circuit breaker blocked signal: {breaker_reason}"
+            )
+            return None
+
+        #retrieve list of tickers for this profile
         with get_db_session() as db:
             profile_tickers = get_active_symbols_per_profile(db,profile.name)
 
+        symbols_to_scan: list[str] = []
+        #Filter symbols list down before moving to signal generator to reduce wasted effort of checking for signals on symbols that are blocked already
+        for ticker in profile_tickers:
+            # Check cooldown (don't signal same symbol too frequently)
+            cooldown_key = f"{profile.name}_{ticker}"
+            last_signal_time = self._last_signals.get(cooldown_key, 0)
+            cooldown_seconds = getattr(profile, 'signal_cooldown_seconds', 300)  # 5 min default
+            
+            if time.time() - last_signal_time < cooldown_seconds:
+                remaining = cooldown_seconds - (time.time() - last_signal_time)
+                self.logger.info(
+                    f"[{profile.name}]  - skipping scan of {ticker} - still in cooldown "
+                    f"({remaining:.0f}s remaining)"
+                )
+                continue
+
+            #check buy quantity. If none, dont bother scanning this symbol
+            quantity, size_reason = self.position_calculator.calculate_buy_quantity(
+                symbol=ticker,
+                profile=profile,
+                quote_asset="USDC"
+            )
+
+            if quantity is None:
+                self.logger.info(
+                    f"[{profile.name}] Skipping scan of {ticker}: {size_reason}"
+                )
+                continue
+
+            symbols_to_scan.append(ticker)
+        
+
+        signal_gen = get_signal_generator(profile)
+
         # Scan all monitored tickers
-        signals = signal_gen.scan_symbols(profile_tickers)
+        signals = signal_gen.scan_symbols(symbols_to_scan)
         
         if not signals:
             self.logger.debug(f"[{profile.name}] No signals generated")
@@ -1014,32 +1061,6 @@ class MonitoringService:
         # Process each signal
         for signal in signals:
             try:
-                
-                # Check cooldown (don't signal same symbol too frequently)
-                cooldown_key = f"{profile.name}_{signal.symbol}"
-                last_signal_time = self._last_signals.get(cooldown_key, 0)
-                cooldown_seconds = getattr(profile, 'signal_cooldown_seconds', 300)  # 5 min default
-                
-                if time.time() - last_signal_time < cooldown_seconds:
-                    remaining = cooldown_seconds - (time.time() - last_signal_time)
-                    self.logger.info(
-                        f"[{profile.name}] {signal.symbol} on cooldown "
-                        f"({remaining:.0f}s remaining)"
-                    )
-                    continue
-                
-                # Check circuit breakers
-                circuit_breaker = get_circuit_breaker()
-                can_trade, breaker_reason = circuit_breaker.check_circuit_breakers(
-                    profile_name=profile.name,
-                    alert_action="buy"
-                )
-                
-                if not can_trade:
-                    self.logger.warning(
-                        f"[{profile.name}] 🚨 Circuit breaker blocked signal: {breaker_reason}"
-                    )
-                    continue
                 
                 # Execute trade
                 self._execute_signal(signal, profile, trading=signal_gen._trading)

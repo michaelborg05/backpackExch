@@ -243,8 +243,11 @@ Rules:
   and day of week (Asian/US/EU session gaps, weekend illiquidity). Never hard-block 
   an entry on low volume alone — use it only to shade confidence down by 0.05-0.10 
   max. A good setup with low volume is still a good setup.
-
-Respond ONLY with valid JSON. No markdown. No preamble."""
+- The trading system's minimum confidence threshold is 72% (0.72). 
+  If you assess confidence ≥ 0.72, you MUST return ENTER. 
+  WAIT is only valid for confidence 0.55–0.71. 
+  Below 0.55, return SKIP.
+  Respond ONLY with valid JSON. No markdown. No preamble."""
 
     def _build_prompt(self, ctx: dict, current_price: float) -> str:
         candles_str = "\n".join([
