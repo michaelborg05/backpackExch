@@ -514,8 +514,32 @@ class SignalGenerator:
         rules_would_enter = False
         if self.use_entry_filter:
             try:
-                entry_check, _, _ = self._check_entry_filter(symbol, self.entry_timeframe)
+                entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
                 rules_would_enter = entry_check
+                indicators['entry_filter'] = entry_check
+
+                validation.entry_validation.timeframe = self.entry_timeframe
+                validation.entry_validation.passed = entry_check
+                validation.entry_validation.indicators = entry_indicators
+                validation.entry_validation.indicators_total = len(entry_indicators)
+                validation.entry_validation.indicators_passed = sum(
+                    1 for ind in entry_indicators if ind.is_bullish
+                )
+                validation.entry_validation.summary = entry_reason
+
+                if not entry_check:
+                    self.logger.info(
+                        f"{symbol}: ❌ Entry filter failed ({self.entry_timeframe}m) - {entry_reason}"
+                    )
+                    return None
+                else:
+                    self.logger.info(
+                        f"{symbol}: ✅ Entry filter passed ({self.entry_timeframe}m) - {entry_reason}"
+                    )
+                
+                reasons.append(f"✅ Entry ({self.entry_timeframe}m): {entry_reason}")
+                confidence_score += self.entry_weight
+
             except Exception as e:
                 self.logger.warning(f"{symbol}: rules entry check error in shadow mode: {e}")
 
