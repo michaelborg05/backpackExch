@@ -531,7 +531,6 @@ class SignalGenerator:
                     self.logger.info(
                         f"{symbol}: ❌ Entry filter failed ({self.entry_timeframe}m) - {entry_reason}"
                     )
-                    return None
                 else:
                     self.logger.info(
                         f"{symbol}: ✅ Entry filter passed ({self.entry_timeframe}m) - {entry_reason}"
