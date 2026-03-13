@@ -542,6 +542,12 @@ class SignalGenerator:
             except Exception as e:
                 self.logger.warning(f"{symbol}: rules entry check error in shadow mode: {e}")
 
+        #check RSI on entry timeframe. If RSI is higher than 70, skip AI call to save money
+        entry_trend = self.trend_cache.get(symbol, self.entry_timeframe)
+        if entry_trend and entry_trend.rsi > 70:
+            self.logger.warning(f"{symbol}: RSI above 70. Skipping AI evaluation - RSI {entry_trend.rsi}")
+            return None
+
         # Call the AI agent
         ai_result, log_id = self.ai_handler.evaluate_and_log(
             symbol=symbol,
