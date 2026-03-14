@@ -399,7 +399,7 @@ class SignalGenerator:
 
         # Check minimum confidence threshold
         if confidence_pct < self.min_confidence:
-            self.logger.debug(
+            self.logger.info(
                 f"{symbol}: ❌ Confidence too low: {confidence_pct:.1f}% < {self.min_confidence}%"
             )
             return None
@@ -1017,7 +1017,7 @@ class SignalGenerator:
         confidence_pct = (total_score / (max_score + max_bonus)) * 100
         
         # Log the breakdown for debugging
-        self.logger.debug(
+        self.logger.info(
             f"{symbol} Mean Reversion Confidence: "
             f"Base {base_score:.1f} + Bonus {bonus_points:.1f} = "
             f"{total_score:.1f}/{max_score + max_bonus:.1f} = {confidence_pct:.1f}% "
@@ -1223,7 +1223,7 @@ class SignalGenerator:
         total_score = base_score + bonus_points
         confidence_pct = (total_score / (max_score + max_bonus)) * 100
 
-        self.logger.debug(
+        self.logger.info(
             f"{symbol} Range Trading Confidence: "
             f"Base {base_score:.1f} + Bonus {bonus_points:.1f} = "
             f"{total_score:.1f}/{max_score + max_bonus:.1f} = {confidence_pct:.1f}% "
