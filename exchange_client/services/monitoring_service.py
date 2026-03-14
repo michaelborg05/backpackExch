@@ -39,6 +39,7 @@ from db.crud import (
     get_active_symbols,
     get_active_symbols_per_profile,
     get_active_orders,
+    get_position,
 )
 
 class MonitoringService:
@@ -345,6 +346,21 @@ class MonitoringService:
                             f"P/L: ${order_response.profit:.2f}",
                             MessagePriority.NORMAL
                         )
+                        # ← NEW: resolve the AI signal outcome if this position was
+                        # opened from an AI_AGENT signal
+                        position = get_position(db, order.position_id)
+                        if position.ai_log_id is not None:
+                            from db.crud_ai import resolve_ai_signal_outcome
+                            from datetime import datetime, timezone
+                            resolve_ai_signal_outcome(
+                                db=db,
+                                ai_log_id=position.ai_log_id,
+                                exit_price=exit_price,
+                                entry_price=entry_price,
+                                close_reason=order.purpose,
+                                closed_at=datetime.now(timezone.utc),
+                            )
+
                     #else:
                     #    self.logger.warning(f"Order {order.exchange_order_id} not filled.")
 

@@ -131,6 +131,14 @@ def add_validation_result(
     db.refresh(validation_result)
     return validation_result
 
+def get_position(db: Session, position_id: int) -> Position:
+
+    position = db.query(Position).filter(Position.id == position_id).first()
+    if position:
+        return position
+    else: 
+        return None
+
 def update_position_trailing_stop(
     db: Session,
     position_id: int,
