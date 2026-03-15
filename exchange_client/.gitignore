@@ -10,8 +10,7 @@ ENV/
 env
 config.ini
 secrets.json
-*_secret*
 logs/
 *.pyc
 .env
-Tools/*.sh
+*.sh

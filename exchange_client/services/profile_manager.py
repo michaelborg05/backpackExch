@@ -304,7 +304,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             # Market regime
             "use_market_regime_filter": bool(row.use_market_regime_filter),
         }
-        from utils.secrets import resolve_secret
+        from utils.db_secrets import resolve_secret
         # Resolve API credentials — stored encrypted in DB, pulled from env as fallback
         # If you store plaintext in DB just use row.api_key / row.secret directly.
         api_key = resolve_secret(row.api_key) or os.getenv(f"{row.name.upper()}_API_KEY")

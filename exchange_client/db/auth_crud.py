@@ -121,7 +121,7 @@ def get_user_profile_data(db: Session, user_id: int) -> dict:
             "MB15m": { ... },
         }
     """
-    from utils.secrets import resolve_secret
+    from utils.db_secrets import resolve_secret
 
     profile_names = get_user_profiles(db, user_id)
     result = {}
@@ -169,7 +169,7 @@ def get_decrypted_profile_secrets(db: Session, profile_name: str) -> Optional[di
 
     Returns: {"api_key": "...", "secret": "..."} or None if not found / inactive.
     """
-    from utils.secrets import resolve_secret
+    from utils.db_secrets import resolve_secret
 
     row = (
         db.query(TradingProfileDB)
@@ -349,7 +349,7 @@ def upsert_trading_profile(
         )
     """
     from db.models import TradingProfileDB
-    from utils.secrets import encrypt_secret
+    from utils.db_secrets import encrypt_secret
 
     enc_key    = encrypt_secret(raw_api_key)
     enc_secret = encrypt_secret(raw_secret)

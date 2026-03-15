@@ -106,6 +106,74 @@ def setup_appusers():
     assign_profile(db, user.id, "15m_no_trend")
     assign_profile(db, user.id, "15m_MB")
 
+
+
+def update_keys():
+    from db.session import SessionLocal
+    from db.models import TradingProfileDB, IndicatorDB
+    from utils.db_secrets import encrypt_secret, is_encrypted
+
+    yaml_path = Path(__file__).parent.parent / "config/trading_profilesa.yaml"
+    if not yaml_path.exists():
+        print(f"✗ trading_profiles.yaml not found: {yaml_path}")
+        return
+
+    if not os.environ.get("DB_ENCRYPTION_KEY"):
+        print(
+            "ERROR: DB_ENCRYPTION_KEY is not set.\n"
+            "Generate one with:\n"
+            "  python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\"",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+
+    profiles_cfg: dict = data.get("profiles", {})
+
+    db = SessionLocal()
+    try:
+        for name, cfg in profiles_cfg.items():
+
+            # ── Resolve credentials ───────────────────────────────────────
+            raw_key    = os.getenv(cfg.get("api_key_env", ""))
+            raw_secret = os.getenv(cfg.get("secret_env", ""))
+
+            if not raw_key or not raw_secret:
+                print(f"  SKIP  {name!r} — missing env var "
+                      f"({cfg.get('api_key_env')} / {cfg.get('secret_env')})")
+                skipped += 1
+                continue
+            
+            enc_key    = raw_key    if is_encrypted(raw_key)    else encrypt_secret(raw_key)
+            enc_secret = raw_secret if is_encrypted(raw_secret) else encrypt_secret(raw_secret)
+
+            print (f"raw: {raw_key} - encrypted: {enc_key}")
+
+            # ── Check for existing profile (idempotency) ──────────────────
+            existing: TradingProfileDB | None = (
+                db.query(TradingProfileDB).filter_by(name=name).first()
+            )
+
+            if existing:
+                print(f"    {name!r} — profile already exists in DB (id={existing.id}) - Updating")
+                existing.api_key=enc_key
+                existing.secret=enc_secret
+                db.commit()
+                db.refresh(existing)
+            else:
+                print(f"  Profile {name!r}  not found")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Migration failed, rolled back: {e}", exc_info=True)
+        print(f"✗ Migration failed, rolled back: {e}")
+    finally:
+        db.close()
+
+
 def migrate_yaml_profiles(dry_run: bool = False) -> None:
     """
     One-time migration: load profiles + indicators from YAML into the database.
@@ -119,7 +187,7 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
     """
     from db.session import SessionLocal
     from db.models import TradingProfileDB, IndicatorDB
-    from utils.secrets import encrypt_secret, is_encrypted
+    from utils.db_secrets import encrypt_secret, is_encrypted
 
     tag = "[DRY-RUN] " if dry_run else ""
 
@@ -667,7 +735,8 @@ commands = {
     "setup-symbols": setup_symbol_configs,
     "add-profile": add_new_profile,
     "populate-settings": populate_default_settings,
-    "create-appuser" : setup_appusers
+    "create-appuser" : setup_appusers,
+    "update-keys": update_keys,
 }
 
 if __name__ == "__main__":
@@ -687,6 +756,7 @@ if __name__ == "__main__":
          print("  add-profile - Add a new trading profile")
          print("  populate-settings - Populate default settings in settings table")
          print("  create-appuser - Create new user for UI")
+         print("  update-keys - Update API keys in db")
          
          sys.exit(1)
     

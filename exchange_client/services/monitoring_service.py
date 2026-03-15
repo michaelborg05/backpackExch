@@ -275,7 +275,7 @@ class MonitoringService:
             if removed:
                 self.logger.info(f"[ProfileRefresh] Removed profiles: {', '.join(sorted(removed))}")
             if not added and not removed:
-                self.logger.debug("[ProfileRefresh] Profiles unchanged")
+                self.logger.info("[ProfileRefresh] Profiles refreshed")
 
         except Exception as e:
             self.logger.error(f"[ProfileRefresh] Failed to reload profiles — keeping existing: {e}", exc_info=True)
