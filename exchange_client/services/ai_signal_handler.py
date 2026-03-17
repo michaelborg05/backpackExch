@@ -253,6 +253,61 @@ class AISignalHandler:
 
     # ── Context assembly ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _session_label(candle_time_utc: datetime) -> str:
+        """Map UTC hour to a qualitative trading session description."""
+        h = candle_time_utc.hour
+        if h >= 22 or h < 7:
+            return "Asian session — typically low volume, tighter ranges, avoid chasing moves"
+        if 7 <= h < 12:
+            return "EU open — moderate volume, range breakouts and trend continuation common"
+        if 12 <= h < 17:
+            return "US/EU overlap — highest volume session, momentum entries favoured"
+        return "US session — moderate volume, fading extended moves is common"
+
+    @staticmethod
+    def _candle_quality(candles: list) -> dict:
+        """
+        Analyse the most recent completed candle for quality signals.
+        Returns a dict the prompt can reference directly.
+        """
+        if not candles:
+            return {}
+        c = candles[-1]
+        try:
+            o, h, l, cl = float(c['open']), float(c['high']), float(c['low']), float(c['close'])
+        except (KeyError, TypeError, ValueError):
+            return {}
+
+        total_range = h - l
+        if total_range == 0:
+            return {}
+
+        body          = abs(cl - o)
+        body_pct      = round(body / total_range * 100, 1)   # % of range that is body
+        upper_wick    = h - max(o, cl)
+        lower_wick    = min(o, cl) - l
+        upper_wick_pct = round(upper_wick / total_range * 100, 1)
+        lower_wick_pct = round(lower_wick / total_range * 100, 1)
+        is_bullish_close = cl > o
+
+        # Simple quality flags
+        flags = []
+        if upper_wick_pct > 60:
+            flags.append("large_upper_wick_exhaustion")
+        if body_pct < 30:
+            flags.append("indecision_small_body")
+        if is_bullish_close and body_pct >= 55:
+            flags.append("strong_bullish_close")
+
+        return {
+            "body_pct":        body_pct,
+            "upper_wick_pct":  upper_wick_pct,
+            "lower_wick_pct":  lower_wick_pct,
+            "is_bullish_close": is_bullish_close,
+            "quality_flags":   flags,
+        }
+
     def _build_context(
         self, symbol, profile, trend_cache,
         current_price, trend_tf, entry_tf,
@@ -277,6 +332,11 @@ class AISignalHandler:
             peak_idx = rsi_values.index(rsi_peak)
             candles_since_peak = len(rsi_values) - 1 - peak_idx
 
+        # RSI trajectory — slope over last 3 values (positive = rising)
+        rsi_slope = None
+        if len(rsi_values) >= 3:
+            rsi_slope = round(rsi_values[-1] - rsi_values[-3], 2)
+
         # Drop from prior close
         drop_pct = 0.0
         if candle_history:
@@ -284,20 +344,41 @@ class AISignalHandler:
             if prior_close > 0:
                 drop_pct = max(0.0, (float(prior_close) - float(current_price)) / float(prior_close) * 100)
 
+        # EMA slope context (quantified, not just "rising"/"falling")
+        ema_slope_pct = gate_data.get("ema_slope_pct")
+        ema_slope_label = None
+        if ema_slope_pct is not None:
+            v = float(ema_slope_pct)
+            if v > 0.08:
+                ema_slope_label = "strong uptrend"
+            elif v > 0.02:
+                ema_slope_label = "mild uptrend"
+            elif v > -0.02:
+                ema_slope_label = "flat"
+            elif v > -0.08:
+                ema_slope_label = "mild downtrend"
+            else:
+                ema_slope_label = "strong downtrend"
+
         return {
-            "pair":               symbol,
-            "profile_name":       profile.name,
-            "current_price":      current_price,
-            "candle_time":        candle_time.isoformat(),
-            "gate":               gate_data,
-            "rsi_15m":            rsi_15m,
-            "volume_vs_avg":      volume_ratio,
-            "rsi_peak_recent":    rsi_peak,
-            "candles_since_peak": candles_since_peak,
+            "pair":                      symbol,
+            "profile_name":              profile.name,
+            "current_price":             current_price,
+            "candle_time":               candle_time.isoformat(),
+            "session_label":             self._session_label(candle_time),
+            "gate":                      gate_data,
+            "ema_slope_pct":             ema_slope_pct,
+            "ema_slope_label":           ema_slope_label,
+            "rsi_15m":                   rsi_15m,
+            "rsi_slope_3c":              rsi_slope,
+            "volume_vs_avg":             volume_ratio,
+            "rsi_peak_recent":           rsi_peak,
+            "candles_since_peak":        candles_since_peak,
             "drop_from_prior_close_pct": round(drop_pct, 3),
-            "candle_pattern":     getattr(trend_15m, 'pattern', None) if trend_15m else None,
-            "candles_15m":        candle_history[-8:],
-            "profile_params":     self._extract_profile_params(profile),
+            "candle_pattern":            getattr(trend_15m, 'pattern', None) if trend_15m else None,
+            "last_candle_quality":       self._candle_quality(candle_history),
+            "candles_15m":               candle_history[-8:],
+            "profile_params":            self._extract_profile_params(profile),
         }
 
     def _extract_profile_params(self, profile) -> dict:
@@ -357,6 +438,33 @@ class AISignalHandler:
 
         gate = ctx.get("gate", {})
 
+        # Candle quality summary
+        cq = ctx.get("last_candle_quality", {})
+        if cq:
+            cq_str = (
+                f"Body {cq.get('body_pct')}% of range | "
+                f"Upper wick {cq.get('upper_wick_pct')}% | "
+                f"Lower wick {cq.get('lower_wick_pct')}% | "
+                f"{'Bullish' if cq.get('is_bullish_close') else 'Bearish'} close"
+            )
+            flags = cq.get("quality_flags", [])
+            if flags:
+                cq_str += f"\n  Flags: {', '.join(flags)}"
+        else:
+            cq_str = "  (no candle data)"
+
+        # EMA slope with label
+        ema_slope_pct   = ctx.get("ema_slope_pct")
+        ema_slope_label = ctx.get("ema_slope_label", "")
+        ema_slope_str   = (
+            f"{ema_slope_pct:.4f}%/candle ({ema_slope_label})"
+            if ema_slope_pct is not None else "n/a"
+        )
+
+        # RSI slope
+        rsi_slope = ctx.get("rsi_slope_3c")
+        rsi_slope_str = f"{rsi_slope:+.1f} pts over last 3 candles" if rsi_slope is not None else "n/a"
+
         return f"""15m entry decision needed. 60m gates already passed.
 
 PAIR: {ctx['pair']}  |  PROFILE: {ctx['profile_name']}  |  PRICE: {current_price}
@@ -364,18 +472,23 @@ PAIR: {ctx['pair']}  |  PROFILE: {ctx['profile_name']}  |  PRICE: {current_price
 ── SESSION CONTEXT ─────────────────────────────────────────
   UTC Time:  {ctx['candle_time']}
   Day:       {datetime.fromisoformat(ctx['candle_time']).strftime('%A')}
+  Session:   {ctx.get('session_label', 'unknown')}
 
 ── 60m GATE CONTEXT (already confirmed) ───────────────────
   RSI 60m:         {gate.get('rsi_60m')}
-  Trend Direction: {gate.get('trend_direction')}
   EMA20/50:        {gate.get('ema20')} / {gate.get('ema50')}
+  EMA20 slope:     {ema_slope_str}
 
 ── 15m ENTRY CONDITIONS ────────────────────────────────────
-  RSI 15m:             {ctx.get('rsi_15m')}
-  Candle Pattern:      {ctx.get('candle_pattern') or 'none'}
-  Recent RSI Peak:     {ctx.get('rsi_peak_recent')} ({ctx.get('candles_since_peak')} candles ago)
-  Drop from Prior Close: {ctx.get('drop_from_prior_close_pct')}%
-  Volume vs Avg:       {ctx.get('volume_vs_avg')}x
+  RSI 15m:               {ctx.get('rsi_15m')}
+  RSI trajectory (3c):   {rsi_slope_str}
+  Recent RSI Peak:        {ctx.get('rsi_peak_recent')} ({ctx.get('candles_since_peak')} candles ago)
+  Drop from Prior Close:  {ctx.get('drop_from_prior_close_pct')}%
+  Volume vs Avg:          {ctx.get('volume_vs_avg')}x
+  Candle Pattern:         {ctx.get('candle_pattern') or 'none'}
+
+── LAST CANDLE QUALITY ─────────────────────────────────────
+  {cq_str}
 
 ── RECENT 15m CANDLES (oldest → newest) ────────────────────
 {candles_str}
@@ -386,8 +499,8 @@ PAIR: {ctx['pair']}  |  PROFILE: {ctx['profile_name']}  |  PRICE: {current_price
 Respond with exactly this JSON:
 {{
   "decision": "ENTER" | "SKIP" | "WAIT",
-  "confidence": 0.0-1.0,
-  "reasoning": "2-4 sentence chain of thought",
+  "confidence": 0.00-1.00,
+  "reasoning": "2-4 sentence chain of thought covering: RSI trajectory, candle quality, session context, and any risk flags",
   "risk_flags": ["list", "of", "concerns"],
   "suggested_entry": {current_price},
   "suggested_stop_loss": <price>,
@@ -399,9 +512,11 @@ Respond with exactly this JSON:
         try:
             cleaned = raw.strip()
             if cleaned.startswith("```"):
-                cleaned = cleaned[3:]
+                # Remove opening fence (```json or ```)
+                cleaned = cleaned[3:]  # strip opening ```
                 if cleaned.startswith("json"):
                     cleaned = cleaned[4:]
+                # Remove closing fence
                 if cleaned.endswith("```"):
                     cleaned = cleaned[:-3]
             data = json.loads(cleaned.strip())
@@ -440,7 +555,7 @@ Respond with exactly this JSON:
     ) -> Optional[int]:
         """Insert shadow comparison row into ai_signal_log. Returns row id."""
         try:
-            from db.utils import get_db_session
+            from db.utils import get_db_session   # adapt to your session import
             from db.models import AISignalLog
 
             with get_db_session() as session:
@@ -478,13 +593,18 @@ Respond with exactly this JSON:
     def _make_snapshot(self, ctx: dict) -> dict:
         """Trim context to a compact JSON snapshot for the DB."""
         return {
-            "rsi_15m":            ctx.get("rsi_15m"),
-            "rsi_peak_recent":    ctx.get("rsi_peak_recent"),
-            "candles_since_peak": ctx.get("candles_since_peak"),
-            "drop_pct":           ctx.get("drop_from_prior_close_pct"),
-            "volume_vs_avg":      ctx.get("volume_vs_avg"),
-            "candle_pattern":     ctx.get("candle_pattern"),
-            "candles":            ctx.get("candles_15m", [])[-4:],
+            "rsi_15m":                   ctx.get("rsi_15m"),
+            "rsi_slope_3c":              ctx.get("rsi_slope_3c"),
+            "rsi_peak_recent":           ctx.get("rsi_peak_recent"),
+            "candles_since_peak":        ctx.get("candles_since_peak"),
+            "drop_pct":                  ctx.get("drop_from_prior_close_pct"),
+            "volume_vs_avg":             ctx.get("volume_vs_avg"),
+            "candle_pattern":            ctx.get("candle_pattern"),
+            "last_candle_quality":       ctx.get("last_candle_quality"),
+            "ema_slope_pct":             ctx.get("ema_slope_pct"),
+            "ema_slope_label":           ctx.get("ema_slope_label"),
+            "session_label":             ctx.get("session_label"),
+            "candles":                   ctx.get("candles_15m", [])[-4:],
         }
 
 
