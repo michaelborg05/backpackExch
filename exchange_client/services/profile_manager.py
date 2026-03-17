@@ -63,6 +63,11 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
     except Exception:
         raise RuntimeError(f"Invalid Strategy Type '{cfg.get('strategy_type')}'")
 
+    try:
+        profile_id = int(cfg.get("id"))
+    except Exception:
+        raise RuntimeError(f"Profile id not found''")
+
     # ── Trend filter ────────────────────────────────────────────────────────
     use_trend_filter = cfg.get("use_trend_filter", False)
     trend_timeframe = cfg.get("trend_timeframe", "1h")
@@ -96,6 +101,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
     atr_filter_mode = cfg.get("atr_filter_mode", "require_high")
 
     profile = TradingProfile(
+        id=profile_id,
         name=name,
         display_name=display_name,
         api_key=api_key,
@@ -269,6 +275,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
 
         # ── Build a normalised cfg dict (same shape _build_profile expects) ─
         cfg = {
+            "id" : row.id,
             "display_name": row.display_name,
             "strategy_type": row.strategy_type,
             # Position sizing

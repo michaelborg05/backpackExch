@@ -9,6 +9,7 @@ from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from models.webhook import TrendUpdateAlert, TrendData
 from models.symbol import SymbolConfigRequest
+from models.ai_prompt import AIPromptCreate, AIPromptUpdate
 from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorOut
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
@@ -1434,6 +1435,18 @@ async def create_indicator(profile_name: str, body: IndicatorCreate):
                 enabled=body.enabled,
             )
             db.add(ind)
+            
+            from services.audit import write_audit, snapshot_indicator
+            write_audit(
+                db=db,
+                type="indicator",
+                subtype=body.category,            # "trend" | "entry" | "exit"
+                action="create",
+                entity_id=ind.id,
+                entity_name=f"{ind.indicator_type} ({profile_name})",
+                before=None,
+                after=snapshot_indicator(ind),
+            )            
             db.commit()
             db.refresh(ind)
             apiserver_logger.info(
@@ -1461,11 +1474,25 @@ async def update_indicator(profile_name: str, indicator_id: int, body: Indicator
             prof = _ind_profile_or_404(db, profile_name)
             ind = _ind_or_404(db, indicator_id, prof.id)
 
+            from services.audit import write_audit, snapshot_indicator
+            before_snap = snapshot_indicator(ind)
+
             ind.category       = body.category
             ind.indicator_type = body.indicator_type
             ind.params         = body.params
             ind.is_hard_stop   = body.is_hard_stop
             ind.enabled        = body.enabled
+
+            write_audit(
+                db=db,
+                type="indicator",
+                subtype=body.category,
+                action="update",
+                entity_id=ind.id,
+                entity_name=f"{ind.indicator_type} ({profile_name})",
+                before=before_snap,
+                after=snapshot_indicator(ind),
+            )
 
             db.commit()
             db.refresh(ind)
@@ -1490,7 +1517,23 @@ async def toggle_indicator(profile_name: str, indicator_id: int):
         with get_db_session() as db:
             prof = _ind_profile_or_404(db, profile_name)
             ind = _ind_or_404(db, indicator_id, prof.id)
+
+            from services.audit import write_audit, snapshot_indicator
+            before_snap = snapshot_indicator(ind)
+
             ind.enabled = not ind.enabled
+
+            write_audit(
+                db=db,
+                type="indicator",
+                subtype=ind.category,
+                action="toggle",
+                entity_id=ind.id,
+                entity_name=f"{ind.indicator_type} ({profile_name})",
+                before=before_snap,
+                after=snapshot_indicator(ind),
+            )
+
             db.commit()
             db.refresh(ind)
             apiserver_logger.info(
@@ -1514,6 +1557,18 @@ async def delete_indicator(profile_name: str, indicator_id: int):
         with get_db_session() as db:
             prof = _ind_profile_or_404(db, profile_name)
             ind = _ind_or_404(db, indicator_id, prof.id)
+
+            from services.audit import write_audit, snapshot_indicator
+            write_audit(
+                db=db,
+                type="indicator",
+                subtype=ind.category,
+                action="delete",
+                entity_id=ind.id,
+                entity_name=f"{ind.indicator_type} ({profile_name})",
+                before=snapshot_indicator(ind),
+                after=None,
+            )
             db.delete(ind)
             db.commit()
             apiserver_logger.info(
@@ -1982,6 +2037,381 @@ def _ai_generate_verdict(stats: list) -> tuple[str, str]:
 
     return verdict, recommendation
 
+@app.get("/ai-prompts", dependencies=[Depends(require_read_permission)])
+async def list_ai_prompts(
+    strategy_type: Optional[str] = None,
+    profile_id: Optional[int] = None,
+    is_active: Optional[bool] = None,
+):
+    """List all AI prompts, with optional filters."""
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+ 
+    try:
+        with get_db_session() as db:
+            q = db.query(AIPrompt)
+            if strategy_type is not None:
+                q = q.filter(AIPrompt.strategy_type == strategy_type)
+            if profile_id is not None:
+                q = q.filter(AIPrompt.profile_id == profile_id)
+            if is_active is not None:
+                q = q.filter(AIPrompt.is_active == is_active)
+            prompts = q.order_by(AIPrompt.strategy_type, AIPrompt.id).all()
+            return [
+                {
+                    "id":            p.id,
+                    "name":          p.name,
+                    "strategy_type": p.strategy_type,
+                    "profile_id":    p.profile_id,
+                    "is_active":     p.is_active,
+                    "is_default":    p.is_default,
+                    "version":       p.version,
+                    "notes":         p.notes,
+                    "system_prompt": p.system_prompt,
+                    "created_at":    p.created_at.isoformat() if p.created_at else None,
+                    "updated_at":    p.updated_at.isoformat() if p.updated_at else None,
+                }
+                for p in prompts
+            ]
+    except Exception as e:
+        apiserver_logger.error(f"Error listing AI prompts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+@app.get("/ai-prompts/{prompt_id}", dependencies=[Depends(require_read_permission)])
+async def get_ai_prompt(prompt_id: int):
+    """Get a single AI prompt by ID."""
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+ 
+    try:
+        with get_db_session() as db:
+            p = db.query(AIPrompt).filter(AIPrompt.id == prompt_id).first()
+            if not p:
+                raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+            return {
+                "id":            p.id,
+                "name":          p.name,
+                "strategy_type": p.strategy_type,
+                "profile_id":    p.profile_id,
+                "is_active":     p.is_active,
+                "is_default":    p.is_default,
+                "version":       p.version,
+                "notes":         p.notes,
+                "system_prompt": p.system_prompt,
+                "created_at":    p.created_at.isoformat() if p.created_at else None,
+                "updated_at":    p.updated_at.isoformat() if p.updated_at else None,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+@app.post("/ai-prompts", dependencies=[Depends(require_admin_permission)])
+async def create_ai_prompt(body: AIPromptCreate):
+    """Create a new AI prompt."""
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+    from services.audit import write_audit, snapshot_ai_prompt
+ 
+    try:
+        with get_db_session() as db:
+            p = AIPrompt(
+                name=body.name,
+                strategy_type=body.strategy_type,
+                profile_id=body.profile_id,
+                system_prompt=body.system_prompt,
+                is_active=body.is_active,
+                is_default=body.is_default,
+                notes=body.notes,
+                version=1,
+            )
+            db.add(p)
+            db.flush()
+ 
+            write_audit(
+                db=db,
+                type="ai_prompt",
+                subtype=body.strategy_type or "global",
+                action="create",
+                entity_id=p.id,
+                entity_name=body.name,
+                before=None,
+                after=snapshot_ai_prompt(p),
+            )
+ 
+            db.commit()
+            db.refresh(p)
+            apiserver_logger.info(f"Created AI prompt '{p.name}' (id={p.id})")
+ 
+            # Invalidate prompt cache so next signal call picks up the new prompt
+            from services.ai_signal_handler import get_ai_signal_handler
+            get_ai_signal_handler().reload_prompt(body.strategy_type, body.profile_id)
+ 
+            return {"id": p.id, "name": p.name, "version": p.version}
+    except Exception as e:
+        apiserver_logger.error(f"Error creating AI prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+@app.put("/ai-prompts/{prompt_id}", dependencies=[Depends(require_admin_permission)])
+async def update_ai_prompt(prompt_id: int, body: AIPromptUpdate):
+    """
+    Update an AI prompt. Increments version automatically.
+    Partial updates are supported — only non-None fields are changed.
+    """
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+    from services.audit import write_audit, snapshot_ai_prompt
+ 
+    try:
+        with get_db_session() as db:
+            p = db.query(AIPrompt).filter(AIPrompt.id == prompt_id).first()
+            if not p:
+                raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+ 
+            before = snapshot_ai_prompt(p)
+            old_strategy = p.strategy_type
+            old_profile_id = p.profile_id
+ 
+            if body.name          is not None: p.name          = body.name
+            if body.strategy_type is not None: p.strategy_type = body.strategy_type
+            if body.profile_id    is not None: p.profile_id    = body.profile_id
+            if body.system_prompt is not None: p.system_prompt = body.system_prompt
+            if body.is_active     is not None: p.is_active     = body.is_active
+            if body.is_default    is not None: p.is_default    = body.is_default
+            if body.notes         is not None: p.notes         = body.notes
+ 
+            p.version += 1
+ 
+            write_audit(
+                db=db,
+                type="ai_prompt",
+                subtype=p.strategy_type or "global",
+                action="update",
+                entity_id=p.id,
+                entity_name=p.name,
+                before=before,
+                after=snapshot_ai_prompt(p),
+            )
+ 
+            db.commit()
+            db.refresh(p)
+            apiserver_logger.info(f"Updated AI prompt id={prompt_id} to version {p.version}")
+ 
+            # Invalidate cache for old and new keys (strategy/profile may have changed)
+            from services.ai_signal_handler import get_ai_signal_handler
+            handler = get_ai_signal_handler()
+            handler.reload_prompt(old_strategy, old_profile_id)
+            if (p.strategy_type, p.profile_id) != (old_strategy, old_profile_id):
+                handler.reload_prompt(p.strategy_type, p.profile_id)
+ 
+            return {"id": p.id, "name": p.name, "version": p.version}
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error updating AI prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+@app.delete("/ai-prompts/{prompt_id}", dependencies=[Depends(require_admin_permission)])
+async def delete_ai_prompt(prompt_id: int):
+    """Delete an AI prompt. Cannot delete the last active default prompt."""
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+    from services.audit import write_audit, snapshot_ai_prompt
+ 
+    try:
+        with get_db_session() as db:
+            p = db.query(AIPrompt).filter(AIPrompt.id == prompt_id).first()
+            if not p:
+                raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+ 
+            # Guard: refuse to delete the last active global default
+            if p.is_default and p.profile_id is None and p.strategy_type is None:
+                other_defaults = (
+                    db.query(AIPrompt)
+                    .filter(
+                        AIPrompt.is_default == True,
+                        AIPrompt.is_active == True,
+                        AIPrompt.id != prompt_id,
+                        AIPrompt.profile_id == None,
+                        AIPrompt.strategy_type == None,
+                    )
+                    .count()
+                )
+                if other_defaults == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot delete the last active global default prompt. "
+                               "Set another prompt as default first."
+                    )
+ 
+            before = snapshot_ai_prompt(p)
+            strategy_type = p.strategy_type
+            profile_id    = p.profile_id
+ 
+            write_audit(
+                db=db,
+                type="ai_prompt",
+                subtype=strategy_type or "global",
+                action="delete",
+                entity_id=p.id,
+                entity_name=p.name,
+                before=before,
+                after=None,
+            )
+ 
+            db.delete(p)
+            db.commit()
+            apiserver_logger.info(f"Deleted AI prompt id={prompt_id}")
+ 
+            from services.ai_signal_handler import get_ai_signal_handler
+            get_ai_signal_handler().reload_prompt(strategy_type, profile_id)
+ 
+            return {"success": True, "message": f"Prompt {prompt_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error deleting AI prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+@app.post("/ai-prompts/{prompt_id}/set-default", dependencies=[Depends(require_admin_permission)])
+async def set_ai_prompt_default(prompt_id: int):
+    """
+    Set a prompt as the default for its (strategy_type, profile_id) scope.
+    Clears is_default on any other prompt in the same scope first.
+    """
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+    from services.audit import write_audit, snapshot_ai_prompt
+ 
+    try:
+        with get_db_session() as db:
+            p = db.query(AIPrompt).filter(AIPrompt.id == prompt_id).first()
+            if not p:
+                raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+ 
+            # Clear existing defaults in the same scope
+            db.query(AIPrompt).filter(
+                AIPrompt.strategy_type == p.strategy_type,
+                AIPrompt.profile_id    == p.profile_id,
+                AIPrompt.id            != prompt_id,
+                AIPrompt.is_default    == True,
+            ).update({"is_default": False})
+ 
+            before = snapshot_ai_prompt(p)
+            p.is_default = True
+ 
+            write_audit(
+                db=db,
+                type="ai_prompt",
+                subtype=p.strategy_type or "global",
+                action="set_default",
+                entity_id=p.id,
+                entity_name=p.name,
+                before=before,
+                after=snapshot_ai_prompt(p),
+            )
+ 
+            db.commit()
+            db.refresh(p)
+            apiserver_logger.info(f"Set AI prompt id={prompt_id} as default")
+
+            from services.ai_signal_handler import get_ai_signal_handler
+            get_ai_signal_handler().reload_prompt(p.strategy_type, p.profile_id)
+ 
+            return {"success": True, "id": p.id, "name": p.name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error setting prompt default: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+@app.post("/ai-prompts/{prompt_id}/reload-cache", dependencies=[Depends(require_admin_permission)])
+async def reload_prompt_cache(prompt_id: int):
+    """Force the in-memory prompt cache to refresh for this prompt's scope."""
+    from db.utils import get_db_session
+    from db.models import AIPrompt
+ 
+    try:
+        with get_db_session() as db:
+            p = db.query(AIPrompt).filter(AIPrompt.id == prompt_id).first()
+            if not p:
+                raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+            
+            from services.ai_signal_handler import get_ai_signal_handler
+            get_ai_signal_handler().reload_prompt(p.strategy_type, p.profile_id)
+            return {"success": True, "message": f"Cache refreshed for strategy={p.strategy_type} profile_id={p.profile_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+# ══════════════════════════════════════════════════════════════════════════════
+# Config Audit Log — read-only endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+ 
+@app.get("/audit-log", dependencies=[Depends(require_read_permission)])
+async def get_audit_log(
+    type: Optional[str] = None,
+    subtype: Optional[str] = None,
+    action: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    days: int = 30,
+    limit: int = 200,
+):
+    """
+    Query the config audit log with optional filters.
+ 
+    Returns newest-first. Max 200 rows per call.
+    Use `days` to restrict the time window (default: last 30 days).
+    """
+    from db.utils import get_db_session
+    from db.models import ConfigAuditLog
+    from datetime import timedelta
+ 
+    try:
+        with get_db_session() as db:
+            from datetime import datetime, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            q = (
+                db.query(ConfigAuditLog)
+                .filter(ConfigAuditLog.changed_at >= cutoff)
+            )
+            if type:      q = q.filter(ConfigAuditLog.type    == type)
+            if subtype:   q = q.filter(ConfigAuditLog.subtype == subtype)
+            if action:    q = q.filter(ConfigAuditLog.action  == action)
+            if entity_id: q = q.filter(ConfigAuditLog.entity_id == entity_id)
+ 
+            rows = (
+                q.order_by(ConfigAuditLog.changed_at.desc())
+                .limit(min(limit, 500))
+                .all()
+            )
+            return [
+                {
+                    "id":          r.id,
+                    "changed_at":  r.changed_at.isoformat() if r.changed_at else None,
+                    "type":        r.type,
+                    "subtype":     r.subtype,
+                    "action":      r.action,
+                    "entity_id":   r.entity_id,
+                    "entity_name": r.entity_name,
+                    "changed_by":  r.changed_by,
+                    "before":      r.before,
+                    "after":       r.after,
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        apiserver_logger.error(f"Error querying audit log: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+ 
 app.include_router(auth_router)
 
 # Mount static files directory

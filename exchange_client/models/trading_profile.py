@@ -5,6 +5,7 @@ from decimal import Decimal
 from utils.constants import StrategyType
 
 class TradingProfile(BaseModel):
+    id: int
     name: str
     display_name: str
     api_key: str

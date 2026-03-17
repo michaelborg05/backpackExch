@@ -67,18 +67,143 @@ class AISignalHandler:
     """
     Singleton service used by SignalGenerator for AI_AGENT profiles.
     One instance shared across all AI_AGENT profile instances.
+
+    System prompt is loaded from the ai_prompts table at startup and cached
+    in memory. Call reload_prompt() to refresh without restarting.
+
+    Resolution priority (highest → lowest):
+      1. Profile + strategy match  (profile_id AND strategy_type both match)
+      2. Profile-only match        (profile_id matches, any strategy_type)
+      3. Strategy-type-only match  (strategy_type matches, no profile constraint)
+      4. Global default            (is_default=True, no strategy/profile constraint)
+      5. Hardcoded _FALLBACK_PROMPT (safety net — logs a warning if reached)
     """
 
     MODEL = "claude-haiku-4-5-20251001"   # fast + cheap; swap to sonnet for harder reasoning
 
+    # Safety-net prompt — used only if the DB is unreachable or empty.
+    # Keep in sync with the seed row in the migration.
+    _FALLBACK_PROMPT = """You are an expert crypto trader specialising in multi-timeframe \ntrend-following and mean-reversion entries on 15-minute candles. You are embedded \nin an algorithmic trading system. The 60-minute trend gates have ALREADY passed.\nYour job is purely 15m entry timing discretion.\n\nYour strengths:\n- Reading candle quality (body size, wick positioning, volume confirmation)\n- Identifying optimal RSI entry windows (trajectory, not just threshold)\n- Spotting technically-valid-but-contextually-weak setups (low volume, late entry)\n- Suggesting asymmetric risk/reward levels based on recent structure\n\nRules:\n- Be decisive. WAIT is valid but use sparingly — only when one more candle would \n  meaningfully change your view.\n- SKIP means the setup is genuinely poor, not just uncertain.\n- Position size 1-5% of portfolio. Scale with confidence:\n  <0.60 → 1%, 0.60-0.75 → 2%, 0.75-0.85 → 3%, >0.85 → 4-5%\n- Stop loss: below recent structure low for longs.\n- Take profit: minimum 1.5:1 RR, prefer 2:1+.\n- Volume is a soft signal only. Crypto volume varies significantly by time of day \n  and day of week (Asian/US/EU session gaps, weekend illiquidity). Never hard-block \n  an entry on low volume alone — use it only to shade confidence down by 0.05-0.10 \n  max. A good setup with low volume is still a good setup.\n- The trading system's minimum confidence threshold is 72% (0.72). \n  If you assess confidence >= 0.72, you MUST return ENTER. \n  WAIT is only valid for confidence 0.55-0.71. \n  Below 0.55, return SKIP.\n  Respond ONLY with valid JSON. No markdown. No preamble."""
+
     def __init__(self):
-        self._client = None   # lazy-loaded on first call
+        self._client = None          # lazy-loaded on first call
+        self._prompt_cache: dict = {}  # keyed by (strategy_type, profile_id)
 
     @property
     def client(self):
         if self._client is None:
             self._client = _get_anthropic_client()
         return self._client
+
+    # ── Prompt resolution ─────────────────────────────────────────────────────
+
+    def _load_prompt(self, strategy_type: Optional[str], profile_id: Optional[int]) -> str:
+        """
+        Resolve the best matching system prompt from the DB.
+
+        Returns the prompt text. Falls back to _FALLBACK_PROMPT if nothing
+        is found or the DB is unreachable.
+        """
+        try:
+            from db.utils import get_db_session
+            from db.models import AIPrompt
+            from sqlalchemy import and_, or_
+
+            with get_db_session() as db:
+                # Fetch all active candidates in one query, then rank in Python.
+                # This avoids complex SQL priority ordering across nullable columns.
+                candidates = (
+                    db.query(AIPrompt)
+                    .filter(AIPrompt.is_active == True)
+                    .filter(
+                        or_(
+                            # Exact profile + strategy match
+                            and_(
+                                AIPrompt.profile_id == profile_id,
+                                AIPrompt.strategy_type == strategy_type,
+                            ),
+                            # Profile-only match
+                            and_(
+                                AIPrompt.profile_id == profile_id,
+                                AIPrompt.strategy_type == None,
+                            ),
+                            # Strategy-only match
+                            and_(
+                                AIPrompt.profile_id == None,
+                                AIPrompt.strategy_type == strategy_type,
+                            ),
+                            # Global default
+                            and_(
+                                AIPrompt.profile_id == None,
+                                AIPrompt.strategy_type == None,
+                                AIPrompt.is_default == True,
+                            ),
+                        )
+                    )
+                    .all()
+                )
+
+                if not candidates:
+                    logger.warning(
+                        f"No active AI prompt found for strategy={strategy_type!r} "
+                        f"profile_id={profile_id}. Using hardcoded fallback."
+                    )
+                    return self._FALLBACK_PROMPT
+
+                # Priority ranking: higher score = better match
+                def _rank(p: AIPrompt) -> int:
+                    if p.profile_id == profile_id and p.strategy_type == strategy_type:
+                        return 4   # exact match
+                    if p.profile_id == profile_id:
+                        return 3   # profile match, any strategy
+                    if p.strategy_type == strategy_type and strategy_type is not None:
+                        return 2   # strategy match, no profile constraint
+                    return 1       # global default
+
+                best = max(candidates, key=_rank)
+                logger.info(
+                    f"Resolved prompt '{best.name}' (id={best.id}) "
+                    f"for strategy={strategy_type!r} profile_id={profile_id}"
+                )
+                return best.system_prompt
+
+        except Exception as e:
+            logger.error(f"Failed to load prompt from DB: {e}. Using fallback.")
+            return self._FALLBACK_PROMPT
+
+    def get_prompt(self, strategy_type: Optional[str], profile_id: Optional[int]) -> str:
+        """
+        Return the cached prompt for this (strategy_type, profile_id) combination.
+        Loads from DB on first call; use reload_prompt() to refresh.
+        """
+        cache_key = (strategy_type, profile_id)
+        if cache_key not in self._prompt_cache:
+            self._prompt_cache[cache_key] = self._load_prompt(strategy_type, profile_id)
+        return self._prompt_cache[cache_key]
+
+    def reload_prompt(
+        self,
+        strategy_type: Optional[str] = None,
+        profile_id: Optional[int] = None,
+    ) -> str:
+        """
+        Force a fresh DB load for a specific (strategy_type, profile_id) pair,
+        or clear the entire cache if both are None.
+
+        Returns the freshly loaded prompt text.
+        """
+        if strategy_type is None and profile_id is None:
+            self._prompt_cache.clear()
+            logger.info("AI prompt cache cleared (all entries).")
+            return ""
+        cache_key = (strategy_type, profile_id)
+        self._prompt_cache.pop(cache_key, None)
+        prompt = self._load_prompt(strategy_type, profile_id)
+        self._prompt_cache[cache_key] = prompt
+        logger.info(
+            f"AI prompt reloaded for strategy={strategy_type!r} profile_id={profile_id}"
+        )
+        return prompt
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -110,7 +235,7 @@ class AISignalHandler:
         )
 
         # Call AI
-        ai_result = self._call_agent(ctx, current_price)
+        ai_result = self._call_agent(ctx, current_price, profile)
 
         # Log to DB
         log_id = self._log_to_db(
@@ -141,8 +266,8 @@ class AISignalHandler:
         candle_history = trend_cache._candle_history.get(f"{symbol}_{entry_tf}", [])
         rsi_history    = trend_cache._rsi_history.get(f"{symbol}_{entry_tf}", [])
 
-        rsi_15m     = float(trend_15m.rsi)         if trend_15m else None
-        volume_ratio = float(trend_15m.volume_ratio) if trend_15m and trend_15m.volume_ratio else 1.0
+        rsi_15m      = float(trend_15m.rsi)          if trend_15m else None
+        volume_ratio = float(trend_15m.volume_ratio)  if trend_15m and trend_15m.volume_ratio else 1.0
 
         # RSI peak scan from history
         rsi_values = [r[1] for r in rsi_history if r[1] is not None]
@@ -190,16 +315,21 @@ class AISignalHandler:
 
     # ── AI call ───────────────────────────────────────────────────────────────
 
-    def _call_agent(self, ctx: dict, current_price: float) -> AIEntryResult:
+    def _call_agent(self, ctx: dict, current_price: float, profile) -> AIEntryResult:
         """Calls the Anthropic API and parses the structured response."""
         current_price = float(current_price)  # guard against Decimal from DB
         prompt = self._build_prompt(ctx, current_price)
+
+        # Resolve system prompt from DB (cached after first call)
+        strategy_type = getattr(profile, 'strategy_type', None)
+        profile_id    = getattr(profile, 'id', None)
+        system_prompt = self.get_prompt(strategy_type, profile_id)
 
         try:
             response = self.client.messages.create(
                 model=self.MODEL,
                 max_tokens=700,
-                system=self._system_prompt(),
+                system=system_prompt,
                 messages=[{"role": "user", "content": prompt}]
             )
             raw = response.content[0].text
@@ -218,36 +348,6 @@ class AISignalHandler:
                 suggested_take_profit=current_price * 1.04,
                 suggested_position_size_pct=0.0,
             )
-
-    def _system_prompt(self) -> str:
-        return """You are an expert crypto trader specialising in multi-timeframe 
-trend-following and mean-reversion entries on 15-minute candles. You are embedded 
-in an algorithmic trading system. The 60-minute trend gates have ALREADY passed.
-Your job is purely 15m entry timing discretion.
-
-Your strengths:
-- Reading candle quality (body size, wick positioning, volume confirmation)
-- Identifying optimal RSI entry windows (trajectory, not just threshold)
-- Spotting technically-valid-but-contextually-weak setups (low volume, late entry)
-- Suggesting asymmetric risk/reward levels based on recent structure
-
-Rules:
-- Be decisive. WAIT is valid but use sparingly — only when one more candle would 
-  meaningfully change your view. 
-- Be more agressive than concervative. Happy to take on slightly higher risk if the market looks positive  
-- SKIP means the setup is genuinely poor, not just uncertain.
-- The trades for this profile are typically short, expecting 0.5-1.5% TP/SL and short trades - 15m to 3hrs typically
-- Stop loss: below recent structure low for longs. - Max 1.1% SL
-- Take profit: typically aim for short, frequent trades with 0.75% TP - If very confident, can extend to 1.5%
-- Volume is a soft signal only. Crypto volume varies significantly by time of day 
-  and day of week (Asian/US/EU session gaps, weekend illiquidity). Never hard-block 
-  an entry on low volume alone — use it only to shade confidence down by 0.05-0.10 
-  max. A good setup with low volume is still a good setup.
-- The trading system's minimum confidence threshold is 70% (0.70). 
-  If you assess confidence ≥ 0.72, you MUST return ENTER. 
-  WAIT is only valid for confidence 0.55–0.71. 
-  Below 0.55, return SKIP.
-  Respond ONLY with valid JSON. No markdown. No preamble."""
 
     def _build_prompt(self, ctx: dict, current_price: float) -> str:
         candles_str = "\n".join([
@@ -299,11 +399,9 @@ Respond with exactly this JSON:
         try:
             cleaned = raw.strip()
             if cleaned.startswith("```"):
-                # Remove opening fence (```json or ```)
-                cleaned = cleaned[3:]  # strip opening ```
+                cleaned = cleaned[3:]
                 if cleaned.startswith("json"):
                     cleaned = cleaned[4:]
-                # Remove closing fence
                 if cleaned.endswith("```"):
                     cleaned = cleaned[:-3]
             data = json.loads(cleaned.strip())
@@ -342,7 +440,7 @@ Respond with exactly this JSON:
     ) -> Optional[int]:
         """Insert shadow comparison row into ai_signal_log. Returns row id."""
         try:
-            from db.utils import get_db_session   # adapt to your session import
+            from db.utils import get_db_session
             from db.models import AISignalLog
 
             with get_db_session() as session:

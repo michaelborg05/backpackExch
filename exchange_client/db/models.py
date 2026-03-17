@@ -1,9 +1,9 @@
 # db/models.py
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint, text
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint, Text, text
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from utils.constants import TradeReason, PositionCloseReason, StrategyType
-
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 Base = declarative_base()
@@ -130,6 +130,7 @@ class Position(Base):
         ForeignKey("ai_signal_log.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+        comment='FK to ai_signal_log — set for AI_AGENT profile positions only'
     )
 
     profit = Column(Numeric(20, 8), nullable=True)
@@ -603,20 +604,20 @@ class AISignalLog(Base):
     id = Column(Integer, primary_key=True)
     pair              = Column(String(20),  nullable=False, index=True)
     profile_name      = Column(String(50),  nullable=False, index=True)
-    signal_source     = Column(String(10),  nullable=False, default="SHADOW")  # SHADOW | AI_LIVE
+    signal_source     = Column(String(10),  nullable=False, server_default="SHADOW")  # SHADOW | AI_LIVE
     candle_time       = Column(DateTime(timezone=True), nullable=False)
     timeframe         = Column(String(5),   nullable=False)
     timestamp         = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     # ── 60m gate results ───────────────────────────────────────────────
     gate_60m_passed   = Column(Boolean, nullable=False)
-    gate_60m_data     = Column(JSON)   # RSI, trend direction, strength etc.
+    gate_60m_data     = Column(JSONB)   # RSI, trend direction, strength etc.
 
     # ── AI agent decision ──────────────────────────────────────────────
     ai_decision             = Column(String(10))   # ENTER | SKIP | WAIT
     ai_confidence           = Column(Numeric(4, 3))
-    ai_reasoning            = Column(String)
-    ai_risk_flags           = Column(JSON)
+    ai_reasoning            = Column(Text)
+    ai_risk_flags           = Column(JSONB)
     ai_entry_price          = Column(Numeric(20, 8))
     ai_stop_loss            = Column(Numeric(20, 8))
     ai_take_profit          = Column(Numeric(20, 8))
@@ -627,7 +628,7 @@ class AISignalLog(Base):
     rules_entry_price = Column(Numeric(20, 8))
 
     # ── Outcome (filled in by OutcomeResolver after trade resolves) ────
-    outcome_resolved      = Column(Boolean, default=False, nullable=False, index=True)
+    outcome_resolved      = Column(Boolean, server_default=text("false"), nullable=False, index=True)
     outcome_result        = Column(String(10))          # WIN | LOSS | BREAKEVEN | MISSED
     outcome_pnl_pct       = Column(Numeric(8, 4))
     outcome_exit_price    = Column(Numeric(20, 8))
@@ -635,7 +636,7 @@ class AISignalLog(Base):
     outcome_candles_held  = Column(Integer)
 
     # ── Raw context snapshot (for replay / debugging) ──────────────────
-    context_snapshot  = Column(JSON)
+    context_snapshot  = Column(JSONB)
 
     __table_args__ = (
         CheckConstraint(
@@ -705,4 +706,90 @@ class AIVsRulesStats(Base):
             f"<AIVsRulesStats pair={self.pair!r} "
             f"period={self.period_start} "
             f"wr_delta={self.win_rate_delta}>"
+        )
+
+class AIPrompt(Base):
+    """
+    Versioned, DB-backed system prompts for the AI signal agent.
+
+    Resolution priority in ai_signal_handler (highest → lowest):
+      1. Profile-specific   (profile_id matches AND strategy_type matches, is_active=True)
+      2. Profile-only       (profile_id matches, is_active=True)
+      3. Strategy-type only (strategy_type matches, is_active=True)
+      4. Global default     (is_default=True, is_active=True)
+      5. Hardcoded fallback in AISignalHandler (safety net — should never reach here)
+
+    Only ONE prompt per (strategy_type, profile_id) combination should have
+    is_default=True. The /ai-prompts/{id}/set-default endpoint enforces this.
+    """
+    __tablename__ = "ai_prompts"
+
+    id            = Column(Integer, primary_key=True)
+    name          = Column(String(128), nullable=False)
+    strategy_type = Column(String(64),  nullable=True)   # None = applies to all strategies
+    profile_id    = Column(Integer, ForeignKey("trading_profiles.id", ondelete="SET NULL"), nullable=True)
+    system_prompt = Column(Text, nullable=False)
+    is_active     = Column(Boolean, nullable=False, default=True)
+    is_default    = Column(Boolean, nullable=False, default=False)
+    version       = Column(Integer, nullable=False, default=1)
+    notes         = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    profile = relationship("TradingProfileDB", foreign_keys=[profile_id])
+
+    __table_args__ = (
+        Index('ix_ai_prompts_strategy_type', 'strategy_type'),
+        Index('ix_ai_prompts_profile_id',    'profile_id'),
+        Index('ix_ai_prompts_is_default',    'is_default'),
+    )
+
+    def __repr__(self):
+        return (
+            f"<AIPrompt id={self.id} name={self.name!r} "
+            f"strategy={self.strategy_type!r} default={self.is_default}>"
+        )
+
+
+class ConfigAuditLog(Base):
+    """
+    Append-only audit trail for all configuration changes made via the UI or API.
+
+    Records what changed, when, who changed it, and full before/after JSON snapshots.
+    This lets you correlate config changes (indicators, prompts, profile settings)
+    against bot performance on any given day.
+
+    type values:    indicator | ai_prompt | profile | symbol_config
+    subtype values: trend | entry | exit | mean_reversion | system | range | swing | …
+    action values:  create | update | delete | toggle | set_default
+    """
+    __tablename__ = "config_audit_log"
+
+    id          = Column(Integer, primary_key=True)
+    changed_at  = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+    type        = Column(String(32),  nullable=False)   # indicator | ai_prompt | profile | symbol_config
+    subtype     = Column(String(64),  nullable=True)    # trend | entry | mean_reversion | system …
+    action      = Column(String(16),  nullable=False)   # create | update | delete | toggle | set_default
+
+    entity_id   = Column(Integer,     nullable=True)    # PK of the affected row (NULL if deleted)
+    entity_name = Column(String(256), nullable=True)    # Human-readable label for the UI
+
+    changed_by  = Column(String(64),  nullable=False, default="web_ui")
+
+    before      = Column(JSON, nullable=True)           # Snapshot of state BEFORE change
+    after       = Column(JSON, nullable=True)           # Snapshot of state AFTER change
+
+    __table_args__ = (
+        Index('ix_audit_changed_at',   'changed_at'),
+        Index('ix_audit_type_subtype', 'type', 'subtype'),
+        Index('ix_audit_entity',       'entity_id', 'type'),
+    )
+
+    def __repr__(self):
+        return (
+            f"<ConfigAuditLog id={self.id} type={self.type!r} "
+            f"action={self.action!r} entity={self.entity_name!r} "
+            f"at={self.changed_at}>"
         )
