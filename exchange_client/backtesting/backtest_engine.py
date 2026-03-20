@@ -975,7 +975,14 @@ class ReplayTrendCache:
                         max_jump   = 0.0
 
                     current_above_min = current_rsi >= current_min
-                    rsi_mom, rsi_dir  = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    
+                    if require_sustained == True:
+                        #If require sustained, look over last 2 candle gaps
+                        rsi_mom, rsi_dir  = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    else:
+                        #else just check previous jump
+                        rsi_mom, rsi_dir  = self._get_rsi_momentum(symbol, timeframe, lookback=1)
+
                     currently_rising  = (rsi_mom is not None and rsi_mom > 2 and rsi_dir == "increasing") if jump_required else True
 
                     sustained_rise = True
@@ -991,6 +998,7 @@ class ReplayTrendCache:
                             sustained_rise = last3[1] > last3[0] and last3[2] > last3[1]
 
                     is_bull = touched_oversold and jump_found and current_above_min and currently_rising
+
                     if require_sustained:
                         is_bull = is_bull and sustained_rise
 

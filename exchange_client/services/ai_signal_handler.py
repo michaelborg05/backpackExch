@@ -505,7 +505,7 @@ Respond with exactly this JSON:
   "suggested_entry": {current_price},
   "suggested_stop_loss": <price>,
   "suggested_take_profit": <price>,
-  "suggested_position_size_pct": <1-5>
+  "suggested_position_size_pct": <50-150>
 }}"""
 
     def _parse_response(self, raw: str, current_price: float) -> AIEntryResult:

@@ -82,100 +82,221 @@ _SWING_BASE = {
     "use_entry_filter": True,
     "max_position_hours": 72,
     "use_market_regime_filter": False,
+    "trend_indicators": [
+        {"type": "rsi_reversal_momentum", "params": {
+            "lookback_candles":    8,
+            "oversold_threshold":  42,
+            "current_min":         36,
+            "min_jump":            3.0,
+            "require_sustained":   False,
+            "sustained_rise_mode": "net",
+            "hard_stop":           True,
+        }},
+        {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
+    ],
+    "min_indicators_required": 2,
+    "entry_indicators": [
+        {"type": "rsi_reversal_momentum", "params": {
+            "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
+            "oversold_threshold":  52,
+            "current_min":         38,
+            "min_jump":            3.0,
+            "require_sustained":   False,
+            "sustained_rise_mode": "net",
+            "hard_stop":           True,
+        }},
+        # RSI overbought is the ONLY "too late" gate — not BB
+        {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
+        # Price vs EMA: wide allowance for post-crash EMA elevation
+        {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+        # Volume: soft, no hard_stop
+        {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
+
+        # BB: lower band check only — confirms price was genuinely depressed
+        # (not a hard stop — just a confidence indicator)
+    ],
+    "min_entry_indicators_required": 4,
 }
 
 SWING_VARIANTS = {
+    "p3_base" : _SWING_BASE,
 
-    "p3_base_current_profile": {
+    # -------------------------------------------------------------------------
+    # V15: RECALIBRATED — fires earlier on 240m, tighter TP/SL for grinding recovery
+    #
+    # Key changes from existing variants:
+    # - lookback=4 on 240m (16h window) catches the dip faster than lookback=8
+    # - current_min=34 (not 36) — recovery starts at 38-40 on 240m, need room
+    # - require_sustained=False on 240m — 4h candles don't need consecutive rises
+    # - TP 2.5% / SL 2.5% — this market moved <1% per candle; 4% TP is unrealistic
+    # - 60m entry: simple RSI+pct_b gates, no rsi_reversal hard stop
+    #   (the 60m already showing RSI 39-45 when 240m fires — reversal is confirmed)
+    # -------------------------------------------------------------------------
+    # "p3_v15_recal_tight_tp": {
+    #     **_SWING_BASE,
+    #     "take_profit_pct": 2.5,        # reduced from 4.0 — matches actual volatility
+    #     "stop_loss_pct": 2.5,
+    #     "trailing_stop_pct": 1.8,
+    #     "arm_trailing_stop_pct": 1.2,  # arm early — the grind is slow
+    #     "use_trailing_stop": True,
+    #     "min_signal_confidence": 72.0, # slightly relaxed
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles": 4,     # 16h window — catches current dip
+    #             "oversold_threshold": 38,  # 240m RSI hit 36.5 (SOL), 35.0 (ETH)
+    #             "current_min": 34,         # needs to be off extreme but not recovered
+    #             "min_jump": 4.0,           # solid jump required on 4h candle
+    #             "require_sustained": False, # 4h bars — one big candle is enough
+    #             "hard_stop": True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {
+    #             "min_value": 58,           # was 50 — RSI 50 is mid-recovery, not late
+    #             "hard_stop": True,
+    #         }},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         # 60m RSI: below 55 means still in recovery zone, not extended
+    #         {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
+    #         # 60m BB: price in lower 70% of band — not chasing
+    #         {"type": "bollinger_bands", "params": {
+    #             "band": "upper", "mode": "pct_b",
+    #             "max_pct_b": 0.70, "hard_stop": True,
+    #         }},
+    #         # Volume: soft — recovery candles have subdued volume
+    #         {"type": "volume_spike", "params": {"min_ratio": 0.6, "max_ratio": 8.0}},
+    #         # Price vs EMA: wide allowance — EMA lags in a crash recovery
+    #         {"type": "price_vs_ema", "params": {
+    #             "ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 5.0,
+    #         }},
+    #     ],
+    #     "min_entry_indicators_required": 3,
+    # },
+
+    # -------------------------------------------------------------------------
+    # V16: TRAILING STOP FOCUS — no fixed TP, let trailing stop manage the exit
+    #
+    # For grinding recoveries, a fixed TP often misses the eventual breakout.
+    # BTC recovered from 30k to 38k in Feb — that's 26%. Even 5–8% would be
+    # captured with a good trailing stop. Don't cap the upside with a fixed TP.
+    #
+    # Set TP very wide (8%) so it almost never hits, rely on trailing stop.
+    # Arm trail early at 1.5% to lock in the small initial gains.
+    # -------------------------------------------------------------------------
+    # "p3_v16_trail_only": {
+    #     **_SWING_BASE,
+    #     "take_profit_pct": 8.0,        # effectively disabled — trailing stop does the work
+    #     "stop_loss_pct": 3.0,          # initial hard SL
+    #     "trailing_stop_pct": 2.0,
+    #     "arm_trailing_stop_pct": 1.5,  # arm after 1.5% — protect any early gain
+    #     "use_trailing_stop": True,
+    #     "max_position_hours": 96,      # allow up to 4 days on the trade
+    #     "min_signal_confidence": 72.0,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles": 4,
+    #             "oversold_threshold": 38,
+    #             "current_min": 34,
+    #             "min_jump": 4.0,
+    #             "require_sustained": False,
+    #             "hard_stop": True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 58, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
+    #         {"type": "bollinger_bands", "params": {
+    #             "band": "upper", "mode": "pct_b",
+    #             "max_pct_b": 0.75, "hard_stop": True,
+    #         }},
+    #         {"type": "volume_spike", "params": {"min_ratio": 0.6, "max_ratio": 8.0}},
+    #         {"type": "price_vs_ema", "params": {
+    #             "ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 5.0,
+    #         }},
+    #     ],
+    #     "min_entry_indicators_required": 3,
+    # },
+
+    # -------------------------------------------------------------------------
+    # V17: GRADUAL RECOVERY (SUI/ETH style) — for when 240m RSI grinds slowly
+    # without a single large jump. Min_jump=2.5 catches the step-up pattern.
+    # Uses lookback=6 to see the full 24h dip-and-recover arc.
+    # -------------------------------------------------------------------------
+    "p3_v17_gradual": {
         **_SWING_BASE,
+        "take_profit_pct": 2.5,
+        "stop_loss_pct": 2.5,
+        "trailing_stop_pct": 1.8,
+        "arm_trailing_stop_pct": 1.2,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 70.0,
         "trend_indicators": [
             {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    8,
-                "oversold_threshold":  45,
-                "current_min":         36,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
+                "lookback_candles": 6,     # 24h — captures full slow-grind pattern
+                "oversold_threshold": 36,  # SUI 240m hit 32.9
+                "current_min": 34,
+                "min_jump": 2.5,           # SUI only had 3.1 max jump across 4h candles
+                "require_sustained": True,
+                "sustained_rise_mode": "net",  # net allows dip-then-higher (ETH pattern)
+                "hard_stop": True,
             }},
-            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
         ],
         "min_indicators_required": 2,
         "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-                "oversold_threshold":  45,
-                "current_min":         38,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
+            {"type": "rsi_overbought", "params": {"min_value": 54, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {
+                "band": "upper", "mode": "pct_b",
+                "max_pct_b": 0.88, "hard_stop": True,  # SUI was at 0.84 when base fired
             }},
-            # RSI overbought is the ONLY "too late" gate — not BB
-            {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
-            # Price vs EMA: wide allowance for post-crash EMA elevation
-            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-            # Volume: soft, no hard_stop
-            {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
-
-           # BB: lower band check only — confirms price was genuinely depressed
-            # (not a hard stop — just a confidence indicator)
+            {"type": "volume_spike", "params": {"min_ratio": 0.5, "max_ratio": 8.0}},
+            {"type": "price_vs_ema", "params": {
+                "ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 5.0,
+            }},
         ],
-        "min_entry_indicators_required": 4,
+        "min_entry_indicators_required": 3,
     },
-    # -------------------------------------------------------------------------
-    # V12: NO BB UPPER HARD STOP — use RSI overbought as the only "too late" gate
-    #
-    # The BB upper hard stop (pct_b > 0.85) is what killed SOL and HYPE. After
-    # a 10–15% crash recovery, price naturally pushes through the upper BB band
-    # because the BB bands are still compressed from the crash. This is normal
-    # and expected — it's not "overbought", it's "catching up to fair value".
-    #
-    # Replace the BB upper gate entirely with a RSI overbought check at a level
-    # that actually signals "this move is over" (RSI > 62 on 60m).
-    #
-    # For 60m entry RSI reversal: extend lookback_candles to 15 to reach back
-    # far enough to find the original oversold event across the 4h boundary.
-    # -------------------------------------------------------------------------
-    "p3_v1_not_sustainedt": {
-        **_SWING_BASE,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    8,
-                "oversold_threshold":  45,
-                "current_min":         36,
-                "min_jump":            3.0,
-                "require_sustained":   False,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-                "oversold_threshold":  45,
-                "current_min":         38,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            # RSI overbought is the ONLY "too late" gate — not BB
-            {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
-            # Price vs EMA: wide allowance for post-crash EMA elevation
-            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-            # Volume: soft, no hard_stop
-            {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
+   
+    # "p3_v1_not_sustainedt": {
+    #     **_SWING_BASE,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    8,
+    #             "oversold_threshold":  45,
+    #             "current_min":         36,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
+    #             "oversold_threshold":  45,
+    #             "current_min":         38,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   True,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         # RSI overbought is the ONLY "too late" gate — not BB
+    #         {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
+    #         # Price vs EMA: wide allowance for post-crash EMA elevation
+    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+    #         # Volume: soft, no hard_stop
+    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
 
-           # BB: lower band check only — confirms price was genuinely depressed
-            # (not a hard stop — just a confidence indicator)
-        ],
-        "min_entry_indicators_required": 4,
-    },
+    #        # BB: lower band check only — confirms price was genuinely depressed
+    #         # (not a hard stop — just a confidence indicator)
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    # },
 
     # -------------------------------------------------------------------------
     # V13: RAISED BB THRESHOLD + EXTENDED LOOKBACK
@@ -188,86 +309,86 @@ SWING_VARIANTS = {
     # Also: extend 60m rsi_reversal lookback to 15 candles (15 hours) to
     # reliably find the original crash event from across the 4h candle.
     # -------------------------------------------------------------------------
-    "p3_v2_notsustained_e": {
-        **_SWING_BASE,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    8,
-                "oversold_threshold":  45,
-                "current_min":         36,
-                "min_jump":            3.0,
-                "require_sustained":   False,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-                "oversold_threshold":  45,
-                "current_min":         38,
-                "min_jump":            3.0,
-                "require_sustained":   False,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            # RSI overbought is the ONLY "too late" gate — not BB
-            {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
-            # Price vs EMA: wide allowance for post-crash EMA elevation
-            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-            # Volume: soft, no hard_stop
-            {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
+    # "p3_v2_notsustained_e": {
+    #     **_SWING_BASE,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    8,
+    #             "oversold_threshold":  45,
+    #             "current_min":         36,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
+    #             "oversold_threshold":  45,
+    #             "current_min":         38,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         # RSI overbought is the ONLY "too late" gate — not BB
+    #         {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
+    #         # Price vs EMA: wide allowance for post-crash EMA elevation
+    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+    #         # Volume: soft, no hard_stop
+    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
 
-           # BB: lower band check only — confirms price was genuinely depressed
-            # (not a hard stop — just a confidence indicator)
-        ],
-        "min_entry_indicators_required": 4,
-    },
+    #        # BB: lower band check only — confirms price was genuinely depressed
+    #         # (not a hard stop — just a confidence indicator)
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    # },
 
     # -------------------------------------------------------------------------
     # V14: RSI-ONLY ENTRY GATE — the simplest possible version
     #
-    "p3_v3_bb_rsilower": {
-        **_SWING_BASE,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    8,
-                "oversold_threshold":  45,
-                "current_min":         36,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-                "oversold_threshold":  45,
-                "current_min":         38,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            # RSI overbought is the ONLY "too late" gate — not BB
-            {"type": "rsi_overbought", "params": {"min_value": 45, "hard_stop": True}},
-            # Price vs EMA: wide allowance for post-crash EMA elevation
-            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-            # Volume: soft, no hard_stop
-            {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1}},
+    # "p3_v3_bb_rsilower": {
+    #     **_SWING_BASE,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    8,
+    #             "oversold_threshold":  45,
+    #             "current_min":         36,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   True,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
+    #             "oversold_threshold":  45,
+    #             "current_min":         38,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   True,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         # RSI overbought is the ONLY "too late" gate — not BB
+    #         {"type": "rsi_overbought", "params": {"min_value": 45, "hard_stop": True}},
+    #         # Price vs EMA: wide allowance for post-crash EMA elevation
+    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+    #         # Volume: soft, no hard_stop
+    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1}},
 
-           # BB: lower band check only — confirms price was genuinely depressed
-            # (not a hard stop — just a confidence indicator)
-        ],
-        "min_entry_indicators_required": 4,
-    },
+    #        # BB: lower band check only — confirms price was genuinely depressed
+    #         # (not a hard stop — just a confidence indicator)
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    # },
 
     # -------------------------------------------------------------------------
     # V15: STAGGERED ENTRY WINDOW — two-phase design
@@ -286,44 +407,44 @@ SWING_VARIANTS = {
     # have a low current_min (confirms recent oversold on 60m) plus a BB that
     # is not yet extended (pct_b < 1.0 allows some band-walking).
     # -------------------------------------------------------------------------
-    "p3_v4_higherrsilevels": {
-        **_SWING_BASE,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    8,
-                "oversold_threshold":  48,
-                "current_min":         36,
-                "min_jump":            3.0,
-                "require_sustained":   False,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-                "oversold_threshold":  52,
-                "current_min":         38,
-                "min_jump":            3.0,
-                "require_sustained":   False,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            # RSI overbought is the ONLY "too late" gate — not BB
-            {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
-            # Price vs EMA: wide allowance for post-crash EMA elevation
-            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-            # Volume: soft, no hard_stop
-            {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
+    # "p3_v4_higherrsilevels": {
+    #     **_SWING_BASE,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    8,
+    #             "oversold_threshold":  48,
+    #             "current_min":         36,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
+    #             "oversold_threshold":  52,
+    #             "current_min":         38,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         # RSI overbought is the ONLY "too late" gate — not BB
+    #         {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
+    #         # Price vs EMA: wide allowance for post-crash EMA elevation
+    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+    #         # Volume: soft, no hard_stop
+    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
 
-           # BB: lower band check only — confirms price was genuinely depressed
-            # (not a hard stop — just a confidence indicator)
-        ],
-        "min_entry_indicators_required": 4,
-    },
+    #        # BB: lower band check only — confirms price was genuinely depressed
+    #         # (not a hard stop — just a confidence indicator)
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    # },
 
     # -------------------------------------------------------------------------
     # V16: SUI-SPECIFIC — fix the 4h trend gate for gradual recoveries
@@ -338,39 +459,45 @@ SWING_VARIANTS = {
     #
     # Entry: SUI doesn't have the BB problem so keep a normal BB gate.
     # -------------------------------------------------------------------------
-    "p3_v16_gradual_trend_recovery": {
-        **_SWING_BASE,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    10,
-                "oversold_threshold":  28,   # SUI hit 26.5
-                "current_min":         34,
-                "min_jump":            3.0,  # key change: accept a gradual rise
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",  # net mode handles the gradual grind
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    20,
-                "oversold_threshold":  30,
-                "current_min":         38,
-                "min_jump":            2.5,  # even lower — gradual recoveries have small per-candle jumps
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought",  "params": {"min_value": 60, "hard_stop": True}},
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 5.0}},
-            # Normal BB gate — SUI stayed well within band throughout
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.95, "hard_stop": True}},
-            {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-        ],
-        "min_entry_indicators_required": 3,
-    },
+    # "p3_v5_sustained_strict": {
+    #     **_SWING_BASE,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    8,
+    #             "oversold_threshold":  45,
+    #             "current_min":         36,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "strict",
+    #             "hard_stop":           True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
+    #             "oversold_threshold":  45,
+    #             "current_min":         38,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   False,
+    #             "sustained_rise_mode": "strict",
+    #             "hard_stop":           True,
+    #         }},
+    #         # RSI overbought is the ONLY "too late" gate — not BB
+    #         {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
+    #         # Price vs EMA: wide allowance for post-crash EMA elevation
+    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+    #         # Volume: soft, no hard_stop
+    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
+
+    #        # BB: lower band check only — confirms price was genuinely depressed
+    #         # (not a hard stop — just a confidence indicator)
+    #     ],
+    #     "min_entry_indicators_required": 4,
+    # },
+
 
     # -------------------------------------------------------------------------
     # V17: COMBINED — targets all four symbols simultaneously
@@ -385,43 +512,44 @@ SWING_VARIANTS = {
     # across the full dataset. It's slightly more permissive than baseline
     # but uses RSI structure as the quality gate rather than price indicators.
     # -------------------------------------------------------------------------
-    "p3_v17_unified_fix": {
-        **_SWING_BASE,
-        "min_signal_confidence": 76.0,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    8,
-                "oversold_threshold":  32,   # ETH fix: was 30, ETH hit 30.9
-                "current_min":         35,
-                "min_jump":            3.5,  # SUI fix: was 5.0, now accepts gradual recovery
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-            # No EMA slope. No vol spike. Both are post-crash lagging failures.
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    20,   # SOL fix: need to reach across 4h candle boundary
-                "oversold_threshold":  30,
-                "current_min":         38,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            # RSI OB is the primary "too late" gate — replaces BB for that purpose
-            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-            # BB upper: raised to 1.0 — only block if price is ABOVE the band (SOL/HYPE fix)
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 1.0, "hard_stop": True}},
-            # Volume: soft only
-            {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-        ],
-        "min_entry_indicators_required": 3,
-    },
+    # "p3_v17_unified_fix": {
+    #     **_SWING_BASE,
+    #     "min_signal_confidence": 76.0,
+    #     "trend_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    8,
+    #             "oversold_threshold":  32,   # ETH fix: was 30, ETH hit 30.9
+    #             "current_min":         35,
+    #             "min_jump":            3.5,  # SUI fix: was 5.0, now accepts gradual recovery
+    #             "require_sustained":   True,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
+    #         # No EMA slope. No vol spike. Both are post-crash lagging failures.
+    #     ],
+    #     "min_indicators_required": 2,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum", "params": {
+    #             "lookback_candles":    20,   # SOL fix: need to reach across 4h candle boundary
+    #             "oversold_threshold":  30,
+    #             "current_min":         38,
+    #             "min_jump":            3.0,
+    #             "require_sustained":   True,
+    #             "sustained_rise_mode": "net",
+    #             "hard_stop":           True,
+    #         }},
+    #         # RSI OB is the primary "too late" gate — replaces BB for that purpose
+    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
+    #         # BB upper: raised to 1.0 — only block if price is ABOVE the band (SOL/HYPE fix)
+    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 1.0, "hard_stop": True}},
+    #         # Volume: soft only
+    #         {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+    #     ],
+    #     "min_entry_indicators_required": 3,
+    # },
+
 }
 
 

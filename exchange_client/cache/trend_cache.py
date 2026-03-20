@@ -1537,7 +1537,13 @@ class TrendCache:
                     values["current_rsi"] = float(current_rsi)
                     
                     #check momentum
-                    rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    if require_sustained == True:
+                        #If require sustained, look over last 2 candle gaps
+                        rsi_momentum, rsi_direction  = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    else:
+                        #else just check previous jump
+                        rsi_momentum, rsi_direction  = self._get_rsi_momentum(symbol, timeframe, lookback=1)
+                        
                     values["rsi_direction"] = rsi_direction
                     values["rsi_momentum"] = float(rsi_momentum)
 

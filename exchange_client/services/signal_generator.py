@@ -698,6 +698,7 @@ class SignalGenerator:
 
         else:
             # AI_LIVE: AI controls live execution
+            confidence_pct = ai_result.confidence * 100.0
             live_decision = (ai_result.decision == EntryDecision.ENTER)
             mode_label = "AI_LIVE"
 
@@ -719,10 +720,6 @@ class SignalGenerator:
             )
             return None
 
-        # Map AI result onto a TradingSignal
-        # AI confidence (0.0–1.0) scaled to match existing confidence_pct range (0–100)
-        confidence_pct = ai_result.confidence * 100.0
-
         if confidence_pct >= 85:
             strength = SignalStrength.STRONG
         elif confidence_pct >= 70:
@@ -739,12 +736,12 @@ class SignalGenerator:
         # In shadow mode we keep profile defaults for live sizing
         tp_price = ai_result.suggested_take_profit if not shadow_mode else None
         sl_price = ai_result.suggested_stop_loss   if not shadow_mode else None
-        position_size_scalar = (
-            ai_result.suggested_position_size_pct / 100.0
-            if not shadow_mode and ai_result.suggested_position_size_pct
-            else 1.0
-        )
-
+        # position_size_scalar = (
+        #     ai_result.suggested_position_size_pct / 100.0
+        #     if not shadow_mode and ai_result.suggested_position_size_pct
+        #     else 1.0
+        # )
+        position_size_scalar= 1.0
         validation.score = confidence_pct
         validation.overall_passed = True
         validation.human_readable = (
