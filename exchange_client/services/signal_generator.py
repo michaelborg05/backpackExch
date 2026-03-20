@@ -498,7 +498,7 @@ class SignalGenerator:
         Shadow mode (default): rules decision controls live execution.
         AI_LIVE mode: AI decision controls live execution.
         """
-        shadow_mode = getattr(self.profile, 'ai_shadow_mode', True)
+        shadow_mode = getattr(self.profile, 'ai_shadow_mode', False)
 
         # Build gate context from what we already have in cache
         trend_60m = self.trend_cache.get(symbol, self.trend_timeframe)
