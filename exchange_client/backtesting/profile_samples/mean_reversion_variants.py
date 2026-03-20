@@ -22,13 +22,13 @@ _MEAN_REV_BASE = {
     "max_position_hours": 8,
     "use_market_regime_filter": False,
     "entry_indicators": [
-        {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 3, "oversold_threshold": 32, "current_min": 38, "min_jump": 3.0, "require_sustained": True, "hard_stop": True}},
-        {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.7, "max_gap_pct": -8.0}},
+        {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 6, "oversold_threshold": 35, "current_min": 38, "min_jump": 4.0, "require_sustained": True, "hard_stop": True}},
         {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
         {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 5.0}},
-        {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "breach"}},
+        {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "breach","lookback_candles": 6}},
         {"type": "rsi_overbought",             "params": {"min_value": 65}},
-        {"type": "reversal_candle",            "params": {"pattern": "hammer", "min_body_pct": 0.08}},
+        {"type": "reversal_candle",            "params": {"pattern": "hammer", "min_body_pct": 0.08,"max_drop_from_close_pct": 0.5}},
+        {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -8.0}},
     ],
     "min_entry_indicators_required": 4,
 }
@@ -46,16 +46,16 @@ MEAN_REV_VARIANTS = {
     # still fired because only 4/7 were needed. If price isn't near the lower
     # BB, it's not a mean reversion setup — it's just a mid-band dip.
     # -------------------------------------------------------------------------
-    "mr_v1_bb_breach_hardstop": {
+    "mr_v1__higherrsi": {
         **_MEAN_REV_BASE,
         "entry_indicators": [
-            {"type": "rsi_reversal_momentum",    "params": {"lookback_candles": 3, "oversold_threshold": 32, "current_min": 38, "min_jump": 3.0, "require_sustained": True, "hard_stop": True}},
-            {"type": "price_below_vwap",         "params": {"min_gap_pct": -0.7, "max_gap_pct": -8.0}},
-            {"type": "price_extended_below_ema", "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
-            {"type": "volume_spike",             "params": {"min_ratio": 1.1, "max_ratio": 5.0}},
-            {"type": "bollinger_bands",          "params": {"band": "lower", "mode": "breach", "hard_stop": True}},  # NOW HARD STOP
-            {"type": "rsi_overbought",           "params": {"min_value": 65}},
-            {"type": "reversal_candle",          "params": {"pattern": "hammer", "min_body_pct": 0.08}},
+            {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 6, "oversold_threshold": 38, "current_min": 35, "min_jump": 4.0, "require_sustained": True, "hard_stop": True}},
+            {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
+            {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 5.0}},
+            {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "breach","lookback_candles": 6}},
+            {"type": "rsi_overbought",             "params": {"min_value": 65}},
+            {"type": "reversal_candle",            "params": {"pattern": "hammer", "min_body_pct": 0.08,"max_drop_from_close_pct": 0.5}},
+            {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -8.0}},
         ],
         "min_entry_indicators_required": 4,
     },
@@ -65,16 +65,16 @@ MEAN_REV_VARIANTS = {
     # Rationale: pct_b < 0.15 means price in bottom 15% of band — more
     # reliable than a binary "touched or not" breach check.
     # -------------------------------------------------------------------------
-    "mr_v2_bb_pct_b": {
+    "mr_smller_jump": {
         **_MEAN_REV_BASE,
         "entry_indicators": [
-            {"type": "rsi_reversal_momentum",    "params": {"lookback_candles": 3, "oversold_threshold": 32, "current_min": 38, "min_jump": 3.0, "require_sustained": True, "hard_stop": True}},
-            {"type": "price_below_vwap",         "params": {"min_gap_pct": -0.7, "max_gap_pct": -8.0}},
-            {"type": "price_extended_below_ema", "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
-            {"type": "volume_spike",             "params": {"min_ratio": 1.1, "max_ratio": 5.0}},
-            {"type": "bollinger_bands",          "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.15, "hard_stop": True}},  # pct_b instead of breach
-            {"type": "rsi_overbought",           "params": {"min_value": 65}},
-            {"type": "reversal_candle",          "params": {"pattern": "hammer", "min_body_pct": 0.08}},
+            {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 6, "oversold_threshold": 38, "current_min": 35, "min_jump": 3.0, "require_sustained": True, "hard_stop": True}},
+            {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
+            {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 5.0}},
+            {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "breach","lookback_candles": 6}},
+            {"type": "rsi_overbought",             "params": {"min_value": 65}},
+            {"type": "reversal_candle",            "params": {"pattern": "hammer", "min_body_pct": 0.08,"max_drop_from_close_pct": 0.5}},
+            {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -8.0}},
         ],
         "min_entry_indicators_required": 4,
     },
