@@ -7,11 +7,9 @@ TO DO
 #ability to add a deposit/withdrawal in the system to update snapshotdata and not let it trigger a circuit breaker
 smarter TP/SL - Different per token. Maybe variable based on market
 # add backtest to web UI
-#review choppy conditions logic - When EMAs are close together it classes as choppy but doesnt take into acct the slope. I.e. If ema20 was way below and is now climbing, once it gets close it will say choppy when it actually is in recovery
-#Review mean reversion profile. Need to be able to catch higher falls. I.e. Based on percent or something other than just a hard rsi
 #build solution to add a new profile cleanly
-# add an audit log on indicators table so i can trace back to a change in behaviour to a specific edit
-# clean batch files of passwords and cycle all API keys before going public
+#Ability to add multiple profiles on same acct. Does it cause issues? How to only display balances 1 per acct if multiple profiles using same acct
+
 
 No need
  # split into separate modules so i can migrate to Azure
@@ -90,3 +88,8 @@ Improvement: The "Mean Reversion" Check
 # add generic profile names and adda profile desc which shows on alerts and msgs so i can easily change what the profile is doing
 # anothr possible idea - Post-TP Re-Entry Protection - yaml# After TP exit, block re-entry on same symbol for 2 hours - 
 # move TP/SL limits to database
+#review choppy conditions logic - When EMAs are close together it classes as choppy but doesnt take into acct the slope. I.e. If ema20 was way below and is now climbing, once it gets close it will say choppy when it actually is in recovery
+#Review mean reversion profile. Need to be able to catch higher falls. I.e. Based on percent or something other than just a hard rsi
+# add an audit log on indicators table so i can trace back to a change in behaviour to a specific edit
+# clean batch files of passwords and cycle all API keys before going public
+# in position summary in Telegram, have small indicator to show if tsl armed

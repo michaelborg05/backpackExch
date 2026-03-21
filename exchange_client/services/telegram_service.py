@@ -663,7 +663,7 @@ class TelegramService:
                     price = price_cache.get_price(symbol)
                     price = float(price)
                     entry_price = float(position.entry_price)
-                    msg += f"{symbol}: ${entry_price}->${price}"
+                    msg += f"{symbol}: ${entry_price}->${price}{"*" if position.trailing_stop_armed else ""}"
                     # Calculate current profit percentage
                     profit_pct = ((price - entry_price) / entry_price) * 100
                     msg += f" ({profit_pct:.2f}%)\n"
