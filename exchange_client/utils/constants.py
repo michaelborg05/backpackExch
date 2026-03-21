@@ -78,7 +78,10 @@ class TradeReason(str, enum.Enum):
     API = "API"
     TREND_INVALIDATION = "TREND_INVALIDATION"
     STALE_POSITION = "STALE_POSITION"
-    
+    RULES_SIGNAL = "RULES_SIGNAL"
+    AI_SIGNAL = "AI_SIGNAL"
+
+
 class PositionCloseReason(str, enum.Enum):
     """Reasons for position closure"""
     TAKE_PROFIT = "TAKE_PROFIT"
@@ -153,6 +156,10 @@ class StrategyType(Enum):
     TREND_FOLLOWING = "trend_following"
     MEAN_REVERSION = "mean_reversion"
     RANGE_TRADING = "range_trading"
-    AI_AGENT = "ai_agent"
 
+
+class TradingType(Enum):
+    AI_LIVE = "ai_live"
+    RULES_LIVE = "rules_live"
+    SHADOW = "shadow"
 

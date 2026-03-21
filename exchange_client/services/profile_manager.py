@@ -3,7 +3,7 @@ import os
 import yaml
 from typing import Dict, List, Optional
 from models.trading_profile import TradingProfile
-from utils.constants import StrategyType
+from utils.constants import StrategyType, TradingType
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_PROFILE_PATH = BASE_DIR / "config" / "trading_profiles.yaml"
@@ -64,6 +64,11 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         raise RuntimeError(f"Invalid Strategy Type '{cfg.get('strategy_type')}'")
 
     try:
+        trading_type = TradingType(cfg.get("trading_type", "rules_live"))
+    except Exception:
+        raise RuntimeError(f"Invalid Trading Type '{cfg.get('trading_type')}'")
+
+    try:
         profile_id = int(cfg.get("id"))
     except Exception:
         raise RuntimeError(f"Profile id not found''")
@@ -106,6 +111,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         display_name=display_name,
         api_key=api_key,
         secret=secret,
+        trading_type=trading_type,
         strategy_type=strategy_type,
         # Position sizing
         default_order_size_usdc=float(cfg.get("default_order_size_usdc", 100)),
@@ -277,6 +283,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
         cfg = {
             "id" : row.id,
             "display_name": row.display_name,
+            "trading_type": row.trading_type,
             "strategy_type": row.strategy_type,
             # Position sizing
             "default_order_size_usdc": float(row.default_order_size_usdc or 100),

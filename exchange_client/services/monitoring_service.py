@@ -328,8 +328,9 @@ class MonitoringService:
                 #get open orders from DB
                 open_orders = get_active_orders(db, profile.name)
 
+                trading = TradingService(profile)
+                
                 for order in open_orders:
-                    trading = TradingService(profile)
                     order_response = trading.process_limit_order(order=order, position_id=order.position_id)
                     
                     if order_response and order_response.status == OrderStatus.FILLED:

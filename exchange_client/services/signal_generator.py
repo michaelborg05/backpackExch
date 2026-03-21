@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import Enum
 import time
 from utils.logging import log_manager
-from utils.constants import TradeSide, StrategyType
+from utils.constants import TradeSide, StrategyType, TradingType, TradeReason
 from cache.trend_cache import get_trend_cache
 from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
@@ -48,6 +48,7 @@ class SignalGenerator:
 
         # NEW: Strategy type detection
         self.strategy_type = getattr(profile, 'strategy_type', StrategyType.TREND_FOLLOWING)
+        self.trading_type = getattr(profile, 'trading_type', TradingType.RULES_LIVE)
 
         # Signal generation settings from profile
         self.trading_timeframe = getattr(profile, 'signal_timeframe', '15')
@@ -239,9 +240,8 @@ class SignalGenerator:
             reasons.append(f"✅ Trend filter not applied")
             confidence_score += self.trend_weight
 
-        # 5. ENTRY FILTER (Execution Timeframe)
-        # ── AI_AGENT: bypass indicator entry filter, call agent instead ──────
-        if self.strategy_type == StrategyType.AI_AGENT:
+        # ── if AI live or in Shadow mode, call ai_agent_signal and bypass the rest of the generate_signal function ──────
+        if self.trading_type in (TradingType.AI_LIVE, TradingType.SHADOW):
             return self._generate_ai_agent_signal(
                 symbol=symbol,
                 current_price=current_price,
@@ -252,6 +252,7 @@ class SignalGenerator:
                 indicators=indicators,
             )
 
+        # 5. ENTRY FILTER (Execution Timeframe)
         if self.use_entry_filter:
             entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
             indicators['entry_filter'] = entry_check
@@ -441,11 +442,14 @@ class SignalGenerator:
                 position_size_scalar = 1.0
                 reasons.append("Scalar override back to 1.0")
 
+        trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
+
         # Create signal
         signal = TradingSignal(
             symbol=symbol,
             action=TradeSide.BUY,
             strength=strength,
+            source=trade_source,
             confidence=confidence_pct,
             timeframe=self.trading_timeframe,
             trend_timeframe=self.trend_timeframe,
@@ -486,7 +490,7 @@ class SignalGenerator:
         indicators: dict,
     ) -> Optional[TradingSignal]:
         """
-        Called instead of the normal entry-filter path when strategy_type == AI_AGENT.
+        Called instead of the normal entry-filter path when trading_type  is AI_LIVE or SHADOW.
 
         The 60m trend gate has already passed at this point. We hand off to
         AISignalHandler which:
@@ -498,7 +502,6 @@ class SignalGenerator:
         Shadow mode (default): rules decision controls live execution.
         AI_LIVE mode: AI decision controls live execution.
         """
-        shadow_mode = getattr(self.profile, 'ai_shadow_mode', False)
 
         # Build gate context from what we already have in cache
         trend_60m = self.trend_cache.get(symbol, self.trend_timeframe)
@@ -562,6 +565,7 @@ class SignalGenerator:
             entry_timeframe=self.entry_timeframe,
             gate_data=gate_data,
             rules_would_enter=rules_would_enter,
+            signal_source=self.trading_type.value,
         )
 
         if ai_result is None:
@@ -571,10 +575,9 @@ class SignalGenerator:
         from services.ai_signal_handler import EntryDecision
 
         # Determine which decision controls live execution
-        if shadow_mode:
+        if self.trading_type == TradingType.SHADOW:
             # Shadow: rules control live, AI is paper only
             live_decision = rules_would_enter
-            mode_label = "SHADOW"
 
             if rules_would_enter: 
                 #Add regular checks for entry filter here for now while in shadow mode
@@ -618,7 +621,7 @@ class SignalGenerator:
                     reasons.append(f"✅ ATR: {atr_reason}")
                 
                 # 8. NOT OVERBOUGHT (safety check - different for each strategy)
-                if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING, StrategyType.AI_AGENT):
+                if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
                     overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
                     indicators['overbought'] = overbought_check
                     ob_check = IndicatorResult(
@@ -700,10 +703,9 @@ class SignalGenerator:
             # AI_LIVE: AI controls live execution
             confidence_pct = ai_result.confidence * 100.0
             live_decision = (ai_result.decision == EntryDecision.ENTER)
-            mode_label = "AI_LIVE"
 
         self.logger.info(
-            f"[AI_AGENT/{mode_label}] {symbol} | "
+            f"[AI_AGENT/{self.trading_type.value}] {symbol} | "
             f"AI={ai_result.decision.value} (conf={ai_result.confidence:.0%}) | "
             f"Rules={'ENTER' if rules_would_enter else 'SKIP'} | "
             f"Live={'ENTER' if live_decision else 'SKIP'} | "
@@ -727,18 +729,18 @@ class SignalGenerator:
         else:
             strength = SignalStrength.WEAK
 
-        reasons.append(f"🤖 AI Agent [{mode_label}]: {ai_result.reasoning[:120]}")
+        reasons.append(f"🤖 AI Agent [{self.trading_type.value}]: {ai_result.reasoning[:120]}")
         if ai_result.risk_flags:
             reasons.append(f"⚠️  Risk flags: {', '.join(ai_result.risk_flags)}")
         reasons.append(f"Score {confidence_pct:.1f}% ({strength.value})")
 
         # AI-provided TP/SL override profile defaults when in AI_LIVE mode
         # In shadow mode we keep profile defaults for live sizing
-        tp_price = ai_result.suggested_take_profit if not shadow_mode else None
-        sl_price = ai_result.suggested_stop_loss   if not shadow_mode else None
+        tp_price = ai_result.suggested_take_profit if self.trading_type == TradingType.AI_LIVE else None
+        sl_price = ai_result.suggested_stop_loss   if self.trading_type == TradingType.AI_LIVE else None
         # position_size_scalar = (
         #     ai_result.suggested_position_size_pct / 100.0
-        #     if not shadow_mode and ai_result.suggested_position_size_pct
+        #     if self.trading_type == TradingType.AI_LIVE and ai_result.suggested_position_size_pct
         #     else 1.0
         # )
         position_size_scalar= 1.0
@@ -747,7 +749,7 @@ class SignalGenerator:
         validation.human_readable = (
             f"🤖 AI {ai_result.decision.value} | "
             f"conf={ai_result.confidence:.0%} | "
-            f"{'shadow' if shadow_mode else 'live'}"
+            f"{'shadow' if self.trading_type == TradingType.SHADOW else 'live'}"
         )
 
         signal = TradingSignal(

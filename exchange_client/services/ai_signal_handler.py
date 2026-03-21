@@ -217,6 +217,7 @@ class AISignalHandler:
         entry_timeframe: str,
         gate_data: dict,            # Already-computed 60m gate values
         rules_would_enter: bool,    # Parallel rules decision for comparison
+        signal_source: str = None,
     ) -> Tuple[Optional[AIEntryResult], Optional[int]]:
         """
         Main entry point from SignalGenerator.
@@ -247,6 +248,7 @@ class AISignalHandler:
             rules_would_enter=rules_would_enter,
             current_price=current_price,
             context_snapshot=self._make_snapshot(ctx),
+            signal_source=signal_source,
         )
 
         return ai_result, log_id
@@ -552,6 +554,7 @@ Respond with exactly this JSON:
         rules_would_enter: bool,
         current_price: float,
         context_snapshot: dict,
+        signal_source: str,
     ) -> Optional[int]:
         """Insert shadow comparison row into ai_signal_log. Returns row id."""
         try:
@@ -562,7 +565,7 @@ Respond with exactly this JSON:
                 row = AISignalLog(
                     pair=symbol,
                     profile_name=profile_name,
-                    signal_source="SHADOW",
+                    signal_source=signal_source,
                     candle_time=candle_time,
                     timeframe="15",
                     gate_60m_passed=True,

@@ -2,7 +2,7 @@
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, CheckConstraint, Boolean, Index, JSON, Float, UniqueConstraint, Text, text
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
-from utils.constants import TradeReason, PositionCloseReason, StrategyType
+from utils.constants import TradeReason, PositionCloseReason, StrategyType, TradingType
 from sqlalchemy.dialects.postgresql import JSONB
 
 
@@ -32,7 +32,8 @@ class TradingProfileDB(Base):
     max_open_positions = Column(Numeric, nullable=True)
     max_portfolio_exposure_pct = Column(Numeric, nullable=True)
 
-    strategy_type = Column(String, default="trend_following")
+    trading_type =  Column(String, server_default="rules_live")
+    strategy_type = Column(String, default=StrategyType.TREND_FOLLOWING.value)
     
     # Timing & Signal Generation
     signal_timeframe = Column(String, default="15")
@@ -729,9 +730,9 @@ class AIPrompt(Base):
     strategy_type = Column(String(64),  nullable=True)   # None = applies to all strategies
     profile_id    = Column(Integer, ForeignKey("trading_profiles.id", ondelete="SET NULL"), nullable=True)
     system_prompt = Column(Text, nullable=False)
-    is_active     = Column(Boolean, nullable=False, default=True)
-    is_default    = Column(Boolean, nullable=False, default=False)
-    version       = Column(Integer, nullable=False, default=1)
+    is_active     = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    is_default    = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    version       = Column(Integer, nullable=False, server_default=text("1"))
     notes         = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -778,8 +779,8 @@ class ConfigAuditLog(Base):
 
     changed_by  = Column(String(64),  nullable=False, default="web_ui")
 
-    before      = Column(JSON, nullable=True)           # Snapshot of state BEFORE change
-    after       = Column(JSON, nullable=True)           # Snapshot of state AFTER change
+    before      = Column(JSONB, nullable=True)           # Snapshot of state BEFORE change
+    after       = Column(JSONB, nullable=True)           # Snapshot of state AFTER change
 
     __table_args__ = (
         Index('ix_audit_changed_at',   'changed_at'),

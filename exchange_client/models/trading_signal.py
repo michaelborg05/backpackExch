@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List, Dict, Tuple
 from models.signal_validation import SignalValidationResult
+from utils.constants import TradeReason
 
 class SignalStrength(Enum):
     """Signal confidence levels"""
@@ -15,6 +16,7 @@ class TradingSignal:
     symbol: str
     action: str  # "BUY", "SELL", "HOLD"
     strength: SignalStrength
+    source: TradeReason
     confidence: float  # 0-100
     reasons: List[str]  # Why this signal was generated
     indicators: Dict[str, any]  # Raw indicator values
