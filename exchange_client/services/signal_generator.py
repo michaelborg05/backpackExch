@@ -751,11 +751,13 @@ class SignalGenerator:
             f"conf={ai_result.confidence:.0%} | "
             f"{'shadow' if self.trading_type == TradingType.SHADOW else 'live'}"
         )
+        trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
 
         signal = TradingSignal(
             symbol=symbol,
             action=TradeSide.BUY,
             strength=strength,
+            source=trade_source,
             confidence=confidence_pct,
             timeframe=self.trading_timeframe,
             trend_timeframe=self.trend_timeframe,
