@@ -44,6 +44,15 @@ class BalanceCache:
                 return profile_balances.get(asset)
             return None
 
+    def get_account_balances(self, account_id: int, profile_manager) -> Optional[Dict]:
+        """Return balance for ONE profile per account (avoids double-counting)"""
+        profiles = profile_manager.get_profiles_for_account(account_id)
+        if not profiles:
+            return None
+        # Use the first profile's cached balance as the account balance
+        canonical = profiles[0]
+        return self.get_profile_balances(canonical.name)
+    
     def get_available_balance(self, profile_name: str, asset: str) -> Optional[Decimal]:
         """Get available balance for an asset in a specific profile"""
         self.logger.debug(f"Retrieving available balance for asset '{asset}' in profile '{profile_name}'")

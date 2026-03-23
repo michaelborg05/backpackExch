@@ -60,6 +60,13 @@ class TradingProfileDB(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    account_id = Column(
+        Integer,
+        ForeignKey("exchange_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    account = relationship("ExchangeAccount", back_populates="profiles")
 
 class IndicatorDB(Base):
     __tablename__ = "indicators"
@@ -794,3 +801,16 @@ class ConfigAuditLog(Base):
             f"action={self.action!r} entity={self.entity_name!r} "
             f"at={self.changed_at}>"
         )
+
+class ExchangeAccount(Base):
+    __tablename__ = "exchange_accounts"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)     # e.g. "main_account"
+    display_name = Column(String, nullable=True)
+    api_key = Column(String, nullable=False)               # Encrypted
+    secret = Column(String, nullable=False)                # Encrypted
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    profiles = relationship("TradingProfileDB", back_populates="account")

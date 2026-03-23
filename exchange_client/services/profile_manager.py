@@ -46,7 +46,22 @@ class ProfileManager:
         """
         self._profiles = new_profiles
 
+    def get_profiles_for_account(self, account_id: int) -> List[TradingProfile]:
+        """Get all active profiles sharing the same exchange account"""
+        return [
+            p for p in self._profiles.values()
+            if getattr(p, 'account_id', None) == account_id
+        ]
 
+    def get_canonical_profile_for_account(self, account_id: int) -> Optional[TradingProfile]:
+        """
+        Return the single 'canonical' profile for balance reporting.
+        Uses the profile with the lowest id to ensure consistency.
+        """
+        profiles = self.get_profiles_for_account(account_id)
+        if not profiles:
+            return None
+        return min(profiles, key=lambda p: p.id)
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -57,7 +72,6 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
     `cfg` is a plain dict that mirrors the YAML structure.
     """
     display_name = cfg.get("display_name", name)
-
     try:
         strategy_type = StrategyType(cfg.get("strategy_type", "trend_following"))
     except Exception:
@@ -109,6 +123,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         id=profile_id,
         name=name,
         display_name=display_name,
+        account_id=cfg.get("account_id"),
         api_key=api_key,
         secret=secret,
         trading_type=trading_type,
@@ -283,6 +298,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
         cfg = {
             "id" : row.id,
             "display_name": row.display_name,
+            "account_id": row.account_id, 
             "trading_type": row.trading_type,
             "strategy_type": row.strategy_type,
             # Position sizing

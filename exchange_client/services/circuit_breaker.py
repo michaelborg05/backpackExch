@@ -7,6 +7,7 @@ from cache.balance_cache import get_balance_cache
 from cache.portfolio_cache import get_portfolio_cache
 from services.telegram_service import get_telegram
 from utils.constants import MessagePriority
+from services.profile_manager import get_profile_manager
 from db.utils import get_db_session
 from db.crud import (
     get_circuit_breaker_config,
@@ -139,7 +140,6 @@ class CircuitBreakerService:
         Monitor all profiles and trigger circuit breakers if needed
         Also updates balance snapshots periodically
         """
-        from services.profile_manager import get_profile_manager
         
         profile_manager = get_profile_manager()
         if not profile_manager:
@@ -375,7 +375,6 @@ class CircuitBreakerService:
         results = {}
         
         with get_db_session() as db:
-            from services.profile_manager import get_profile_manager
             profile_manager = get_profile_manager()
             
             if not profile_manager:
@@ -460,6 +459,15 @@ class CircuitBreakerService:
                 "circuit_breaker_active": active_breaker is not None,
                 "hours_remaining": round(hours_remaining, 2) if hours_remaining else "N/A"
             }
+
+    def _get_cb_key(self, profile_name: str) -> str:
+        """Get the key to use for circuit breaker lookups.
+        Shared accounts use account_id so limits apply account-wide."""
+        pm = get_profile_manager()
+        profile = pm.get_profile(profile_name)
+        if profile and getattr(profile, 'account_id', None):
+            return f"account_{profile.account_id}"
+        return profile_name
 
     def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
         """

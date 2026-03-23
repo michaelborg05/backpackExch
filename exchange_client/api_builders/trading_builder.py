@@ -121,9 +121,12 @@ class TradingService:
                 # Find open limit sell orders
                 open_sell_orders = [
                     o for o in open_orders
-                    if o.side == Side.ASK and o.order_type == OrderType.LIMIT
+                    if o.side == Side.ASK
+                    and o.order_type == OrderType.LIMIT
+                    and str(o.id) in {str(db_order.exchange_order_id) 
+                                    for db_order in self._get_profile_orders(order.symbol)}
                 ]
-                
+
                 if open_sell_orders:
                     self.logger.info(f"Found {len(open_sell_orders)} open limit sell order(s) for {order.symbol}")
                     
@@ -253,7 +256,17 @@ class TradingService:
         
         return order
 
-
+    def _get_profile_orders(self, symbol: str) -> List:
+        """Only return exchange order IDs this profile created"""
+        from db.utils import get_db_session
+        
+        with get_db_session() as db:
+            return db.query(Order).filter(
+                Order.profile_name == self.profile.name,
+                Order.symbol == symbol,
+                Order.status.in_(["New", "PartiallyFilled"])
+            ).all()
+        
     def _get_order_price(
         self, 
         order: OrderExecuteRequest, 
