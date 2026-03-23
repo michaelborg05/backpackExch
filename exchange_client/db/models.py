@@ -53,6 +53,11 @@ class TradingProfileDB(Base):
     min_indicators_required = Column(Integer, default=3)
     min_entry_indicators_required = Column(Integer, default=6)
     
+    max_position_hours = Column(Integer, nullable=True)
+    use_trend_invalidation_exit = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    trend_invalidation_indicators = Column(String(24),  nullable=False, server_default=text("'entry'"))
+    min_position_age_for_trend_check = Column(Integer, nullable=True)
+
     # Relationship to Indicators
     indicators = relationship("IndicatorDB", back_populates="profile", cascade="all, delete-orphan")
     # Metadata

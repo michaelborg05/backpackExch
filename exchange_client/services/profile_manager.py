@@ -333,6 +333,11 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "min_volume_ratio": row.min_volume_ratio or 1.5,
             # Market regime
             "use_market_regime_filter": bool(row.use_market_regime_filter),
+            "max_position_hours": row.max_position_hours or None,
+            "use_trend_invalidation_exit": bool(row.use_trend_invalidation_exit),
+            "trend_invalidation_indicators": row.trend_invalidation_indicators or "entry",            
+            "min_position_age_for_trend_check": row.min_position_age_for_trend_check or 120,
+            
         }
         from utils.db_secrets import resolve_secret
         # Resolve API credentials — stored encrypted in DB, pulled from env as fallback

@@ -9,7 +9,8 @@ smarter TP/SL - Different per token. Maybe variable based on market
 # add backtest to web UI
 #build solution to add a new profile cleanly
 #Ability to add multiple profiles on same acct. Does it cause issues? How to only display balances 1 per acct if multiple profiles using same acct
-
+#clean up circuit breaker
+    - Reporting percent from start but triggering from highest - I.e. Reported CB trigger 1.5% loss even though loss limit was 3%. It was looking at highest price for period instead of cb_trigger amount. Would nee dto 
 
 No need
  # split into separate modules so i can migrate to Azure

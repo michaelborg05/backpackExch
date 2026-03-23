@@ -10,15 +10,16 @@ from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREN
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default=21             ,
+parser.add_argument("--days",    type=int, default=3             ,
                     help="Lookback window in days (default: 7)")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr"],
+parser.add_argument("--set",     default="mr", choices=["all", "range", "mr"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=True,
+parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
-parser.add_argument("--csv",     default=None,
+#parser.add_argument("--csv",     default="/home/michael/Downloads/mr.csv",
+parser.add_argument("--csv",     default="",
                     help="Export all trades to CSV. Filename is auto-suffixed per set/symbol.")
 parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
