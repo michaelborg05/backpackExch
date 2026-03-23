@@ -54,6 +54,9 @@ class PositionManager:
             should_exit, reason = self._check_trend_invalidation(
                 position, profile, current_price
             )
+            self.logger.info(
+                f"Trend Position status: {position.symbol} - should_exit {should_exit} - {reason} "
+            )
             if should_exit:
                 return True, f"TREND_INVALIDATION: {reason}"
         
@@ -61,6 +64,9 @@ class PositionManager:
         if self._should_use_time_exits(profile):
             should_exit, reason = self._check_stale_position(
                 position, profile, current_price
+            )
+            self.logger.info(
+                f"Stale Position status: {position.symbol} - should_exit {should_exit} - {reason} "
             )
             if should_exit:
                 return True, f"STALE_POSITION: {reason}"
