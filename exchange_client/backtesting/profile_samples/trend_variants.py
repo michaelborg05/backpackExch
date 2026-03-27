@@ -52,18 +52,31 @@ _TF_BASE = {
     "signal_cooldown_seconds": 900,
     "min_signal_confidence": 70.0,
     "min_volume_ratio": 1.1,
-    "use_trend_filter": False,
+    "use_trend_filter": True,
     "trend_timeframe": "60",
     "use_entry_filter": True,
     "max_position_hours": 12,
-    "use_market_regime_filter": False,
-}
+    "use_market_regime_filter": True,
+    "trend_indicators": [
+        {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01,"hard_stop": True}},
+        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":-0.05, "max_pct_b": 0.95,"hard_stop": True}},
+        {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 60}},
+        {"type": "rsi_overbought",  "params": {"min_value": 68, "hard_stop": True}},
+    ],
+    "min_indicators_required": 3,
+    "entry_indicators": [
+        {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
+        {"type": "reversal_candle", "params": {"pattern": "hammer", "min_body_pct": 0.08, "max_drop_from_close_pct": 0.5}},
+        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.65}},
+        {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 57,"use_momentum": True, "early_threshold":45, "hard_stop": True}},
+#        {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising",      "min_slope_pct": 0.02}},
+#        {"type": "ema_slope",       "params": {"ema": 50, "direction": "not_falling", "min_slope_pct": 0.01}},
+#        {"type": "rsi_reversal_momentum",   "params": {"lookback_candles": 3, "oversold_threshold": 42, "current_min": 45, "min_jump": 3, "require_sustained": False, "hard_stop": True}},
+        {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
+        {"type": "price_vs_vwap",   "params": {}},
+    ],
+    "min_entry_indicators_required": 5,
 
-_TF_NO_TREND_BASE = {
-    **_TF_BASE,
-    "use_trend_filter": False,
-    "min_signal_confidence": 70.0,
-    "min_volume_ratio": 1.1,
 }
 
 TREND_VARIANTS = {
@@ -73,28 +86,6 @@ TREND_VARIANTS = {
     # -------------------------------------------------------------------------
     "tf_baseline_default": {
         **_TF_BASE,
-        "entry_indicators": [
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising",      "min_slope_pct": 0.02}},
-            {"type": "ema_slope",       "params": {"ema": 50, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 54, "use_momentum": True, "early_threshold": 40, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 70, "hard_stop": True}},
-            {"type": "price_vs_vwap",   "params": {}},
-        ],
-        "min_entry_indicators_required": 5,
-    },
-
-    "tf_baseline_no_trend": {
-        **_TF_NO_TREND_BASE,
-        "entry_indicators": [
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-            {"type": "reversal_candle", "params": {"pattern": "hammer", "min_body_pct": 0.08}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.65}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 57, "use_momentum": True, "early_threshold": 45, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
-            {"type": "price_vs_vwap",   "params": {}},
-        ],
-        "min_entry_indicators_required": 5,
     },
 
     # -------------------------------------------------------------------------
@@ -105,71 +96,83 @@ TREND_VARIANTS = {
     # (RSI=44.5) with pct_b=0.99 and price just above EMA.
     # Trade-off: fires in mediocre 40-50 RSI chop too. Backtest required.
     # -------------------------------------------------------------------------
-    "tf_v1_engulfing_candle": {
-        **_TF_BASE,
-        "entry_indicators": [
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-            {"type": "reversal_candle", "params": {"pattern": "engulfing"}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.65}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 57, "use_momentum": True, "early_threshold": 45, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 63, "hard_stop": True}},
-            {"type": "price_vs_vwap",   "params": {}},
-        ],
-        "min_entry_indicators_required": 5,
-    },
-
-    "tf_v2_rsi_reversal": {
-        **_TF_BASE,
-        "entry_indicators": [
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising",      "min_slope_pct": 0.02}},
-            {"type": "ema_slope",       "params": {"ema": 50, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_reversal_momentum",   "params": {"lookback_candles": 3, "oversold_threshold": 42, "current_min": 45, "min_jump": 3, "require_sustained": False, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 70, "hard_stop": True}},
-            {"type": "price_vs_vwap",   "params": {}},
-        ],
-        "min_entry_indicators_required": 5,
-    },
-
-    "tf_v3_trend_HTF": {
+    "tf_v1_ai_profile": {
         **_TF_BASE,
         "trend_indicators": [
-            {"type": "rsi_range", "params": {"min": 30, "max": 60}},
-            {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling",      "min_slope_pct": 0.01}},
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01,"hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.95,"hard_stop": True}},
+            {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 60}},
+            {"type": "rsi_overbought",  "params": {"min_value": 68, "lookback_candles":5, "hard_stop": True}},
         ],
-        "min_indicators_required": 2,
+        "min_indicators_required": 3,
         "entry_indicators": [
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising",      "min_slope_pct": 0.02}},
-            {"type": "ema_slope",       "params": {"ema": 50, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_reversal_momentum",   "params": {"lookback_candles": 3, "oversold_threshold": 42, "current_min": 45, "min_jump": 3, "require_sustained": False, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 70, "hard_stop": True}},
-            {"type": "price_vs_vwap",   "params": {}},
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.5, "max_gap_pct": 2, "hard_stop": True}},
+            {"type": "ema_gap",         "params": {"min_gap_pct": 0.15, "mode": "min", "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.9, "hard_stop": True}},
+            {"type": "rsi_overbought",  "params": {"min_value": 68,"lookback_candles":6, "hard_stop": True}},
+            
+            {"type": "rsi_reversal_momentum",   "params": {"lookback_candles": 10, "oversold_threshold": 48, "current_min": 36, "min_jump": 3, "require_sustained": False,}},
+            {"type": "rsi_range", "params": {"min": 50, "max": 67, "invert": True}},
+            {"type": "reversal_candle", "params": {"pattern": "engulfing", "max_drop_from_close_pct": 0.6}},
+            {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55, "max_drop_from_close_pct": 0.6}},
+            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False, "max_drop_from_close_pct": 0.6}},
         ],
-        "min_entry_indicators_required": 5,
+        "min_entry_indicators_required": 6,
     },
 
-    "tf_v4_simple": {
+    "tf_v2_ema_slope_rising": {
         **_TF_BASE,
-        "entry_indicators": [
-            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
-            {"type": "rsi_reversal_momentum",   "params": {"lookback_candles": 3, "oversold_threshold": 42, "current_min": 45, "min_jump": 3, "require_sustained": False, "hard_stop": True}},
-            {"type": "rsi_overbought",  "params": {"min_value": 70, "hard_stop": True}},
+        "trend_indicators": [
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01,"hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.95,"hard_stop": True}},
+            {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 60}},
+            {"type": "rsi_overbought",  "params": {"min_value": 68, "lookback_candles":5, "hard_stop": True}},
         ],
-        "min_entry_indicators_required": 3,
+        "min_indicators_required": 3,
     },
 
-    "tf_v5_higher_rsimin": {
-        **_TF_NO_TREND_BASE,
+    "tf_v3_changed_entries": {
+        **_TF_BASE,
+        "trend_indicators": [
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01,"hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":-0.05, "max_pct_b": 0.95,"hard_stop": True}},
+            {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 60}},
+            {"type": "rsi_overbought",  "params": {"min_value": 68, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
         "entry_indicators": [
             {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
             {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.65}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 57, "use_momentum": True, "early_threshold": 52, "hard_stop": True}},
+            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 54,"use_momentum": True, "early_threshold":45, "hard_stop": True}},
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising",      "min_slope_pct": 0.02}},
+            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False, "max_drop_from_close_pct": 0.6}},
             {"type": "rsi_overbought",  "params": {"min_value": 68, "hard_stop": True}},
             {"type": "price_vs_vwap",   "params": {}},
         ],
-        "min_entry_indicators_required": 4,
+        "min_entry_indicators_required": 5,
     },
+
+    "tf_v3_changed_entriesWith6Min": {
+        **_TF_BASE,
+        "trend_indicators": [
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01,"hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":-0.05, "max_pct_b": 0.95,"hard_stop": True}},
+            {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 60}},
+            {"type": "rsi_overbought",  "params": {"min_value": 68, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+        "entry_indicators": [
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b":0.05, "max_pct_b": 0.65}},
+            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 54,"use_momentum": True, "early_threshold":45, "hard_stop": True}},
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "rising",      "min_slope_pct": 0.02}},
+            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False, "max_drop_from_close_pct": 0.6}},
+            {"type": "rsi_overbought",  "params": {"min_value": 68, "hard_stop": True}},
+            {"type": "price_vs_vwap",   "params": {}},
+        ],
+        "min_entry_indicators_required": 6,
+    },
+
     # -------------------------------------------------------------------------
     # V3: BB momentum instead of EMA slope — faster signal, less lag
     # The EMA slope needs multiple candles of sustained price movement to flip.
@@ -213,7 +216,7 @@ TREND_VARIANTS = {
     # require 57 RSI and a hammer candle" from 15m_no_trend.
     # -------------------------------------------------------------------------
     # "tf_v4_no_trend_bb_rsi": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "entry_indicators": [
     #         # BB must be in the mid-rising range
     #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.75}},
@@ -240,7 +243,7 @@ TREND_VARIANTS = {
     # It just needs to see RSI recovering from an oversold read.
     # -------------------------------------------------------------------------
     # "tf_v5_no_trend_rsi_reversal": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "entry_indicators": [
     #         # RSI was recently oversold and is rising sustainably
     #         {"type": "rsi_reversal_momentum", "params": {
@@ -298,7 +301,7 @@ TREND_VARIANTS = {
     # # (confirms the reversal candle, not just any RSI bounce).
     # # -------------------------------------------------------------------------
     # "tf_v7_no_trend_lower_rsi_keep_hammer": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "entry_indicators": [
     #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": 1.5}},
     #         {"type": "reversal_candle", "params": {"pattern": "hammer", "min_body_pct": 0.08}},
@@ -320,7 +323,7 @@ TREND_VARIANTS = {
     # # Note min_volume_ratio raised — vol is the main edge here.
     # # -------------------------------------------------------------------------
     # "tf_v8_volume_primary": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "entry_indicators": [
     #         # Must have real volume — not just background noise
     #         {"type": "volume_spike",    "params": {"min_ratio": 1.5, "max_ratio": 6.0}},
@@ -338,7 +341,7 @@ TREND_VARIANTS = {
     #     "min_volume_ratio": 1.5,
     # },
     # "tf_v9_feb18defaultprofile": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "trend_indicators": [
     #         {"type": "ema_slope",  "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01}},
     #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 52, "use_momentum": True, "early_threshold": 40}},
@@ -360,7 +363,7 @@ TREND_VARIANTS = {
     # },
 
     # "tf_v9_feb18_15m_profile": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "use_trend_filter": False,
     #     "use_entry_filter": True,
     #     "entry_indicators": [
@@ -377,7 +380,7 @@ TREND_VARIANTS = {
     # },
     
     # "tf_v9_feb14defaultprofile": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "trend_indicators": [
     #         {"type": "ema_slope",  "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.02}},
     #         {"type": "ema_slope",  "params": {"ema": 50, "direction": "not_falling", "min_slope_pct": 0.01}},
@@ -398,7 +401,7 @@ TREND_VARIANTS = {
     # },
 
     # "tf_v9_feb14_15m_profile": {
-    #     **_TF_NO_TREND_BASE,
+    #     **_TF_BASE,
     #     "use_trend_filter": False,
     #     "use_entry_filter": True,
     #     "entry_indicators": [

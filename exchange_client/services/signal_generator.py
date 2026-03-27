@@ -368,7 +368,8 @@ class SignalGenerator:
                 symbol, 
                 self.entry_timeframe,
                 base_score=confidence_score,
-                max_score=self.max_confidence
+                max_score=self.max_confidence,
+                price=float(current_price)
             )
         elif self.strategy_type == StrategyType.RANGE_TRADING:
             confidence_pct = self._range_trading_confidence_score(
@@ -892,7 +893,8 @@ class SignalGenerator:
         symbol: str, 
         timeframe: str,
         base_score: float,
-        max_score: float
+        max_score: float,
+        price: float = None,
     ) -> float:
         """
         Calculate mean reversion confidence based on oversold depth and setup quality
@@ -931,41 +933,43 @@ class SignalGenerator:
         rsi_min = self.trend_cache._get_rsi_min(symbol, timeframe, lookback=5)
         rsi_low = rsi_min if rsi_min is not None else rsi  # fall back to current if no history
         
-        if rsi_low < 20:
+        if rsi_low < 25:
             bonus_points += 10.0  # Extreme oversold dip
-        elif rsi_low < 25:
-            bonus_points += 8.0   # Very oversold dip
         elif rsi_low < 30:
+            bonus_points += 8.0   # Very oversold dip
+        elif rsi_low < 34:
             bonus_points += 6.0   # Oversold dip
-        elif rsi_low < 35:
+        elif rsi_low < 36:
             bonus_points += 4.0   # Slightly oversold dip
         
         # FACTOR 2: Volume Spike Magnitude (max +8 points)
         # Higher volume = more conviction in selling climax
+        #Reduce volume requirements since the volume from the sell off skews the recovery ratio
         if trend.volume_ratio is not None:
-            if trend.volume_ratio >= 3.0:
+            if trend.volume_ratio >= 2.0:
                 bonus_points += 8.0   # Major volume spike
-            elif trend.volume_ratio >= 2.5:
-                bonus_points += 6.0   # Strong volume
-            elif trend.volume_ratio >= 2.0:
-                bonus_points += 4.0   # Good volume
             elif trend.volume_ratio >= 1.5:
+                bonus_points += 6.0   # Strong volume
+            elif trend.volume_ratio >= 1:
+                bonus_points += 4.0   # Good volume
+            elif trend.volume_ratio >= 0.7:
                 bonus_points += 2.0   # Decent volume
         
         # FACTOR 3: Price Extension Below VWAP (max +5 points)
         # Further below VWAP = more stretched = higher bounce potential
+        #Reduced limits 24th March due to low likelyhood of such large stretches on 15m chart
         try:
-            vwap_gap_pct = ((trend.price - trend.vwap) / trend.vwap) * 100
+            vwap_gap_pct = ((price - trend.vwap) / trend.vwap) * 100
         except:
             vwap_gap_pct = 0
         
         if vwap_gap_pct < -4.0:
             bonus_points += 5.0   # Very extended
-        elif vwap_gap_pct < -3.0:
+        elif vwap_gap_pct < -2.5:
             bonus_points += 4.0   # Extended
-        elif vwap_gap_pct < -2.0:
+        elif vwap_gap_pct < -1.5:
             bonus_points += 3.0   # Moderate
-        elif vwap_gap_pct < -1.0:
+        elif vwap_gap_pct < -0.5:
             bonus_points += 1.5   # Slight
         
         # FACTOR 4: Price Extension Below EMA20 (max +4 points)
