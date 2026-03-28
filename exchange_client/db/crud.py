@@ -535,10 +535,13 @@ def create_circuit_breaker_config(
     max_daily_profit_pct: Decimal = Decimal("5.0"),
     max_daily_loss_pct: Decimal = Decimal("2.0"),
     profit_lock_hours: int = 6,
-    loss_lock_hours: int = 12
+    loss_lock_hours: int = 12,
+    account_id: int = None,
+
 ) -> CircuitBreakerConfig:
     """Create default circuit breaker config for a profile"""
     config = CircuitBreakerConfig(
+        account_id= account_id,
         profile_name=profile_name,
         max_daily_profit_pct=max_daily_profit_pct,
         max_daily_loss_pct=max_daily_loss_pct,
@@ -571,21 +574,33 @@ def update_circuit_breaker_config(
 
 
 # ===== Circuit Breaker Events =====
-
 def get_active_circuit_breaker(
-    db: Session, 
-    profile_name: str
+    db: Session,
+    profile_name: str,
+    account_id: Optional[int] = None,
 ) -> Optional[CircuitBreakerEvent]:
-    """Get active circuit breaker event for a profile"""
-    now = datetime.now(timezone.utc)
-    
-    return db.query(CircuitBreakerEvent).filter(
-        CircuitBreakerEvent.profile_name == profile_name,
-        CircuitBreakerEvent.is_active == True,
-        #CircuitBreakerEvent.reset_at > now  # Still locked
-    ).first()
-
-
+    """
+    Prefer account_id lookup when available, fall back to profile_name.
+    This handles rows written before the migration as well as new rows.
+    """
+    if account_id is not None:
+        return (
+            db.query(CircuitBreakerEvent)
+            .filter(
+                CircuitBreakerEvent.account_id == account_id,
+                CircuitBreakerEvent.is_active == True,
+            )
+            .first()
+        )
+    # Fallback for standalone profiles or pre-migration rows
+    return (
+        db.query(CircuitBreakerEvent)
+        .filter(
+            CircuitBreakerEvent.profile_name == profile_name,
+            CircuitBreakerEvent.is_active == True,
+        )
+        .first()
+    )
 def create_circuit_breaker_event(
     db: Session,
     profile_name: str,
@@ -593,28 +608,25 @@ def create_circuit_breaker_event(
     trigger_value_pct: Decimal,
     balance_at_trigger: Decimal,
     daily_start_balance: Decimal,
-    lock_hours: int
+    lock_hours: int,
+    account_id: Optional[int] = None,       # <-- new
 ) -> CircuitBreakerEvent:
-    """Create a new circuit breaker trigger event"""
     now = datetime.now(timezone.utc)
-    reset_time = now + timedelta(hours=lock_hours)
-    
     event = CircuitBreakerEvent(
         profile_name=profile_name,
+        account_id=account_id,              # <-- new
         reason=reason,
         trigger_value_pct=trigger_value_pct,
         balance_at_trigger=balance_at_trigger,
         daily_start_balance=daily_start_balance,
         triggered_at=now,
-        reset_at=reset_time,
-        is_active=True
+        reset_at=now + timedelta(hours=lock_hours),
+        is_active=True,
     )
-    
     db.add(event)
     db.commit()
     db.refresh(event)
     return event
-
 
 def expire_circuit_breaker(
     db: Session,
@@ -652,33 +664,40 @@ def manually_reset_circuit_breaker(
 
 
 # ===== Daily Balance Snapshots =====
-
 def get_current_daily_snapshot(
     db: Session,
-    profile_name: str
+    profile_name: str,
+    account_id: Optional[int] = None,
 ) -> Optional[DailyBalanceSnapshot]:
-    """Get the latest snapshot"""
-    
-    return db.query(DailyBalanceSnapshot).filter(
-        DailyBalanceSnapshot.profile_name == profile_name
-    ).order_by(DailyBalanceSnapshot.snapshot_date.desc()).first()
-
+    if account_id is not None:
+        return (
+            db.query(DailyBalanceSnapshot)
+            .filter(DailyBalanceSnapshot.account_id == account_id)
+            .order_by(DailyBalanceSnapshot.snapshot_date.desc())
+            .first()
+        )
+    return (
+        db.query(DailyBalanceSnapshot)
+        .filter(DailyBalanceSnapshot.profile_name == profile_name)
+        .order_by(DailyBalanceSnapshot.snapshot_date.desc())
+        .first()
+    )
 
 def create_daily_snapshot(
     db: Session,
     profile_name: str,
-    starting_balance: Decimal
+    starting_balance: Decimal,
+    account_id: Optional[int] = None,       # <-- new
 ) -> DailyBalanceSnapshot:
-    """Create a new daily snapshot"""
     snapshot = DailyBalanceSnapshot(
         profile_name=profile_name,
+        account_id=account_id,              # <-- new
         snapshot_date=datetime.now(timezone.utc),
         starting_balance=starting_balance,
         highest_balance=starting_balance,
         lowest_balance=starting_balance,
-        circuit_breaker_baseline=None
+        circuit_breaker_baseline=None,
     )
-    
     db.add(snapshot)
     db.commit()
     db.refresh(snapshot)

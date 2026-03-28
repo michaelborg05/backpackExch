@@ -8,7 +8,15 @@ sys.path.insert(0, str(project_root))
 
 from db.models import Trade, Position
 from db.session import engine,SessionLocal
-from db.models import Base,TradingProfileDB, IndicatorDB
+from db.models import (
+    Base,
+    TradingProfileDB, 
+    IndicatorDB,
+    ExchangeAccount,
+    CircuitBreakerConfig,
+    CircuitBreakerEvent,
+    DailyBalanceSnapshot,
+)
 from utils.logging import log_manager
 import yaml
 from db.crud import create_profile, create_daily_snapshot
@@ -16,6 +24,9 @@ from db.utils import get_db_session
 from db.crud_settings import initialize_default_settings, bulk_upsert_settings
 from utils.logging import log_manager
 
+import argparse
+from collections import defaultdict
+from utils.db_secrets import resolve_secret, encrypt_secret
 
 
 logger = log_manager.get_logger("DatabaseManager")
@@ -170,6 +181,231 @@ def update_keys():
         db.rollback()
         logger.error(f"✗ Migration failed, rolled back: {e}", exc_info=True)
         print(f"✗ Migration failed, rolled back: {e}")
+    finally:
+        db.close()
+
+def migrate_to_accounts(dry_run: bool = False):
+    tag = "[DRY-RUN] " if dry_run else ""
+    db = SessionLocal()
+
+    try:
+        profiles = (
+            db.query(TradingProfileDB)
+            .filter(TradingProfileDB.is_active == True)
+            .all()
+        )
+
+        if not profiles:
+            print("No active profiles found — nothing to migrate.")
+            return
+
+        # ── Step 1: Group profiles by decrypted api_key ───────────────────────
+        # Profiles sharing the same api_key belong to the same exchange account.
+        # We decrypt here only to group — the account row stores the encrypted value.
+        print("\nGrouping profiles by API key...")
+        key_to_profiles = defaultdict(list)
+
+        for p in profiles:
+            try:
+                raw_key = resolve_secret(p.api_key)
+            except Exception as e:
+                print(f"  WARNING: Could not decrypt api_key for '{p.name}': {e}")
+                raw_key = p.api_key  # fall back to stored value for grouping
+
+            key_to_profiles[raw_key].append(p)
+
+        print(f"Found {len(key_to_profiles)} unique exchange account(s) "
+              f"across {len(profiles)} profile(s).\n")
+
+        # ── Step 2: Create ExchangeAccount rows ───────────────────────────────
+        key_to_account_id = {}  # raw_key → account.id
+
+        for raw_key, grouped_profiles in key_to_profiles.items():
+            # Build a sensible account name from the profile names
+            if len(grouped_profiles) == 1:
+                account_name = grouped_profiles[0].name
+                if grouped_profiles[0].name == "default":
+                    account_name = "ai_trading_acct"
+                elif grouped_profiles[0].name == "15m_MB_ATR":
+                    account_name = "mean_reversion"
+                elif grouped_profiles[0].name == "profile3":
+                    account_name = "4hr_trend_trading"
+                elif grouped_profiles[0].name == "15m_no_trend":
+                    account_name = "15m_entry_trading"
+                elif grouped_profiles[0].name == "15m_MB":
+                    account_name = "range_trading"
+            else:
+                account_name = "_".join(p.name for p in grouped_profiles[:3])
+                display_name = " / ".join(
+                    p.display_name for p in grouped_profiles[:3]
+                )
+                if len(grouped_profiles) > 3:
+                    display_name += f" (+{len(grouped_profiles) - 3} more)"
+
+            # Check if account already exists (idempotency)
+            existing = (
+                db.query(ExchangeAccount)
+                .filter(ExchangeAccount.name == account_name)
+                .first()
+            )
+
+            if existing:
+                print(f"  SKIP  Account '{account_name}' already exists "
+                      f"(id={existing.id})")
+                key_to_account_id[raw_key] = existing.id
+                continue
+
+            # Resolve encrypted credentials from first profile
+            canonical = grouped_profiles[0]
+            try:
+                enc_key    = canonical.api_key    # already encrypted
+                enc_secret = canonical.secret     # already encrypted
+            except Exception as e:
+                print(f"  ERROR: Could not get credentials for '{account_name}': {e}")
+                continue
+
+            account = ExchangeAccount(
+                name=account_name,
+                api_key=enc_key,
+                secret=enc_secret,
+                is_active=True,
+            )
+
+            profile_names = [p.name for p in grouped_profiles]
+            print(f"  {tag}✓ Creating account '{account_name}' "
+                  f"for profile(s): {profile_names}")
+
+            if not dry_run:
+                db.add(account)
+                db.flush()  # get account.id before commit
+                key_to_account_id[raw_key] = account.id
+
+        if not dry_run:
+            db.commit()
+
+        # ── Step 3: Back-fill account_id on trading_profiles ─────────────────
+        print("\nBack-filling trading_profiles.account_id...")
+
+        for raw_key, grouped_profiles in key_to_profiles.items():
+            account_id = key_to_account_id.get(raw_key)
+            if account_id is None:
+                print(f"  WARNING: No account_id resolved for key group "
+                      f"({[p.name for p in grouped_profiles]}) — skipping")
+                continue
+
+            for p in grouped_profiles:
+                if p.account_id == account_id:
+                    print(f"  SKIP  {p.name} already has account_id={account_id}")
+                    continue
+                print(f"  {tag}✓ {p.name} → account_id={account_id}")
+                if not dry_run:
+                    p.account_id = account_id
+
+        if not dry_run:
+            db.commit()
+
+        # ── Step 4: Back-fill circuit_breaker_config ──────────────────────────
+        print("\nBack-filling circuit_breaker_config.account_id...")
+
+        configs = db.query(CircuitBreakerConfig).all()
+        for config in configs:
+            profile = (
+                db.query(TradingProfileDB)
+                .filter(TradingProfileDB.name == config.profile_name)
+                .first()
+            )
+            if not profile or not profile.account_id:
+                print(f"  SKIP  config for '{config.profile_name}' "
+                      f"(no matching profile or account_id)")
+                continue
+            if config.account_id == profile.account_id:
+                print(f"  SKIP  config for '{config.profile_name}' "
+                      f"already has account_id={config.account_id}")
+                continue
+            print(f"  {tag}✓ CB config '{config.profile_name}' "
+                  f"→ account_id={profile.account_id}")
+            if not dry_run:
+                config.account_id = profile.account_id
+
+        if not dry_run:
+            db.commit()
+
+        # ── Step 5: Back-fill circuit_breaker_events ──────────────────────────
+        print("\nBack-filling circuit_breaker_events.account_id...")
+
+        events = db.query(CircuitBreakerEvent).all()
+        updated_events = 0
+        skipped_events = 0
+
+        for event in events:
+            profile = (
+                db.query(TradingProfileDB)
+                .filter(TradingProfileDB.name == event.profile_name)
+                .first()
+            )
+            if not profile or not profile.account_id:
+                skipped_events += 1
+                continue
+            if event.account_id == profile.account_id:
+                skipped_events += 1
+                continue
+            if not dry_run:
+                event.account_id = profile.account_id
+            updated_events += 1
+
+        print(f"  {tag}✓ Updated {updated_events} events, "
+              f"skipped {skipped_events}")
+
+        if not dry_run:
+            db.commit()
+
+        # ── Step 6: Back-fill daily_balance_snapshots ─────────────────────────
+        print("\nBack-filling daily_balance_snapshots.account_id...")
+
+        snapshots = db.query(DailyBalanceSnapshot).all()
+        updated_snaps = 0
+        skipped_snaps = 0
+
+        for snap in snapshots:
+            profile = (
+                db.query(TradingProfileDB)
+                .filter(TradingProfileDB.name == snap.profile_name)
+                .first()
+            )
+            if not profile or not profile.account_id:
+                skipped_snaps += 1
+                continue
+            if snap.account_id == profile.account_id:
+                skipped_snaps += 1
+                continue
+            if not dry_run:
+                snap.account_id = profile.account_id
+            updated_snaps += 1
+
+        print(f"  {tag}✓ Updated {updated_snaps} snapshots, "
+              f"skipped {skipped_snaps}")
+
+        if not dry_run:
+            db.commit()
+
+        # ── Summary ───────────────────────────────────────────────────────────
+        print(f"\n{'=' * 55}")
+        print(f"  Migration {'preview' if dry_run else 'complete'}")
+        print(f"{'=' * 55}")
+        print(f"  Accounts created : {len(key_to_account_id)}")
+        print(f"  Profiles updated : {len(profiles)}")
+        print(f"  CB configs updated: {len(configs)}")
+        print(f"  CB events updated : {updated_events}")
+        print(f"  Snapshots updated : {updated_snaps}")
+        if dry_run:
+            print("\n  *** DRY RUN — no changes written ***")
+        print(f"{'=' * 55}\n")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Migration failed, rolled back: {e}", exc_info=True)
+        print(f"\n✗ Migration failed: {e}")
+        sys.exit(1)
     finally:
         db.close()
 
@@ -608,17 +844,86 @@ def setup_symbol_configs():
 
 def add_new_profile():
     # Function to add a new trading profile
+    with SessionLocal() as db:
+        accts = (
+            db.query(ExchangeAccount)
+            .filter(ExchangeAccount.is_active == True)
+            .all()
+        )
+    for acct in accts:
+        print(f"Acct {acct.id} {acct.name}")
+
+    acct_id = input("\nEnter acct_id to link to: ")
     profile_name = input("\nEnter new profile name: ")
-    print(f"Adding new profile: {profile_name}")
+    acct_details = None
+    for acct in accts:
+        if acct.id == int(acct_id):
+            acct_details = acct
+
+    if acct_details is None: 
+        print (f"couldnt find acct_id {acct_id}. Exiting")        
+        return
+    
+    print(f"Adding new profile: {profile_name} to account {acct_id}")
     confirm = input("\nConfirm? (yes/no): ").lower() == "yes"
     if confirm == False: 
         return
     
+    with SessionLocal() as db:
+        profile_row = TradingProfileDB(
+            name=profile_name,
+            display_name=profile_name,
+            api_key=acct_details.api_key,
+            secret=acct_details.secret,
+            account_id=acct_details.id,
+            # Position management
+            take_profit_pct=2,
+            stop_loss_pct=2,
+            trailing_stop_pct=1.5,
+            arm_trailing_stop_pct=1,
+            use_trailing_stop=True,
+
+            # Risk / sizing
+            max_risk_pct=0.25,
+            default_order_size_usdc=100,
+            max_position_size_pct=40,
+            max_open_positions=1,
+            max_portfolio_exposure_pct=100,
+
+            # Strategy
+            strategy_type= "trend_following",
+
+            # Signal generation
+            signal_timeframe=15,
+            signal_cooldown_seconds=900,
+            min_signal_confidence=72,
+            min_volume_ratio=1.0,
+
+            # Filter toggles
+            use_market_regime_filter=True,
+            use_trend_filter=True,
+            use_entry_filter=True,
+            use_atr_filter=False,
+
+            # Timeframes & thresholds
+            trend_timeframe=60,
+            entry_timeframe=15,
+            min_indicators_required=3,
+            min_entry_indicators_required=3,
+
+            is_active=True,
+        )
+
+        db.add(profile_row)
+        db.flush()  # gives us profile_row.id before commit
+        db.commit()
+
     from db.crud import create_circuit_breaker_config
     try:
         db = SessionLocal()
         create_circuit_breaker_config(
             db,
+            account_id=acct_id,
             profile_name=profile_name,
             max_daily_profit_pct=Decimal("5.0"),
             max_daily_loss_pct=Decimal("3.0"),
@@ -737,6 +1042,7 @@ commands = {
     "populate-settings": populate_default_settings,
     "create-appuser" : setup_appusers,
     "update-keys": update_keys,
+    "migrate-exchaccts": migrate_to_accounts,
 }
 
 if __name__ == "__main__":
@@ -757,7 +1063,7 @@ if __name__ == "__main__":
          print("  populate-settings - Populate default settings in settings table")
          print("  create-appuser - Create new user for UI")
          print("  update-keys - Update API keys in db")
-         
+         print("  migrate-exchaccts - Migrate profiles to accts table")
          sys.exit(1)
     
     command = sys.argv[1]

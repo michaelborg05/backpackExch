@@ -65,6 +65,13 @@ class TradingProfileDB(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    account_id = Column(
+        Integer,
+        ForeignKey("exchange_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    account = relationship("ExchangeAccount", back_populates="profiles")
 
 class IndicatorDB(Base):
     __tablename__ = "indicators"
@@ -161,7 +168,12 @@ class CircuitBreakerConfig(Base):
     
     id = Column(Integer, primary_key=True)
     profile_name = Column(String, nullable=False)
-    
+    account_id = Column(
+        Integer,
+        ForeignKey("exchange_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
     # Limits
     max_daily_profit_pct = Column(Numeric(5, 2), default=5.0)
     max_daily_loss_pct = Column(Numeric(5, 2), default=2.0)
@@ -184,6 +196,12 @@ class CircuitBreakerEvent(Base):
     
     id = Column(Integer, primary_key=True)
     profile_name = Column(String, nullable=False, index=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("exchange_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
     
     reason = Column(String, nullable=False)  # PROFIT_LIMIT, LOSS_LIMIT
     trigger_value_pct = Column(Numeric(10, 4), nullable=True)  # Actual % when triggered
@@ -209,6 +227,12 @@ class DailyBalanceSnapshot(Base):
     
     id = Column(Integer, primary_key=True)
     profile_name = Column(String, nullable=False, index=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("exchange_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
     
     snapshot_date = Column(DateTime(timezone=True), nullable=False, index=True)  # Start of 24h period
     starting_balance = Column(Numeric(20, 8), nullable=False)
@@ -799,3 +823,15 @@ class ConfigAuditLog(Base):
             f"action={self.action!r} entity={self.entity_name!r} "
             f"at={self.changed_at}>"
         )
+
+class ExchangeAccount(Base):
+    __tablename__ = "exchange_accounts"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)     # e.g. "main_account"
+    api_key = Column(String, nullable=False)               # Encrypted
+    secret = Column(String, nullable=False)                # Encrypted
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    profiles = relationship("TradingProfileDB", back_populates="account")

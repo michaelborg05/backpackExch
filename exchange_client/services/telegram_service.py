@@ -620,24 +620,33 @@ class TelegramService:
             if not self.profile_manager:
                 self.logger.warning("Profile manager not initialized")
                 balances = cache.print_portfolio_summary(profile_name="default")
-                balance_text = (
+                return (
                     f"💰 <b>Current Balances:</b>\n\n{balances}"
                     if balances else "❌ No balance data available"
                 )
                 
-            else:
-                profiles = self.profile_manager.get_all_profiles()
-                
-                # Send each profile's balance
-                for profile in profiles:
-                    balances = cache.print_portfolio_summary(profile_name=profile.name, display_name=profile.display_name)
+            profiles = self.profile_manager.get_all_profiles()
+            
+            reported_accounts = set()
+            balance_text = ""
+            # Send each profile's balance
+            for profile in profiles:
+                account_key = profile.account_id or profile.name  # fallback for standalone
+                if account_key in reported_accounts:
+                    continue  # Skip duplicate account
+                reported_accounts.add(account_key)
 
-                    balance_text += (
-                        f"💰 {balances}"
-                        if balances 
-                        else f"❌ No balance for {profile.display_name}"
-                    )
-        
+                balances = cache.print_portfolio_summary(
+                    profile_name=profile.name,
+                    display_name=profile.display_name
+                )
+
+                balance_text += (
+                    f"💰 {balances}"
+                    if balances 
+                    else f"❌ No balance for {profile.display_name}"
+                )
+
         except Exception as e:
             # Delete processing message and show error
             balance_text += f"❌ Error fetching balances: {str(e)}"
