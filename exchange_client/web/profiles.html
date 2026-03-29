@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BorgBot — Profile Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080b10;--bg2:#0d1117;--bg3:#111820;--brd:#1e2a38;--bb:#2a3f55;
+  --acc:#00d4ff;--acc2:#00ff9d;--warn:#ffcc00;--red:#ff3c5a;--grn:#00ff9d;
+  --tx:#c8d8e8;--txd:#5a7a96;--txb:#e8f4ff;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Space Mono',monospace;font-size:13px;min-height:100vh;display:flex;flex-direction:column}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+
+/* ── Auth gate ─────────────────────────────────────────────────────────── */
+#auth-gate{position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;align-items:center;justify-content:center}
+.auth-msg{font-size:13px;color:var(--txd);letter-spacing:.1em}
+
+/* ── Header ────────────────────────────────────────────────────────────── */
+header{position:sticky;top:0;z-index:100;background:rgba(8,11,16,.97);backdrop-filter:blur(12px);border-bottom:1px solid var(--brd);padding:0 24px;height:56px;display:flex;align-items:center;gap:18px;flex-shrink:0}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:18px;letter-spacing:.15em;color:var(--acc);text-shadow:0 0 20px rgba(0,212,255,.5);flex-shrink:0}
+.logo span{color:var(--txd)}
+.logo-sep{color:var(--txd);font-size:14px;margin:0 6px}
+.page-title{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;letter-spacing:.12em;color:var(--txb)}
+.hr{display:flex;align-items:center;gap:10px;margin-left:auto}
+.bsm{background:transparent;border:1px solid var(--bb);color:var(--txd);padding:5px 12px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all .2s}
+.bsm:hover{color:var(--tx);border-color:var(--txd)}
+.bsm.a{color:var(--acc)}.bsm.a:hover{border-color:var(--acc);background:rgba(0,212,255,.06)}
+.bsm.dng:hover{color:var(--red);border-color:var(--red)}
+
+/* ── Layout ────────────────────────────────────────────────────────────── */
+.layout{display:flex;flex:1;overflow:hidden;position:relative;z-index:1}
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+.sidebar{width:240px;flex-shrink:0;border-right:1px solid var(--brd);display:flex;flex-direction:column;background:var(--bg2);overflow:hidden}
+.sidebar-head{padding:14px 16px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between}
+.sidebar-label{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--acc)}
+.btn-new{background:transparent;border:1px solid var(--acc);color:var(--acc);padding:4px 10px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .2s}
+.btn-new:hover{background:var(--acc);color:var(--bg)}
+.profile-list{flex:1;overflow-y:auto;padding:8px 0}
+.profile-item{padding:10px 16px;cursor:pointer;border-left:2px solid transparent;transition:all .15s;position:relative}
+.profile-item:hover{background:rgba(0,212,255,.04);border-left-color:var(--bb)}
+.profile-item.active{background:rgba(0,212,255,.07);border-left-color:var(--acc)}
+.pi-name{font-family:'Syne',sans-serif;font-weight:700;font-size:12px;letter-spacing:.08em;color:var(--txb);margin-bottom:3px}
+.pi-badges{display:flex;gap:5px;flex-wrap:wrap}
+.pi-badge{font-size:9px;padding:1px 6px;border:1px solid;letter-spacing:.06em;text-transform:uppercase}
+.pb-live{border-color:rgba(0,255,157,.3);color:var(--grn);background:rgba(0,255,157,.06)}
+.pb-shadow{border-color:rgba(255,204,0,.3);color:var(--warn);background:rgba(255,204,0,.06)}
+.pb-ai{border-color:rgba(0,212,255,.3);color:var(--acc);background:rgba(0,212,255,.06)}
+.pb-off{border-color:rgba(90,122,150,.3);color:var(--txd);background:transparent}
+.pi-strategy{font-size:9px;color:var(--txd);margin-top:2px;letter-spacing:.06em}
+
+/* ── Main content ───────────────────────────────────────────────────────── */
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.empty-state{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--txd)}
+.empty-icon{font-size:40px;opacity:.3}
+.empty-text{font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+
+/* Profile header bar */
+.profile-header{padding:16px 24px;border-bottom:1px solid var(--brd);display:flex;align-items:center;gap:12px;background:var(--bg2);flex-shrink:0}
+.ph-name{font-family:'Syne',sans-serif;font-weight:800;font-size:18px;letter-spacing:.1em;color:var(--txb)}
+.ph-badges{display:flex;gap:6px;align-items:center}
+.ph-actions{display:flex;gap:8px;margin-left:auto}
+.btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);padding:6px 14px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .2s}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-cred{background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 14px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .2s}
+.btn-cred:hover{background:var(--warn);color:var(--bg)}
+.key-hint{font-size:10px;color:var(--txd);padding:4px 10px;border:1px solid var(--brd);letter-spacing:.1em}
+
+/* Sub-tabs */
+.subtabs{display:flex;border-bottom:1px solid var(--brd);padding:0 24px;background:var(--bg2);flex-shrink:0}
+.stab{padding:10px 18px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none}
+.stab:hover{color:var(--tx)}
+.stab.on{color:var(--acc);border-bottom-color:var(--acc)}
+
+/* Tab panels */
+.tab-panel{display:none;padding:24px;flex:1}
+.tab-panel.on{display:block}
+
+/* Form layout */
+.form-section{margin-bottom:28px}
+.section-title{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--acc);margin-bottom:14px;padding-bottom:6px;border-bottom:1px solid var(--brd)}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd)}
+.field input,.field select{background:var(--bg3);border:1px solid var(--brd);color:var(--txb);padding:8px 10px;font-family:'Space Mono',monospace;font-size:12px;outline:none;transition:border-color .2s;width:100%}
+.field input:focus,.field select:focus{border-color:var(--acc)}
+.field select option{background:var(--bg2)}
+.field-hint{font-size:10px;color:var(--txd);margin-top:2px}
+.toggle-row{display:flex;align-items:center;gap:10px;padding:8px 0}
+.toggle-label{font-size:11px;color:var(--tx)}
+.toggle-sub{font-size:10px;color:var(--txd)}
+input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px;cursor:pointer;flex-shrink:0}
+
+/* Save bar */
+.save-bar{position:sticky;bottom:0;background:rgba(13,17,23,.97);backdrop-filter:blur(8px);border-top:1px solid var(--brd);padding:12px 24px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.btn-save{background:transparent;border:1px solid var(--acc);color:var(--acc);padding:9px 24px;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
+.btn-save::before{content:'';position:absolute;inset:0;background:var(--acc);transform:translateX(-100%);transition:transform .2s;z-index:0}
+.btn-save:hover::before{transform:translateX(0)}
+.btn-save:hover{color:var(--bg)}
+.btn-save:disabled{opacity:.4;cursor:not-allowed}
+.btn-save:disabled::before{display:none}
+.btn-save span{position:relative;z-index:1}
+.save-status{font-size:11px;color:var(--txd)}
+.save-status.ok{color:var(--grn)}
+.save-status.err{color:var(--red)}
+
+/* Circuit Breaker tab */
+.cb-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:600px}
+.cb-stat{background:var(--bg3);border:1px solid var(--brd);padding:16px 20px}
+.cb-stat-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);margin-bottom:6px}
+.cb-stat-val{font-family:'Syne',sans-serif;font-size:22px;font-weight:700;color:var(--txb)}
+.cb-stat-sub{font-size:10px;color:var(--txd);margin-top:4px}
+.active-breaker-banner{background:rgba(255,60,90,.08);border:1px solid rgba(255,60,90,.3);border-left:3px solid var(--red);padding:12px 16px;margin-bottom:20px}
+.ab-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--red);margin-bottom:4px}
+.ab-text{font-size:12px;color:#ffaab8}
+
+/* Indicators tab — reuses existing ind-* classes, just embedded */
+.ind-toolbar-inline{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+
+/* Modal overlay */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-box{background:var(--bg2);border:1px solid var(--brd);width:100%;max-width:560px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.modal-box::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--brd);flex-shrink:0}
+.modal-title{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--acc)}
+.modal-close{background:none;border:none;color:var(--txd);font-size:20px;cursor:pointer;line-height:1;padding:0 4px}
+.modal-close:hover{color:var(--tx)}
+.modal-body{overflow-y:auto;padding:20px;flex:1}
+.modal-footer{padding:14px 20px;border-top:1px solid var(--brd);display:flex;justify-content:flex-end;gap:10px;flex-shrink:0}
+.form-row{margin-bottom:14px}
+.form-row label{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);margin-bottom:5px}
+.form-row input,.form-row select{width:100%;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:7px 10px;font-family:'Space Mono',monospace;font-size:11px;border-radius:2px}
+.form-row input:focus,.form-row select:focus{outline:none;border-color:var(--acc)}
+.mbtn{padding:9px 20px;border:1px solid var(--acc);color:var(--acc);background:transparent;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;transition:all .2s}
+.mbtn:hover{background:var(--acc);color:var(--bg)}
+.mbtn.sec{border-color:var(--brd);color:var(--txd)}
+.mbtn.sec:hover{background:var(--brd);color:var(--tx)}
+.mbtn.dng{border-color:var(--red);color:var(--red)}
+.mbtn.dng:hover{background:var(--red);color:#fff}
+.form-err{color:var(--red);font-size:11px;margin-top:8px}
+
+/* Toast */
+#toast{position:fixed;bottom:20px;right:20px;padding:10px 18px;font-size:12px;z-index:9999;display:none;border:1px solid}
+#toast.ok{background:rgba(0,255,157,.08);border-color:rgba(0,255,157,.3);color:var(--grn)}
+#toast.err{background:rgba(255,60,90,.08);border-color:rgba(255,60,90,.3);color:var(--red)}
+
+/* Symbols table */
+.dt{width:100%;border-collapse:collapse}
+.dt th{padding:8px 12px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);text-align:left;border-bottom:1px solid var(--brd);background:rgba(255,255,255,.02)}
+.dt td{padding:10px 12px;border-bottom:1px solid rgba(30,42,56,.5);color:var(--tx)}
+.dt tr:last-child td{border-bottom:none}
+.dt tr:hover td{background:rgba(0,212,255,.025)}
+.bs{display:inline-block;padding:2px 6px;font-size:10px;font-weight:700}
+.bl2{background:rgba(0,255,157,.15);color:var(--grn)}.bsh{background:rgba(255,60,90,.15);color:var(--red)}
+
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--bb);border-radius:2px}
+</style>
+</head>
+<body>
+
+<div id="auth-gate"><div class="auth-msg">Checking session...</div></div>
+
+<header>
+  <div class="logo">BorgBot<span>/</span>TRADE</div>
+  <span class="logo-sep">/</span>
+  <div class="page-title">Profile Manager</div>
+  <div class="hr">
+    <span style="font-size:11px;color:var(--txd)" id="huser">—</span>
+    <button class="bsm a" onclick="window.location.href='/'">← Dashboard</button>
+    <button class="bsm dng" onclick="doLogout()">Logout</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <div class="sidebar">
+    <div class="sidebar-head">
+      <span class="sidebar-label">Profiles</span>
+      <button class="btn-new" onclick="openCreateModal()">+ New</button>
+    </div>
+    <div class="profile-list" id="profile-list">
+      <div style="padding:16px;color:var(--txd);font-size:11px">Loading...</div>
+    </div>
+  </div>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────────── -->
+  <div class="main" id="main-area">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">⚙</div>
+      <div class="empty-text">Select a profile to edit</div>
+    </div>
+
+    <!-- Profile detail view (hidden until profile selected) -->
+    <div id="profile-detail" style="display:none;display:flex;flex-direction:column;flex:1">
+      <!-- Header bar -->
+      <div class="profile-header">
+        <div class="ph-name" id="ph-name">—</div>
+        <div class="ph-badges" id="ph-badges"></div>
+        <div style="flex:1"></div>
+        <div style="font-size:10px;color:var(--txd);margin-right:8px">API Key:</div>
+        <div class="key-hint" id="key-hint">—</div>
+        <div class="ph-actions">
+          <button class="btn-cred" onclick="openCredsModal()">🔑 Change Credentials</button>
+          <button class="btn-danger" onclick="deactivateProfile()">Deactivate</button>
+        </div>
+      </div>
+
+      <!-- Sub-tabs -->
+      <div class="subtabs">
+        <div class="stab on" onclick="showTab('settings',this)">Settings</div>
+        <div class="stab" onclick="showTab('cb',this)">Circuit Breaker</div>
+        <div class="stab" onclick="showTab('symbols',this)">Symbols</div>
+        <div class="stab" onclick="showTab('indicators',this)">Indicators</div>
+      </div>
+
+      <!-- ── SETTINGS TAB ─────────────────────────────────────────────── -->
+      <div class="tab-panel on" id="tab-settings">
+
+        <div class="form-section">
+          <div class="section-title">Identity</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Display Name</label>
+              <input id="f-display_name" type="text" placeholder="e.g. Trend 15m (MB)">
+            </div>
+            <div class="field">
+              <label>Internal Name <span style="color:var(--txd)">(read-only)</span></label>
+              <input id="f-name-ro" type="text" disabled style="opacity:.5">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title">Strategy</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Trading Type</label>
+              <select id="f-trading_type">
+                <option value="rules_live">Rules Live</option>
+                <option value="shadow">Shadow (AI paper)</option>
+                <option value="ai_live">AI Live</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Strategy Type</label>
+              <select id="f-strategy_type">
+                <option value="trend_following">Trend Following</option>
+                <option value="mean_reversion">Mean Reversion</option>
+                <option value="range_trading">Range Trading</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title">Risk Management</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Take Profit %</label>
+              <input id="f-take_profit_pct" type="number" step="0.1" placeholder="e.g. 2.5">
+              <div class="field-hint">% gain to trigger TP</div>
+            </div>
+            <div class="field">
+              <label>Stop Loss %</label>
+              <input id="f-stop_loss_pct" type="number" step="0.1" placeholder="e.g. 1.5">
+              <div class="field-hint">% loss to trigger SL</div>
+            </div>
+            <div class="field">
+              <label>Trailing Stop %</label>
+              <input id="f-trailing_stop_pct" type="number" step="0.1" placeholder="e.g. 1.0">
+            </div>
+            <div class="field">
+              <label>Arm Trailing At %</label>
+              <input id="f-arm_trailing_stop_pct" type="number" step="0.1" placeholder="e.g. 1.0">
+              <div class="field-hint">Profit % to arm trailing stop</div>
+            </div>
+          </div>
+          <div class="toggle-row" style="margin-top:8px">
+            <input type="checkbox" id="f-use_trailing_stop">
+            <div>
+              <div class="toggle-label">Use Trailing Stop</div>
+              <div class="toggle-sub">Activates trailing SL after arm threshold is hit</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title">Position Sizing</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Default Order Size (USDC)</label>
+              <input id="f-default_order_size_usdc" type="number" step="1" placeholder="100">
+            </div>
+            <div class="field">
+              <label>Max Position Size %</label>
+              <input id="f-max_position_size_pct" type="number" step="1" placeholder="40">
+              <div class="field-hint">Max % of portfolio per position</div>
+            </div>
+            <div class="field">
+              <label>Max Open Positions</label>
+              <input id="f-max_open_positions" type="number" step="1" placeholder="5">
+            </div>
+            <div class="field">
+              <label>Max Portfolio Exposure %</label>
+              <input id="f-max_portfolio_exposure_pct" type="number" step="1" placeholder="80">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title">Signal Generation</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Signal Timeframe (min)</label>
+              <input id="f-signal_timeframe" type="text" placeholder="15">
+            </div>
+            <div class="field">
+              <label>Trend Timeframe (min)</label>
+              <input id="f-trend_timeframe" type="text" placeholder="60">
+            </div>
+            <div class="field">
+              <label>Entry Timeframe (min)</label>
+              <input id="f-entry_timeframe" type="text" placeholder="15">
+            </div>
+            <div class="field">
+              <label>Cooldown (seconds)</label>
+              <input id="f-signal_cooldown_seconds" type="number" step="60" placeholder="900">
+            </div>
+            <div class="field">
+              <label>Min Confidence %</label>
+              <input id="f-min_signal_confidence" type="number" step="0.5" placeholder="72">
+              <div class="field-hint">0–100; signals below this are skipped</div>
+            </div>
+            <div class="field">
+              <label>Min Volume Ratio</label>
+              <input id="f-min_volume_ratio" type="number" step="0.1" placeholder="1.0">
+              <div class="field-hint">1.0 = average volume</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title">Filter Toggles</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 24px">
+            <div class="toggle-row"><input type="checkbox" id="f-use_market_regime_filter"><div><div class="toggle-label">Market Regime Filter</div><div class="toggle-sub">Block trades in choppy/high-risk conditions</div></div></div>
+            <div class="toggle-row"><input type="checkbox" id="f-use_trend_filter"><div><div class="toggle-label">Trend Filter (HTF)</div><div class="toggle-sub">Require bullish 60m trend before entry</div></div></div>
+            <div class="toggle-row"><input type="checkbox" id="f-use_entry_filter"><div><div class="toggle-label">Entry Filter (LTF)</div><div class="toggle-sub">Require entry indicators on signal TF</div></div></div>
+            <div class="toggle-row"><input type="checkbox" id="f-use_atr_filter"><div><div class="toggle-label">ATR Filter</div><div class="toggle-sub">Only trade when volatility meets threshold</div></div></div>
+          </div>
+          <div class="form-grid" style="margin-top:12px;max-width:500px">
+            <div class="field">
+              <label>Min Trend Indicators Required</label>
+              <input id="f-min_indicators_required" type="number" step="1" min="1" placeholder="2">
+            </div>
+            <div class="field">
+              <label>Min Entry Indicators Required</label>
+              <input id="f-min_entry_indicators_required" type="number" step="1" min="1" placeholder="2">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title">Position Exit Logic</div>
+          <div class="toggle-row">
+            <input type="checkbox" id="f-use_trend_invalidation_exit">
+            <div>
+              <div class="toggle-label">Trend Invalidation Exit</div>
+              <div class="toggle-sub">Close position when trend indicators turn bearish</div>
+            </div>
+          </div>
+          <div class="form-grid" style="margin-top:12px;max-width:600px">
+            <div class="field">
+              <label>Invalidation Indicators</label>
+              <select id="f-trend_invalidation_indicators">
+                <option value="entry">Entry indicators</option>
+                <option value="trend">Trend indicators</option>
+                <option value="mean_reversion">Mean reversion</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Min Position Age (min)</label>
+              <input id="f-min_position_age_for_trend_check" type="number" step="15" placeholder="120">
+              <div class="field-hint">Don't check until position is this old</div>
+            </div>
+            <div class="field">
+              <label>Max Position Hours</label>
+              <input id="f-max_position_hours" type="number" step="1" placeholder="18">
+              <div class="field-hint">Force-exit if stuck (leave blank to disable)</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tab-settings -->
+
+      <!-- ── CIRCUIT BREAKER TAB ──────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-cb">
+        <div id="cb-active-banner" style="display:none" class="active-breaker-banner">
+          <div class="ab-label">⚡ Circuit Breaker Active</div>
+          <div class="ab-text" id="cb-active-text">—</div>
+        </div>
+        <div class="form-section">
+          <div class="section-title">Daily Limits</div>
+          <div class="cb-grid">
+            <div class="field">
+              <label>Max Daily Profit %</label>
+              <input id="f-cb-max_daily_profit_pct" type="number" step="0.5" placeholder="5.0">
+              <div class="field-hint">Lock trading after this gain</div>
+            </div>
+            <div class="field">
+              <label>Max Daily Loss %</label>
+              <input id="f-cb-max_daily_loss_pct" type="number" step="0.5" placeholder="3.0">
+              <div class="field-hint">Lock trading after this loss</div>
+            </div>
+            <div class="field">
+              <label>Profit Lock Hours</label>
+              <input id="f-cb-profit_lock_hours" type="number" step="1" placeholder="6">
+            </div>
+            <div class="field">
+              <label>Loss Lock Hours</label>
+              <input id="f-cb-loss_lock_hours" type="number" step="1" placeholder="12">
+            </div>
+          </div>
+          <div class="toggle-row" style="margin-top:12px">
+            <input type="checkbox" id="f-cb-is_active">
+            <div>
+              <div class="toggle-label">Circuit Breaker Enabled</div>
+              <div class="toggle-sub">Uncheck to disable all daily limits for this profile</div>
+            </div>
+          </div>
+        </div>
+        <div id="cb-daily-summary" style="margin-top:16px"></div>
+      </div>
+
+      <!-- ── SYMBOLS TAB ─────────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-symbols">
+        <div class="ind-toolbar-inline">
+          <span style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--txd)" id="sym-p-label">—</span>
+          <span style="flex:1"></span>
+          <span id="sym-count-label" style="font-size:10px;color:var(--txd)"></span>
+          <button class="btn-new" onclick="openAddSymbol()">+ Add Symbol</button>
+        </div>
+        <table class="dt">
+          <thead><tr>
+            <th>Symbol</th><th>Order Size (USDC)</th><th>Max Position %</th>
+            <th>Enabled</th><th>Updated</th><th></th>
+          </tr></thead>
+          <tbody id="sym-tbody">
+            <tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── INDICATORS TAB ─────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-indicators">
+        <div class="ind-toolbar-inline">
+          <div style="display:flex;gap:0;border:1px solid var(--brd)">
+            <div class="stab on" style="border-bottom:none;padding:5px 14px;font-size:10px" onclick="setIndCatP('all',this)">All</div>
+            <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('trend',this)">Trend</div>
+            <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('entry',this)">Entry</div>
+          </div>
+          <span style="flex:1"></span>
+          <span id="ind-count-p" style="font-size:10px;color:var(--txd)"></span>
+          <button class="btn-new" onclick="openAddIndicatorP()">+ Add</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:4px" id="ind-grid-p">
+          <div style="color:var(--txd);font-size:11px;grid-column:1/-1;padding:16px 0">Select a profile to load indicators</div>
+        </div>
+      </div>
+
+      <!-- ── Save bar (Settings + CB tabs) ──────────────────────────── -->
+      <div class="save-bar" id="save-bar">
+        <button class="btn-save" onclick="saveCurrentTab()"><span id="save-btn-text">Save Changes</span></button>
+        <div class="save-status" id="save-status"></div>
+      </div>
+    </div><!-- /profile-detail -->
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<!-- ── Create Profile Modal ────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="create-modal" style="display:none" onclick="if(event.target===this)closeCreateModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">Create New Profile</span>
+      <button class="modal-close" onclick="closeCreateModal()">×</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-row">
+        <label>Exchange Account <span style="color:var(--red)">*</span></label>
+        <select id="cm-account">
+          <option value="">Loading accounts...</option>
+        </select>
+        <!-- Shows key hint once an account is selected -->
+        <div id="cm-account-hint" style="margin-top:6px;font-size:10px;color:var(--txd);display:none">
+          🔑 API key: <span id="cm-account-key-hint" style="color:var(--txb)">—</span>
+          &nbsp;·&nbsp; credentials will be copied from this account
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Internal Name <span style="color:var(--red)">*</span> <span style="color:var(--txd)">(unique, no spaces)</span></label>
+        <input type="text" id="cm-name" placeholder="e.g. mean_rev_large_dip">
+      </div>
+
+      <div class="form-row">
+        <label>Display Name <span style="color:var(--red)">*</span></label>
+        <input type="text" id="cm-display" placeholder="e.g. Mean Rev — Large Dip">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-row" style="margin-bottom:0">
+          <label>Strategy Type</label>
+          <select id="cm-strategy">
+            <option value="trend_following">Trend Following</option>
+            <option value="mean_reversion">Mean Reversion</option>
+            <option value="range_trading">Range Trading</option>
+          </select>
+        </div>
+        <div class="form-row" style="margin-bottom:0">
+          <label>Trading Type</label>
+          <select id="cm-trading">
+            <option value="rules_live">Rules Live</option>
+            <option value="shadow">Shadow</option>
+            <option value="ai_live">AI Live</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-err" id="cm-err"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="mbtn sec" onclick="closeCreateModal()">Cancel</button>
+      <button class="mbtn" onclick="createProfile()">Create Profile</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Change Credentials Modal ───────────────────────────────────────────── -->
+<div class="modal-overlay" id="creds-modal" style="display:none" onclick="if(event.target===this)closeCredsModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">Change Credentials — <span id="creds-modal-profile">—</span></span>
+      <button class="modal-close" onclick="closeCredsModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:rgba(255,204,0,.06);border:1px solid rgba(255,204,0,.2);padding:10px 14px;margin-bottom:16px;font-size:11px;color:var(--warn)">
+        ⚠️ New credentials will be encrypted and stored immediately. The profile will be reloaded.
+      </div>
+      <div class="form-row"><label>New API Key <span style="color:var(--red)">*</span></label><input type="text" id="cr-apikey" placeholder="Exchange API key"></div>
+      <div class="form-row"><label>New Secret <span style="color:var(--red)">*</span></label><input type="password" id="cr-secret" placeholder="Exchange secret"></div>
+      <div class="form-err" id="cr-err"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="mbtn sec" onclick="closeCredsModal()">Cancel</button>
+      <button class="mbtn" onclick="saveCredentials()">Update Credentials</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Symbol modal (reuse from index.html pattern) ───────────────────────── -->
+<div class="modal-overlay" id="sym-modal-p" style="display:none" onclick="if(event.target===this)closeSymModalP()">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-header"><span class="modal-title" id="sym-modal-title-p">Add Symbol Config</span><button class="modal-close" onclick="closeSymModalP()">×</button></div>
+    <div class="modal-body">
+      <div class="form-row"><label>Symbol</label><input type="text" id="smp-symbol" placeholder="e.g. SOL_USDC" style="text-transform:uppercase"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-row" style="margin-bottom:0"><label>Order Size (USDC)</label><input type="number" step="0.01" id="smp-size" placeholder="150"></div>
+        <div class="form-row" style="margin-bottom:0"><label>Max Position %</label><input type="number" step="0.1" id="smp-maxpos" placeholder="40"></div>
+      </div>
+      <div class="toggle-row" style="margin-top:12px"><input type="checkbox" id="smp-enabled" checked><div class="toggle-label">Enabled</div></div>
+      <div class="form-err" id="smp-err"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="mbtn sec" onclick="closeSymModalP()">Cancel</button>
+      <button class="mbtn dng" id="smp-del-btn" style="display:none" onclick="deleteSymP()">Delete</button>
+      <button class="mbtn" onclick="saveSymP()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Indicator modal (same as index.html) ───────────────────────────────── -->
+<div class="modal-overlay" id="ind-modal-p" style="display:none" onclick="if(event.target===this)closeIndModalP()">
+  <div class="modal-box">
+    <div class="modal-header"><span class="modal-title" id="imodp-title">Add Indicator</span><button class="modal-close" onclick="closeIndModalP()">×</button></div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div class="form-row" style="margin-bottom:0"><label>Category</label><select id="imodp-cat"><option value="trend">Trend</option><option value="entry">Entry</option></select></div>
+        <div class="form-row" style="margin-bottom:0"><label>Type</label><select id="imodp-type" onchange="onIndTypePChange()"></select></div>
+      </div>
+      <div style="display:flex;gap:20px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx);cursor:pointer"><input type="checkbox" id="imodp-hardstop"> Hard Stop</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx);cursor:pointer"><input type="checkbox" id="imodp-enabled" checked> Enabled</label>
+      </div>
+      <div class="form-row" style="margin-bottom:0"><label>Parameters (JSON)</label><textarea id="imodp-json" style="width:100%;min-height:140px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;font-family:'Space Mono',monospace;font-size:11px;resize:vertical;outline:none" placeholder='{"key": value}'></textarea></div>
+      <div class="form-err" id="imodp-err"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="mbtn sec" onclick="closeIndModalP()">Cancel</button>
+      <button class="mbtn dng" id="imodp-del-btn" style="display:none" onclick="deleteIndP()">Delete</button>
+      <button class="mbtn" onclick="saveIndP()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+const BASE = window.location.origin;
+let S = { u: null, role: null, internalKey: null, userId: null };
+let _currentProfile = null;  // current profile object
+let _allProfiles = [];
+let _symDataP = [];
+let _symEditId = null;
+let _indDataP = [];
+let _indCatP = 'all';
+let _indEditId = null;
+let _currentTab = 'settings';
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+
+async function init() {
+  try {
+    const r = await fetch(BASE + '/auth/me', { credentials: 'include' });
+    if (!r.ok) { window.location.href = '/'; return; }
+    const d = await r.json();
+    S = { u: d.username, role: d.role, internalKey: d.internal_api_key, userId: d.user_id  };
+    document.getElementById('huser').textContent = S.u;
+    document.getElementById('auth-gate').style.display = 'none';
+    loadProfiles();
+  } catch {
+    window.location.href = '/';
+  }
+}
+
+async function doLogout() {
+  await fetch(BASE + '/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+  window.location.href = '/';
+}
+
+function akey() { return S.internalKey ?? null; }
+
+async function api(path, opts = {}) {
+  const k = akey(); if (!k) return null;
+  try {
+    const r = await fetch(BASE + path, {
+      credentials: 'include',
+      headers: { 'X-API-Key': k, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+      ...opts
+    });
+    if (r.status === 204) return { ok: true };
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.detail || 'HTTP ' + r.status);
+    }
+    return await r.json();
+  } catch (e) {
+    console.warn('[API]', path, e.message);
+    throw e;
+  }
+}
+
+// ── Profile list ──────────────────────────────────────────────────────────────
+
+async function loadProfiles() {
+  try {
+    _allProfiles = await api('/profiles') ?? [];
+    renderSidebar();
+  } catch (e) {
+    document.getElementById('profile-list').innerHTML =
+      `<div style="padding:16px;color:var(--red);font-size:11px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderSidebar() {
+  const el = document.getElementById('profile-list');
+  if (!_allProfiles.length) {
+    el.innerHTML = '<div style="padding:16px;color:var(--txd);font-size:11px">No profiles yet — create one</div>';
+    return;
+  }
+  el.innerHTML = _allProfiles.map(p => {
+    const tradingBadge = tradingTypeBadge(p.trading_type);
+    const stratBadge = `<span class="pi-badge pb-off">${(p.strategy_type || '').replace('_', ' ')}</span>`;
+    const activeBadge = !p.is_active ? '<span class="pi-badge pb-off">inactive</span>' : '';
+    return `<div class="profile-item${_currentProfile?.name === p.name ? ' active' : ''}" onclick="selectProfile('${p.name}')">
+      <div class="pi-name">${p.display_name}</div>
+      <div class="pi-badges">${tradingBadge}${stratBadge}${activeBadge}</div>
+    </div>`;
+  }).join('');
+}
+
+function tradingTypeBadge(t) {
+  if (t === 'rules_live') return '<span class="pi-badge pb-live">Live</span>';
+  if (t === 'shadow')     return '<span class="pi-badge pb-shadow">Shadow</span>';
+  if (t === 'ai_live')    return '<span class="pi-badge pb-ai">AI Live</span>';
+  return `<span class="pi-badge pb-off">${t || '—'}</span>`;
+}
+
+// ── Select profile ────────────────────────────────────────────────────────────
+
+async function selectProfile(name) {
+  try {
+    _currentProfile = await api('/profiles/' + name);
+    renderSidebar(); // re-render to highlight active
+    showProfileDetail();
+  } catch (e) {
+    showToast('Failed to load profile: ' + e.message, true);
+  }
+}
+
+function showProfileDetail() {
+  const p = _currentProfile;
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('profile-detail').style.display = 'flex';
+
+  document.getElementById('ph-name').textContent = p.display_name;
+  document.getElementById('key-hint').textContent = p.key_hint ?? '—';
+  document.getElementById('creds-modal-profile').textContent = p.name;
+  document.getElementById('sym-p-label').textContent = p.name;
+
+  // Badges
+  document.getElementById('ph-badges').innerHTML =
+    tradingTypeBadge(p.trading_type) +
+    `<span class="pi-badge pb-off" style="margin-left:4px">${(p.strategy_type || '').replace('_', ' ')}</span>` +
+    (!p.is_active ? '<span class="pi-badge pb-off" style="margin-left:4px">inactive</span>' : '');
+
+  // Fill settings form
+  fillSettings(p);
+
+  // Load CB config
+  fillCB(p.circuit_breaker);
+  loadCBSummary(p.name);
+
+  // Load symbols & indicators
+  loadSymbolsP();
+  loadIndicatorsP();
+
+  // Show save bar only for settings/cb
+  updateSaveBar();
+
+  // Ensure settings tab is shown
+  showTab('settings', document.querySelector('.stab'));
+}
+
+function fillSettings(p) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val ?? '';
+  };
+  set('f-name-ro', p.name);
+  set('f-display_name', p.display_name);
+  set('f-trading_type', p.trading_type);
+  set('f-strategy_type', p.strategy_type);
+  set('f-take_profit_pct', p.take_profit_pct);
+  set('f-stop_loss_pct', p.stop_loss_pct);
+  set('f-trailing_stop_pct', p.trailing_stop_pct);
+  set('f-arm_trailing_stop_pct', p.arm_trailing_stop_pct);
+  set('f-use_trailing_stop', p.use_trailing_stop);
+  set('f-default_order_size_usdc', p.default_order_size_usdc);
+  set('f-max_position_size_pct', p.max_position_size_pct);
+  set('f-max_open_positions', p.max_open_positions);
+  set('f-max_portfolio_exposure_pct', p.max_portfolio_exposure_pct);
+  set('f-signal_timeframe', p.signal_timeframe);
+  set('f-trend_timeframe', p.trend_timeframe);
+  set('f-entry_timeframe', p.entry_timeframe);
+  set('f-signal_cooldown_seconds', p.signal_cooldown_seconds);
+  set('f-min_signal_confidence', p.min_signal_confidence);
+  set('f-min_volume_ratio', p.min_volume_ratio);
+  set('f-use_market_regime_filter', p.use_market_regime_filter);
+  set('f-use_trend_filter', p.use_trend_filter);
+  set('f-use_entry_filter', p.use_entry_filter);
+  set('f-use_atr_filter', p.use_atr_filter);
+  set('f-min_indicators_required', p.min_indicators_required);
+  set('f-min_entry_indicators_required', p.min_entry_indicators_required);
+  set('f-use_trend_invalidation_exit', p.use_trend_invalidation_exit);
+  set('f-trend_invalidation_indicators', p.trend_invalidation_indicators);
+  set('f-min_position_age_for_trend_check', p.min_position_age_for_trend_check);
+  set('f-max_position_hours', p.max_position_hours);
+}
+
+function fillCB(cb) {
+  if (!cb) return;
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val ?? '';
+  };
+  set('f-cb-max_daily_profit_pct', cb.max_daily_profit_pct);
+  set('f-cb-max_daily_loss_pct', cb.max_daily_loss_pct);
+  set('f-cb-profit_lock_hours', cb.profit_lock_hours);
+  set('f-cb-loss_lock_hours', cb.loss_lock_hours);
+  set('f-cb-is_active', cb.is_active !== false);
+}
+
+async function loadCBSummary(profileName) {
+  const banner = document.getElementById('cb-active-banner');
+  const sumEl = document.getElementById('cb-daily-summary');
+  try {
+    const s = await api('/circuit-breaker/daily-summary/' + profileName);
+    if (s?.circuit_breaker_active) {
+      banner.style.display = 'block';
+      document.getElementById('cb-active-text').textContent =
+        `${s.daily_pnl_pct ?? '—'}  ·  ${s.hours_remaining}h remaining`;
+    } else {
+      banner.style.display = 'none';
+    }
+    sumEl.innerHTML = s ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-width:700px">
+        ${cbStat('Day P&L', s.daily_pnl_pct, s.daily_pnl)}
+        ${cbStat('CB P&L', s.cb_pnl_pct)}
+        ${cbStat('Start Balance', s.daily_start_balance)}
+        ${cbStat('Current', s.current_balance)}
+        ${cbStat('Reset In', s.hours_until_reset + 'h')}
+      </div>` : '';
+  } catch { banner.style.display = 'none'; }
+}
+
+function cbStat(label, val, sub) {
+  return `<div style="background:var(--bg3);border:1px solid var(--brd);padding:12px 14px">
+    <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);margin-bottom:4px">${label}</div>
+    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txb)">${val ?? '—'}</div>
+    ${sub ? `<div style="font-size:10px;color:var(--txd);margin-top:2px">${sub}</div>` : ''}
+  </div>`;
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+function showTab(name, el) {
+  _currentTab = name;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('on'));
+  document.querySelectorAll('.stab').forEach(t => t.classList.remove('on'));
+  const panel = document.getElementById('tab-' + name);
+  if (panel) panel.classList.add('on');
+  if (el) el.classList.add('on');
+  updateSaveBar();
+}
+
+function updateSaveBar() {
+  const bar = document.getElementById('save-bar');
+  // Show save bar only for settings and CB tabs
+  bar.style.display = (_currentTab === 'settings' || _currentTab === 'cb') ? 'flex' : 'none';
+  document.getElementById('save-status').textContent = '';
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+
+async function saveCurrentTab() {
+  if (!_currentProfile) return;
+  if (_currentTab === 'settings') await saveSettings();
+  else if (_currentTab === 'cb') await saveCB();
+}
+
+function getNum(id) {
+  const v = document.getElementById(id)?.value?.trim();
+  return v === '' || v === null || v === undefined ? null : parseFloat(v);
+}
+function getInt(id) {
+  const v = document.getElementById(id)?.value?.trim();
+  return v === '' || v === null || v === undefined ? null : parseInt(v);
+}
+function getStr(id) {
+  const v = document.getElementById(id)?.value?.trim();
+  return v === '' ? null : v;
+}
+function getBool(id) { return document.getElementById(id)?.checked ?? null; }
+
+async function saveSettings() {
+  const btn = document.getElementById('save-btn-text');
+  const status = document.getElementById('save-status');
+  btn.textContent = 'Saving...';
+  status.textContent = '';
+
+  const body = {
+    display_name:                   getStr('f-display_name'),
+    trading_type:                   getStr('f-trading_type'),
+    strategy_type:                  getStr('f-strategy_type'),
+    take_profit_pct:                getNum('f-take_profit_pct'),
+    stop_loss_pct:                  getNum('f-stop_loss_pct'),
+    trailing_stop_pct:              getNum('f-trailing_stop_pct'),
+    arm_trailing_stop_pct:          getNum('f-arm_trailing_stop_pct'),
+    use_trailing_stop:              getBool('f-use_trailing_stop'),
+    default_order_size_usdc:        getNum('f-default_order_size_usdc'),
+    max_position_size_pct:          getNum('f-max_position_size_pct'),
+    max_open_positions:             getInt('f-max_open_positions'),
+    max_portfolio_exposure_pct:     getNum('f-max_portfolio_exposure_pct'),
+    signal_timeframe:               getStr('f-signal_timeframe'),
+    trend_timeframe:                getStr('f-trend_timeframe'),
+    entry_timeframe:                getStr('f-entry_timeframe'),
+    signal_cooldown_seconds:        getInt('f-signal_cooldown_seconds'),
+    min_signal_confidence:          getNum('f-min_signal_confidence'),
+    min_volume_ratio:               getNum('f-min_volume_ratio'),
+    use_market_regime_filter:       getBool('f-use_market_regime_filter'),
+    use_trend_filter:               getBool('f-use_trend_filter'),
+    use_entry_filter:               getBool('f-use_entry_filter'),
+    use_atr_filter:                 getBool('f-use_atr_filter'),
+    min_indicators_required:        getInt('f-min_indicators_required'),
+    min_entry_indicators_required:  getInt('f-min_entry_indicators_required'),
+    use_trend_invalidation_exit:    getBool('f-use_trend_invalidation_exit'),
+    trend_invalidation_indicators:  getStr('f-trend_invalidation_indicators'),
+    min_position_age_for_trend_check: getInt('f-min_position_age_for_trend_check'),
+    max_position_hours:             getInt('f-max_position_hours'),
+  };
+  // Remove nulls so we don't accidentally blank fields
+  Object.keys(body).forEach(k => body[k] === null && delete body[k]);
+
+  try {
+    await api('/profiles/' + _currentProfile.name, { method: 'PUT', body: JSON.stringify(body) });
+    status.textContent = '✓ Saved';
+    status.className = 'save-status ok';
+    showToast('Settings saved');
+    // Refresh
+    _currentProfile = await api('/profiles/' + _currentProfile.name);
+    // Update sidebar display name if changed
+    const idx = _allProfiles.findIndex(p => p.name === _currentProfile.name);
+    if (idx >= 0) _allProfiles[idx] = _currentProfile;
+    renderSidebar();
+    document.getElementById('ph-name').textContent = _currentProfile.display_name;
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'save-status err';
+  } finally {
+    btn.textContent = 'Save Changes';
+  }
+}
+
+async function saveCB() {
+  const btn = document.getElementById('save-btn-text');
+  const status = document.getElementById('save-status');
+  btn.textContent = 'Saving...';
+  const body = {
+    max_daily_profit_pct: getNum('f-cb-max_daily_profit_pct'),
+    max_daily_loss_pct:   getNum('f-cb-max_daily_loss_pct'),
+    profit_lock_hours:    getInt('f-cb-profit_lock_hours'),
+    loss_lock_hours:      getInt('f-cb-loss_lock_hours'),
+    is_active:            getBool('f-cb-is_active'),
+  };
+  Object.keys(body).forEach(k => body[k] === null && delete body[k]);
+  try {
+    await api('/profiles/' + _currentProfile.name + '/circuit-breaker',
+              { method: 'PUT', body: JSON.stringify(body) });
+    status.textContent = '✓ Saved';
+    status.className = 'save-status ok';
+    showToast('Circuit breaker config saved');
+    loadCBSummary(_currentProfile.name);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'save-status err';
+  } finally {
+    btn.textContent = 'Save Changes';
+  }
+}
+
+let _exchangeAccounts = [];   // [{id, name, key_hint}, ...]
+
+async function loadExchangeAccounts() {
+  try {
+    _exchangeAccounts = await api('/exchange-accounts') ?? [];
+  } catch (e) {
+    _exchangeAccounts = [];
+    console.warn('Could not load exchange accounts:', e.message);
+  }
+}
+
+function renderAccountDropdown() {
+  const sel = document.getElementById('cm-account');
+  if (!_exchangeAccounts.length) {
+    sel.innerHTML = '<option value="">No exchange accounts found — create one first</option>';
+    return;
+  }
+  sel.innerHTML =
+    '<option value="">— Select exchange account —</option>' +
+    _exchangeAccounts.map(a =>
+      `<option value="${a.id}">${a.name}</option>`
+    ).join('');
+}
+
+function onAccountChange() {
+  const sel = document.getElementById('cm-account');
+  const hint = document.getElementById('cm-account-hint');
+  const keyHint = document.getElementById('cm-account-key-hint');
+  const accountId = parseInt(sel.value);
+  const account = _exchangeAccounts.find(a => a.id === accountId);
+
+  if (account) {
+    // Show which account's credentials will be used
+    keyHint.textContent = account.key_hint ?? '(encrypted)';
+    hint.style.display = 'block';
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+
+// ── Create Profile Modal ──────────────────────────────────────────────────────
+
+// ── Create Modal ──────────────────────────────────────────────────────────────
+
+async function openCreateModal() {
+  // Load accounts fresh each time modal opens
+  await loadExchangeAccounts();
+  renderAccountDropdown();
+
+  // Wire up account change handler
+  const sel = document.getElementById('cm-account');
+  sel.onchange = onAccountChange;
+
+  // Reset fields
+  document.getElementById('cm-name').value = '';
+  document.getElementById('cm-display').value = '';
+  document.getElementById('cm-strategy').value = 'trend_following';
+  document.getElementById('cm-trading').value = 'rules_live';
+  document.getElementById('cm-err').textContent = '';
+  document.getElementById('cm-account-hint').style.display = 'none';
+
+  document.getElementById('create-modal').style.display = 'flex';
+}
+
+function closeCreateModal() {
+  document.getElementById('create-modal').style.display = 'none';
+  document.getElementById('cm-err').textContent = '';
+}
+
+
+async function createProfile() {
+  const accountId = parseInt(document.getElementById('cm-account').value);
+  const name      = document.getElementById('cm-name').value.trim();
+  const display   = document.getElementById('cm-display').value.trim();
+  const err       = document.getElementById('cm-err');
+
+  if (!accountId) { err.textContent = 'Please select an exchange account'; return; }
+  if (!name)      { err.textContent = 'Internal name is required'; return; }
+  if (!display)   { err.textContent = 'Display name is required'; return; }
+  if (/\s/.test(name)) { err.textContent = 'Internal name cannot contain spaces'; return; }
+
+  try {
+    const result = await api('/profiles', {
+      method: 'POST',
+      body: JSON.stringify({
+        account_id:    accountId,
+        name:          name,
+        display_name:  display,
+        strategy_type: document.getElementById('cm-strategy').value,
+        trading_type:  document.getElementById('cm-trading').value,
+        user_id: S.userId, 
+      })
+    });
+    closeCreateModal();
+    showToast(`Profile "${result.name}" created (linked to ${result.account_name})`);
+    await loadProfiles();
+    selectProfile(name);
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+// ── Credentials Modal ─────────────────────────────────────────────────────────
+
+function openCredsModal() { document.getElementById('creds-modal').style.display = 'flex'; }
+function closeCredsModal() {
+  document.getElementById('creds-modal').style.display = 'none';
+  document.getElementById('cr-err').textContent = '';
+  document.getElementById('cr-apikey').value = '';
+  document.getElementById('cr-secret').value = '';
+}
+
+async function saveCredentials() {
+  const apiKey = document.getElementById('cr-apikey').value.trim();
+  const secret = document.getElementById('cr-secret').value.trim();
+  const err = document.getElementById('cr-err');
+  if (!apiKey || !secret) { err.textContent = 'Both fields required'; return; }
+  try {
+    await api('/profiles/' + _currentProfile.name + '/credentials', {
+      method: 'PUT',
+      body: JSON.stringify({ raw_api_key: apiKey, raw_secret: secret }),
+    });
+    closeCredsModal();
+    showToast('Credentials updated');
+    // Refresh hint
+    _currentProfile = await api('/profiles/' + _currentProfile.name);
+    document.getElementById('key-hint').textContent = _currentProfile.key_hint ?? '—';
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+// ── Deactivate ────────────────────────────────────────────────────────────────
+
+async function deactivateProfile() {
+  if (!_currentProfile) return;
+  if (!confirm(`Deactivate profile "${_currentProfile.display_name}"?\n\nThis will stop all signal generation for this profile. You can re-activate it via the DB if needed.`)) return;
+  try {
+    await api('/profiles/' + _currentProfile.name, { method: 'DELETE' });
+    showToast('Profile deactivated');
+    _currentProfile = null;
+    document.getElementById('profile-detail').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'flex';
+    await loadProfiles();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+// ── Symbols (profiles page version) ──────────────────────────────────────────
+
+async function loadSymbolsP() {
+  if (!_currentProfile) return;
+  const data = await api('/config/symbols/' + _currentProfile.name).catch(() => null);
+  _symDataP = data ?? [];
+  renderSymTableP();
+}
+
+function renderSymTableP() {
+  const tbody = document.getElementById('sym-tbody');
+  document.getElementById('sym-count-label').textContent = _symDataP.length + ' symbol(s)';
+  if (!_symDataP.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">No symbol configs</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _symDataP.map(s => {
+    const en = !!s.enabled;
+    return `<tr>
+      <td style="color:var(--txb);font-weight:700">${s.symbol}</td>
+      <td>$${parseFloat(s.order_size_usdc || 0).toFixed(2)}</td>
+      <td>${s.max_position_size_pct != null ? parseFloat(s.max_position_size_pct).toFixed(1) + '%' : '—'}</td>
+      <td><span class="bs ${en ? 'bl2' : 'bsh'}">${en ? 'ACTIVE' : 'OFF'}</span></td>
+      <td style="color:var(--txd);font-size:11px">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
+      <td style="text-align:right"><button class="btn-new" style="font-size:10px" onclick='openEditSymP(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddSymbol() {
+  _symEditId = null;
+  document.getElementById('sym-modal-title-p').textContent = 'Add Symbol Config';
+  document.getElementById('smp-symbol').value = '';
+  document.getElementById('smp-symbol').disabled = false;
+  document.getElementById('smp-size').value = '';
+  document.getElementById('smp-maxpos').value = '';
+  document.getElementById('smp-enabled').checked = true;
+  document.getElementById('smp-del-btn').style.display = 'none';
+  document.getElementById('smp-err').textContent = '';
+  document.getElementById('sym-modal-p').style.display = 'flex';
+}
+
+function openEditSymP(sym) {
+  _symEditId = sym.symbol;
+  document.getElementById('sym-modal-title-p').textContent = 'Edit Symbol Config';
+  document.getElementById('smp-symbol').value = sym.symbol;
+  document.getElementById('smp-symbol').disabled = true;
+  document.getElementById('smp-size').value = sym.order_size_usdc != null ? parseFloat(sym.order_size_usdc) : '';
+  document.getElementById('smp-maxpos').value = sym.max_position_size_pct != null ? parseFloat(sym.max_position_size_pct) : '';
+  document.getElementById('smp-enabled').checked = !!sym.enabled;
+  document.getElementById('smp-del-btn').style.display = '';
+  document.getElementById('smp-err').textContent = '';
+  document.getElementById('sym-modal-p').style.display = 'flex';
+}
+
+function closeSymModalP() { document.getElementById('sym-modal-p').style.display = 'none'; }
+
+async function saveSymP() {
+  const prof = _currentProfile?.name;
+  const symbol = (_symEditId ?? document.getElementById('smp-symbol').value.trim().toUpperCase());
+  if (!symbol) { document.getElementById('smp-err').textContent = 'Symbol required'; return; }
+  const sz = document.getElementById('smp-size').value.trim();
+  if (!sz) { document.getElementById('smp-err').textContent = 'Order size required'; return; }
+  try {
+    await api('/config/symbol/' + prof + '/' + symbol, {
+      method: 'POST',
+      body: JSON.stringify({
+        order_size_usdc: parseFloat(sz),
+        max_position_size_pct: document.getElementById('smp-maxpos').value.trim()
+          ? parseFloat(document.getElementById('smp-maxpos').value.trim()) : null,
+        enabled: document.getElementById('smp-enabled').checked,
+      })
+    });
+    closeSymModalP();
+    loadSymbolsP();
+    showToast('Symbol config saved');
+  } catch (e) {
+    document.getElementById('smp-err').textContent = e.message;
+  }
+}
+
+async function deleteSymP() {
+  if (!_symEditId || !_currentProfile) return;
+  if (!confirm('Delete config for ' + _symEditId + '?')) return;
+  closeSymModalP();
+  try {
+    await api('/config/symbol/' + _currentProfile.name + '/' + _symEditId, { method: 'DELETE' });
+    loadSymbolsP();
+    showToast('Symbol config deleted');
+  } catch (e) { showToast(e.message, true); }
+}
+
+// ── Indicators (profiles page version — JSON-only editor) ────────────────────
+
+const IND_TYPES = [
+  'ema_slope','bollinger_bands','adx_regime','rsi_overbought','rsi_threshold',
+  'rsi_range','rsi_reversal_momentum','ema_gap','price_vs_ema','price_below_vwap',
+  'price_extended_below_ema','price_vs_vwap','volume_spike','reversal_candle',
+  'bb_width_regime','bb_pct_b_momentum',
+];
+
+const IND_DEFAULTS = {
+  ema_slope:              '{"ema":20,"direction":"not_falling","min_slope_pct":0.01}',
+  rsi_threshold:          '{"period":14,"min_value":50,"use_momentum":false}',
+  rsi_overbought:         '{"min_value":68}',
+  rsi_reversal_momentum:  '{"lookback_candles":10,"oversold_threshold":45,"current_min":36,"min_jump":3,"require_sustained":false}',
+  bollinger_bands:        '{"band":"lower","mode":"pct_b","max_pct_b":0.25}',
+  price_vs_ema:           '{"ema":20,"min_gap_pct":-1.5,"max_gap_pct":2}',
+  price_below_vwap:       '{"min_gap_pct":-0.15,"max_gap_pct":-2}',
+  volume_spike:           '{"min_ratio":1,"max_ratio":8}',
+  adx_regime:             '{"max_adx":25}',
+  rsi_range:              '{"min":40,"max":65,"invert":false}',
+  reversal_candle:        '{"pattern":"hammer","max_drop_from_close_pct":0.5}',
+  bb_width_regime:        '{"required_direction":"not_expanding","lookback":4}',
+  bb_pct_b_momentum:      '{"required_direction":"not_rising","lookback":3}',
+  default:                '{}',
+};
+
+async function loadIndicatorsP() {
+  if (!_currentProfile) return;
+  _indDataP = await api('/indicators/' + _currentProfile.name).catch(() => []) ?? [];
+  renderIndGridP();
+}
+
+function setIndCatP(cat, el) {
+  _indCatP = cat;
+  document.querySelectorAll('#tab-indicators .stab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  renderIndGridP();
+}
+
+function renderIndGridP() {
+  const grid = document.getElementById('ind-grid-p');
+  const filtered = _indCatP === 'all' ? _indDataP : _indDataP.filter(i => i.category === _indCatP);
+  document.getElementById('ind-count-p').textContent = filtered.length + ' indicator(s)';
+  if (!filtered.length) {
+    grid.innerHTML = `<div style="color:var(--txd);font-size:11px;padding:8px 0;grid-column:1/-1">No indicators — click + Add to create one</div>`;
+    return;
+  }
+  const groups = _indCatP === 'all'
+    ? ['trend','entry'].filter(c => filtered.some(i => i.category === c))
+    : [_indCatP];
+  grid.innerHTML = groups.map(cat => {
+    const items = filtered.filter(i => i.category === cat);
+    const header = _indCatP === 'all'
+      ? `<div style="grid-column:1/-1;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--acc);padding:4px 0;margin-top:8px">${cat}</div>`
+      : '';
+    return header + items.map(renderIndCardP).join('');
+  }).join('');
+}
+
+function renderIndCardP(ind) {
+  const params = Object.entries(ind.params ?? {})
+    .filter(([k, v]) => v !== null && v !== undefined && k !== 'hard_stop')
+    .map(([k, v]) => `<div style="background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.12);padding:3px 8px;font-size:10px;display:inline-block;margin:2px"><span style="color:var(--txd);margin-right:4px">${k}</span><b style="color:var(--txb)">${v}</b></div>`)
+    .join('');
+  const hardBadge = ind.is_hard_stop
+    ? '<span style="font-size:9px;padding:1px 6px;border:1px solid rgba(255,60,90,.4);color:var(--red);background:rgba(255,60,90,.07)">Hard Stop</span>'
+    : '<span style="font-size:9px;padding:1px 6px;border:1px solid rgba(255,204,0,.35);color:var(--warn);background:rgba(255,204,0,.06)">Soft</span>';
+  return `<div style="background:var(--bg3);border:1px solid var(--brd);${!ind.enabled ? 'opacity:.45' : ''}">
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--brd)">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:var(--txb);flex:1">${ind.indicator_type}</div>
+      ${hardBadge}
+    </div>
+    <div style="padding:8px 12px;min-height:28px">${params || '<span style="color:var(--txd);font-size:10px">No params</span>'}</div>
+    <div style="display:flex;border-top:1px solid var(--brd)">
+      <button style="flex:1;background:transparent;border:none;border-right:1px solid var(--brd);color:var(--txd);padding:6px 0;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s;text-transform:uppercase" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--txd)'" onclick="openEditIndP(${ind.id})">✎ Edit</button>
+      <button style="flex:1;background:transparent;border:none;border-right:1px solid var(--brd);color:var(--txd);padding:6px 0;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s;text-transform:uppercase" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--txd)'" onclick="quickToggleP(${ind.id})">${ind.enabled ? 'Disable' : 'Enable'}</button>
+      <button style="flex:1;background:transparent;border:none;color:var(--txd);padding:6px 0;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s;text-transform:uppercase" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--txd)'" onclick="deleteIndPById(${ind.id})">✗ Del</button>
+    </div>
+  </div>`;
+}
+
+function openAddIndicatorP() {
+  _indEditId = null;
+  document.getElementById('imodp-title').textContent = 'Add Indicator';
+  document.getElementById('imodp-del-btn').style.display = 'none';
+  document.getElementById('imodp-cat').value = _indCatP === 'all' ? 'trend' : _indCatP;
+  document.getElementById('imodp-hardstop').checked = true;
+  document.getElementById('imodp-enabled').checked = true;
+  // Populate type select
+  const sel = document.getElementById('imodp-type');
+  sel.innerHTML = IND_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
+  document.getElementById('imodp-json').value = IND_DEFAULTS[IND_TYPES[0]] ?? '{}';
+  document.getElementById('imodp-err').textContent = '';
+  document.getElementById('ind-modal-p').style.display = 'flex';
+}
+
+function onIndTypePChange() {
+  const t = document.getElementById('imodp-type').value;
+  document.getElementById('imodp-json').value = IND_DEFAULTS[t] ?? IND_DEFAULTS.default;
+}
+
+function openEditIndP(id) {
+  const ind = _indDataP.find(i => i.id === id);
+  if (!ind) return;
+  _indEditId = id;
+  document.getElementById('imodp-title').textContent = 'Edit Indicator';
+  document.getElementById('imodp-del-btn').style.display = 'block';
+  document.getElementById('imodp-cat').value = ind.category;
+  document.getElementById('imodp-hardstop').checked = ind.is_hard_stop;
+  document.getElementById('imodp-enabled').checked = ind.enabled;
+  const sel = document.getElementById('imodp-type');
+  sel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t === ind.indicator_type ? ' selected' : ''}>${t}</option>`).join('');
+  // Remove hard_stop from display params
+  const cleanParams = Object.fromEntries(Object.entries(ind.params ?? {}).filter(([k]) => k !== 'hard_stop'));
+  document.getElementById('imodp-json').value = JSON.stringify(cleanParams, null, 2);
+  document.getElementById('imodp-err').textContent = '';
+  document.getElementById('ind-modal-p').style.display = 'flex';
+}
+
+function closeIndModalP() { document.getElementById('ind-modal-p').style.display = 'none'; }
+
+async function saveIndP() {
+  const prof = _currentProfile?.name;
+  let params;
+  try {
+    params = JSON.parse(document.getElementById('imodp-json').value || '{}');
+  } catch (e) {
+    document.getElementById('imodp-err').textContent = 'Invalid JSON: ' + e.message;
+    return;
+  }
+  const body = {
+    category:       document.getElementById('imodp-cat').value,
+    indicator_type: document.getElementById('imodp-type').value,
+    params,
+    is_hard_stop:   document.getElementById('imodp-hardstop').checked,
+    enabled:        document.getElementById('imodp-enabled').checked,
+  };
+  try {
+    if (_indEditId == null) {
+      await api('/indicators/' + prof, { method: 'POST', body: JSON.stringify(body) });
+    } else {
+      await api('/indicators/' + prof + '/' + _indEditId, { method: 'PUT', body: JSON.stringify(body) });
+    }
+    closeIndModalP();
+    loadIndicatorsP();
+    showToast('Indicator saved');
+  } catch (e) {
+    document.getElementById('imodp-err').textContent = e.message;
+  }
+}
+
+async function quickToggleP(id) {
+  const prof = _currentProfile?.name;
+  const result = await api('/indicators/' + prof + '/' + id + '/toggle', { method: 'PATCH' }).catch(e => { showToast(e.message, true); return null; });
+  if (result) {
+    const idx = _indDataP.findIndex(i => i.id === id);
+    if (idx >= 0) _indDataP[idx] = result;
+    renderIndGridP();
+  }
+}
+
+async function deleteIndPById(id) {
+  if (!confirm('Delete this indicator? Cannot be undone.')) return;
+  const prof = _currentProfile?.name;
+  try {
+    await fetch(BASE + '/indicators/' + prof + '/' + id, {
+      method: 'DELETE', credentials: 'include',
+      headers: { 'X-API-Key': akey() ?? '' },
+    });
+    _indDataP = _indDataP.filter(i => i.id !== id);
+    renderIndGridP();
+    showToast('Indicator deleted');
+  } catch (e) { showToast(e.message, true); }
+}
+
+function deleteIndP() {
+  if (_indEditId != null) { closeIndModalP(); deleteIndPById(_indEditId); }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+let _toastTimer;
+function showToast(msg, isErr = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = isErr ? 'err' : 'ok';
+  el.style.display = 'block';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+init();
+</script>
+</body>
+</html>

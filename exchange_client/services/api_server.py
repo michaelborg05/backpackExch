@@ -11,6 +11,7 @@ from models.webhook import TrendUpdateAlert, TrendData
 from models.symbol import SymbolConfigRequest
 from models.ai_prompt import AIPromptCreate, AIPromptUpdate
 from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorOut
+from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.trading_builder import TradingService, process_tradingview_alert
@@ -2351,7 +2352,476 @@ async def reload_prompt_cache(prompt_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
  
+
+# ---------------------------------------------------------------------------
+# GET /profiles  — list all profiles (active + inactive)
+# ---------------------------------------------------------------------------
+@app.get("/profiles", dependencies=[Depends(require_read_permission)])
+async def list_profiles():
+    """
+    Return all trading profiles with their full DB config.
+    API key/secret are returned as hints only (last 6 chars).
+    """
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, CircuitBreakerConfig
+
+    with get_db_session() as db:
+        profiles = db.query(TradingProfileDB).order_by(TradingProfileDB.name).all()
+        result = []
+        for p in profiles:
+            cb = db.query(CircuitBreakerConfig).filter(
+                CircuitBreakerConfig.profile_name == p.name
+            ).first()
+            result.append(_serialize_profile(p, cb))
+        return result
+
+
+# ---------------------------------------------------------------------------
+# GET /profiles/{profile_name}
+# ---------------------------------------------------------------------------
+@app.get("/profiles/{profile_name}", dependencies=[Depends(require_read_permission)])
+async def get_profile_detail(profile_name: str):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, CircuitBreakerConfig
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(
+            TradingProfileDB.name == profile_name
+        ).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        cb = db.query(CircuitBreakerConfig).filter(
+            CircuitBreakerConfig.profile_name == profile_name
+        ).first()
+        return _serialize_profile(p, cb)
+
+
+# ---------------------------------------------------------------------------
+# POST /profiles  — create new profile
+# ---------------------------------------------------------------------------
+@app.post("/profiles", dependencies=[Depends(require_admin_permission)])
+async def create_profile_endpoint(body: ProfileCreateRequest):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, CircuitBreakerConfig, ExchangeAccount
+    from services.audit import write_audit
+
+    with get_db_session() as db:
+        # Validate profile name is unique
+        existing = db.query(TradingProfileDB).filter(
+            TradingProfileDB.name == body.name
+        ).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Profile '{body.name}' already exists")
+
+        # Resolve exchange account — must exist and be active
+        account = db.query(ExchangeAccount).filter(
+            ExchangeAccount.id == body.account_id,
+            ExchangeAccount.is_active == True,
+        ).first()
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Exchange account {body.account_id} not found or inactive"
+            )
+
+        # Copy encrypted credentials from the exchange account
+        # (temporary duplication — will be removed once all reads go through ExchangeAccount)
+        p = TradingProfileDB(
+            name=body.name,
+            display_name=body.display_name,
+            account_id=body.account_id,
+            api_key=account.api_key,       # copied from ExchangeAccount (already encrypted)
+            secret=account.secret,         # copied from ExchangeAccount (already encrypted)
+            trading_type=body.trading_type,
+            strategy_type=body.strategy_type,
+            take_profit_pct=body.take_profit_pct,
+            stop_loss_pct=body.stop_loss_pct,
+            trailing_stop_pct=body.trailing_stop_pct,
+            arm_trailing_stop_pct=body.arm_trailing_stop_pct,
+            use_trailing_stop=body.use_trailing_stop,
+            default_order_size_usdc=body.default_order_size_usdc,
+            max_position_size_pct=body.max_position_size_pct,
+            max_open_positions=body.max_open_positions,
+            max_portfolio_exposure_pct=body.max_portfolio_exposure_pct,
+            signal_timeframe=body.signal_timeframe,
+            signal_cooldown_seconds=body.signal_cooldown_seconds,
+            min_signal_confidence=body.min_signal_confidence,
+            min_volume_ratio=body.min_volume_ratio,
+            trend_timeframe=body.trend_timeframe,
+            entry_timeframe=body.entry_timeframe,
+            use_market_regime_filter=body.use_market_regime_filter,
+            use_trend_filter=body.use_trend_filter,
+            use_entry_filter=body.use_entry_filter,
+            use_atr_filter=body.use_atr_filter,
+            min_indicators_required=body.min_indicators_required,
+            min_entry_indicators_required=body.min_entry_indicators_required,
+            is_active=body.is_active,
+        )
+        db.add(p)
+        db.flush()
+
+        # Default circuit breaker config
+        cb = CircuitBreakerConfig(
+            profile_name=p.name,
+            max_daily_profit_pct=Decimal("5.0"),
+            max_daily_loss_pct=Decimal("3.0"),
+            profit_lock_hours=6,
+            loss_lock_hours=12,
+            is_active=True,
+        )
+        db.add(cb)
+
+        write_audit(
+            db=db,
+            type="profile",
+            subtype="create",
+            action="create",
+            entity_id=p.id,
+            entity_name=p.name,
+            before=None,
+            after={
+                "name":          p.name,
+                "display_name":  p.display_name,
+                "account_id":    p.account_id,
+                "account_name":  account.name,
+                "strategy_type": p.strategy_type,
+                "trading_type":  p.trading_type,
+            },
+        )
+
+        from db.models import UserProfileMapping
+        usermapping = UserProfileMapping(
+            user_id = body.user_id,
+            profile_name = body.name,
+            is_active = body.is_active,
+        )
+        db.add(usermapping)
+        db.commit()
+        db.refresh(p)
+
+        apiserver_logger.info(
+            f"Created profile '{p.name}' (id={p.id}) "
+            f"linked to exchange account '{account.name}' (id={account.id})"
+        )
+        return {
+            "id":           p.id,
+            "name":         p.name,
+            "account_id":   p.account_id,
+            "account_name": account.name,
+            "message":      f"Profile '{p.name}' created",
+        }
+
+
+# ---------------------------------------------------------------------------
+# PUT /profiles/{profile_name}  — partial update
+# ---------------------------------------------------------------------------
+@app.put("/profiles/{profile_name}", dependencies=[Depends(require_admin_permission)])
+async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB
+    from services.audit import write_audit
+
+    _EDITABLE = [
+        "display_name", "trading_type", "strategy_type",
+        "take_profit_pct", "stop_loss_pct", "trailing_stop_pct",
+        "arm_trailing_stop_pct", "use_trailing_stop",
+        "default_order_size_usdc", "max_position_size_pct",
+        "max_open_positions", "max_portfolio_exposure_pct",
+        "signal_timeframe", "signal_cooldown_seconds",
+        "min_signal_confidence", "min_volume_ratio",
+        "trend_timeframe", "entry_timeframe",
+        "use_market_regime_filter", "use_trend_filter",
+        "use_entry_filter", "use_atr_filter",
+        "min_indicators_required", "min_entry_indicators_required",
+        "use_trend_invalidation_exit", "trend_invalidation_indicators",
+        "min_position_age_for_trend_check", "max_position_hours",
+        "is_active",
+    ]
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        before = {k: _safe_val(getattr(p, k, None)) for k in _EDITABLE}
+        changes = {}
+
+        for field in _EDITABLE:
+            val = getattr(body, field, None)
+            if val is not None:
+                setattr(p, field, val)
+                changes[field] = val
+
+        if not changes:
+            return {"message": "No changes provided"}
+
+        write_audit(
+            db=db,
+            type="profile",
+            subtype="update",
+            action="update",
+            entity_id=p.id,
+            entity_name=p.name,
+            before={k: before[k] for k in changes},
+            after=changes,
+        )
+
+        db.commit()
+        db.refresh(p)
+
+        # Invalidate signal generator cache so it picks up new profile
+        from services.signal_generator import invalidate_signal_generator
+        invalidate_signal_generator(profile_name)
+
+        apiserver_logger.info(f"Updated profile '{profile_name}': {list(changes.keys())}")
+        return {"name": p.name, "updated_fields": list(changes.keys())}
+
+
+def _safe_val(v):
+    from decimal import Decimal
+    return float(v) if isinstance(v, Decimal) else v
+
+# ---------------------------------------------------------------------------
+# PUT /profiles/{profile_name}/credentials  — update API key/secret
+# ---------------------------------------------------------------------------
+@app.put("/profiles/{profile_name}/credentials", dependencies=[Depends(require_admin_permission)])
+async def update_profile_credentials(profile_name: str, body: ProfileCredentialsRequest):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB
+    from utils.db_secrets import encrypt_secret
+    from services.audit import write_audit
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        p.api_key = encrypt_secret(body.raw_api_key)
+        p.secret = encrypt_secret(body.raw_secret)
+
+        write_audit(
+            db=db, type="profile", subtype="credentials", action="update",
+            entity_id=p.id, entity_name=p.name,
+            before={"api_key": "***", "secret": "***"},
+            after={"api_key": "***updated***", "secret": "***updated***"},
+        )
+        db.commit()
+
+        # Force profile reload so new credentials are used immediately
+        from services.signal_generator import invalidate_signal_generator
+        invalidate_signal_generator(profile_name)
+
+        return {"message": f"Credentials updated for '{profile_name}'"}
+
+
+# ---------------------------------------------------------------------------
+# DELETE /profiles/{profile_name}  — soft-deactivate
+# ---------------------------------------------------------------------------
+@app.delete("/profiles/{profile_name}", dependencies=[Depends(require_admin_permission)])
+async def deactivate_profile_endpoint(profile_name: str):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB
+    from services.audit import write_audit
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        # Safety: block deactivation if open positions exist
+        from db.crud import get_open_positions
+        open_pos = get_open_positions(db, profile_name)
+        if open_pos:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot deactivate profile with {len(open_pos)} open position(s). Close them first."
+            )
+
+        before = {"is_active": p.is_active}
+        p.is_active = False
+
+        write_audit(
+            db=db, type="profile", subtype="deactivate", action="delete",
+            entity_id=p.id, entity_name=p.name,
+            before=before, after={"is_active": False},
+        )
+        db.commit()
+
+        from services.signal_generator import invalidate_signal_generator
+        invalidate_signal_generator(profile_name)
+
+        return {"message": f"Profile '{profile_name}' deactivated"}
+
+
+# ---------------------------------------------------------------------------
+# GET /profiles/{profile_name}/circuit-breaker
+# ---------------------------------------------------------------------------
+@app.get("/profiles/{profile_name}/circuit-breaker", dependencies=[Depends(require_read_permission)])
+async def get_profile_cb_config(profile_name: str):
+    from db.utils import get_db_session
+    from db.models import CircuitBreakerConfig
+
+    with get_db_session() as db:
+        cb = db.query(CircuitBreakerConfig).filter(
+            CircuitBreakerConfig.profile_name == profile_name
+        ).first()
+        if not cb:
+            raise HTTPException(status_code=404, detail=f"No circuit breaker config for '{profile_name}'")
+        return _serialize_cb(cb)
+
+
+# ---------------------------------------------------------------------------
+# PUT /profiles/{profile_name}/circuit-breaker
+# ---------------------------------------------------------------------------
+@app.put("/profiles/{profile_name}/circuit-breaker", dependencies=[Depends(require_admin_permission)])
+async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdateRequest):
+    from db.utils import get_db_session
+    from db.models import CircuitBreakerConfig
+    from services.audit import write_audit
+
+    with get_db_session() as db:
+        cb = db.query(CircuitBreakerConfig).filter(
+            CircuitBreakerConfig.profile_name == profile_name
+        ).first()
+        if not cb:
+            # Auto-create if missing
+            cb = CircuitBreakerConfig(
+                profile_name=profile_name,
+                max_daily_profit_pct=Decimal("5.0"),
+                max_daily_loss_pct=Decimal("3.0"),
+                profit_lock_hours=6,
+                loss_lock_hours=12,
+                is_active=True,
+            )
+            db.add(cb)
+            db.flush()
+
+        before = _serialize_cb(cb)
+        changes = {}
+
+        for field in ["max_daily_profit_pct", "max_daily_loss_pct",
+                      "profit_lock_hours", "loss_lock_hours", "is_active"]:
+            val = getattr(body, field, None)
+            if val is not None:
+                setattr(cb, field, val)
+                changes[field] = val
+
+        write_audit(
+            db=db, type="profile", subtype="circuit_breaker", action="update",
+            entity_id=cb.id, entity_name=f"CB:{profile_name}",
+            before={k: before[k] for k in changes}, after=changes,
+        )
+        db.commit()
+        db.refresh(cb)
+        return _serialize_cb(cb)
+
+@app.get("/exchange-accounts", dependencies=[Depends(require_read_permission)])
+async def list_exchange_accounts():
+    """Return all active exchange accounts for dropdowns."""
+    from db.utils import get_db_session
+    from db.models import ExchangeAccount
  
+    with get_db_session() as db:
+        accounts = (
+            db.query(ExchangeAccount)
+            .filter(ExchangeAccount.is_active == True)
+            .order_by(ExchangeAccount.name)
+            .all()
+        )
+        return [
+            {
+                "id":   a.id,
+                "name": a.name,
+            }
+            for a in accounts
+        ]
+ 
+# ---------------------------------------------------------------------------
+# Helper serialisers (add as module-level functions in api_server.py)
+# ---------------------------------------------------------------------------
+
+def _serialize_profile(p, cb=None) -> dict:
+    """Serialise TradingProfileDB to a safe dict (no raw keys)."""
+    from utils.db_secrets import resolve_secret
+    raw_key = None
+    try:
+        raw_key = resolve_secret(p.api_key)
+    except Exception:
+        pass
+
+    return {
+        "id":                          p.id,
+        "name":                        p.name,
+        "display_name":                p.display_name,
+        "is_active":                   p.is_active,
+        "key_hint":                    f"...{raw_key[-6:]}" if raw_key else None,
+
+        # Strategy
+        "trading_type":                p.trading_type,
+        "strategy_type":               p.strategy_type,
+
+        # Risk
+        "take_profit_pct":             float(p.take_profit_pct)       if p.take_profit_pct       else None,
+        "stop_loss_pct":               float(p.stop_loss_pct)         if p.stop_loss_pct         else None,
+        "trailing_stop_pct":           float(p.trailing_stop_pct)     if p.trailing_stop_pct     else None,
+        "arm_trailing_stop_pct":       float(p.arm_trailing_stop_pct) if p.arm_trailing_stop_pct else None,
+        "use_trailing_stop":           bool(p.use_trailing_stop),
+
+        # Sizing
+        "default_order_size_usdc":     float(p.default_order_size_usdc)     if p.default_order_size_usdc     else 100.0,
+        "max_position_size_pct":       float(p.max_position_size_pct)       if p.max_position_size_pct       else None,
+        "max_open_positions":          int(p.max_open_positions)            if p.max_open_positions            else 5,
+        "max_portfolio_exposure_pct":  float(p.max_portfolio_exposure_pct)  if p.max_portfolio_exposure_pct  else 80.0,
+
+        # Signal
+        "signal_timeframe":            p.signal_timeframe,
+        "signal_cooldown_seconds":     p.signal_cooldown_seconds,
+        "min_signal_confidence":       float(p.min_signal_confidence) if p.min_signal_confidence else 72.0,
+        "min_volume_ratio":            float(p.min_volume_ratio)      if p.min_volume_ratio      else 1.0,
+
+        # Timeframes
+        "trend_timeframe":             p.trend_timeframe,
+        "entry_timeframe":             p.entry_timeframe,
+
+        # Filters
+        "use_market_regime_filter":    bool(p.use_market_regime_filter),
+        "use_trend_filter":            bool(p.use_trend_filter),
+        "use_entry_filter":            bool(p.use_entry_filter),
+        "use_atr_filter":              bool(p.use_atr_filter),
+
+        # Indicator thresholds
+        "min_indicators_required":     p.min_indicators_required,
+        "min_entry_indicators_required": p.min_entry_indicators_required,
+
+        # Exit logic
+        "use_trend_invalidation_exit":          bool(p.use_trend_invalidation_exit) if p.use_trend_invalidation_exit is not None else False,
+        "trend_invalidation_indicators":        p.trend_invalidation_indicators if p.trend_invalidation_indicators else None,
+        "min_position_age_for_trend_check":     p.min_position_age_for_trend_check if p.min_position_age_for_trend_check else None,
+        "max_position_hours":                   p.max_position_hours if p.max_position_hours else None,
+
+        # Circuit breaker (embedded)
+        "circuit_breaker":             _serialize_cb(cb) if cb else None,
+
+        # Timestamps
+        "created_at":                  p.created_at.isoformat() if p.created_at else None,
+        "updated_at":                  p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+def _serialize_cb(cb) -> dict:
+    if not cb:
+        return {}
+    return {
+        "id":                   cb.id,
+        "profile_name":         cb.profile_name,
+        "max_daily_profit_pct": float(cb.max_daily_profit_pct) if cb.max_daily_profit_pct else 5.0,
+        "max_daily_loss_pct":   float(cb.max_daily_loss_pct)   if cb.max_daily_loss_pct   else 3.0,
+        "profit_lock_hours":    cb.profit_lock_hours,
+        "loss_lock_hours":      cb.loss_lock_hours,
+        "is_active":            bool(cb.is_active),
+    }
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Config Audit Log — read-only endpoints
 # ══════════════════════════════════════════════════════════════════════════════

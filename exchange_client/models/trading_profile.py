@@ -117,3 +117,110 @@ class TradingProfile(BaseModel):
         return summary
     
  
+class ProfileCreateRequest(BaseModel):
+    name: str
+    display_name: str
+    account_id:   int            # Required — links to ExchangeAccount
+    user_id: int                #stored for linking user to app_user_mapping
+
+    # Strategy
+    trading_type: Optional[str] = "rules_live"
+    strategy_type: Optional[str] = "trend_following"
+
+    # Risk
+    take_profit_pct: Optional[float] = None
+    stop_loss_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    arm_trailing_stop_pct: Optional[float] = None
+    use_trailing_stop: Optional[bool] = False
+
+    # Sizing
+    default_order_size_usdc: Optional[float] = 100.0
+    max_position_size_pct: Optional[float] = 40.0
+    max_open_positions: Optional[int] = 5
+    max_portfolio_exposure_pct: Optional[float] = 80.0
+
+    # Signal generation
+    signal_timeframe: Optional[str] = "15"
+    signal_cooldown_seconds: Optional[int] = 900
+    min_signal_confidence: Optional[float] = 72.0
+    min_volume_ratio: Optional[float] = 1.0
+
+    # Timeframes
+    trend_timeframe: Optional[str] = "60"
+    entry_timeframe: Optional[str] = "15"
+
+    # Filter toggles
+    use_market_regime_filter: Optional[bool] = False
+    use_trend_filter: Optional[bool] = False
+    use_entry_filter: Optional[bool] = False
+    use_atr_filter: Optional[bool] = False
+
+    # Indicator thresholds
+    min_indicators_required: Optional[int] = 2
+    min_entry_indicators_required: Optional[int] = 2
+
+    # Exit logic
+    use_trend_invalidation_exit: Optional[bool] = False
+    trend_invalidation_indicators: Optional[str] = "entry"
+    min_position_age_for_trend_check: Optional[int] = 120
+    max_position_hours: Optional[int] = None
+
+    # Active flag
+    is_active: Optional[bool] = True
+
+
+class ProfileUpdateRequest(BaseModel):
+    """Partial update — only non-None fields are applied."""
+    display_name: Optional[str] = None
+
+    trading_type: Optional[str] = None
+    strategy_type: Optional[str] = None
+
+    take_profit_pct: Optional[float] = None
+    stop_loss_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    arm_trailing_stop_pct: Optional[float] = None
+    use_trailing_stop: Optional[bool] = None
+
+    default_order_size_usdc: Optional[float] = None
+    max_position_size_pct: Optional[float] = None
+    max_open_positions: Optional[int] = None
+    max_portfolio_exposure_pct: Optional[float] = None
+
+    signal_timeframe: Optional[str] = None
+    signal_cooldown_seconds: Optional[int] = None
+    min_signal_confidence: Optional[float] = None
+    min_volume_ratio: Optional[float] = None
+
+    trend_timeframe: Optional[str] = None
+    entry_timeframe: Optional[str] = None
+
+    use_market_regime_filter: Optional[bool] = None
+    use_trend_filter: Optional[bool] = None
+    use_entry_filter: Optional[bool] = None
+    use_atr_filter: Optional[bool] = None
+
+    min_indicators_required: Optional[int] = None
+    min_entry_indicators_required: Optional[int] = None
+
+    use_trend_invalidation_exit: Optional[bool] = None
+    trend_invalidation_indicators: Optional[str] = None
+    min_position_age_for_trend_check: Optional[int] = None
+    max_position_hours: Optional[int] = None
+
+    is_active: Optional[bool] = None
+
+
+class ProfileCredentialsRequest(BaseModel):
+    raw_api_key: str
+    raw_secret: str
+
+
+class CircuitBreakerUpdateRequest(BaseModel):
+    max_daily_profit_pct: Optional[float] = None
+    max_daily_loss_pct: Optional[float] = None
+    profit_lock_hours: Optional[int] = None
+    loss_lock_hours: Optional[int] = None
+    is_active: Optional[bool] = None
+
