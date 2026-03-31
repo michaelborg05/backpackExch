@@ -1083,6 +1083,8 @@ class MonitoringService:
                 self._execute_signal(signal, profile, trading=signal_gen._trading)
                 
                 # Update last signal time
+                cooldown_key = f"{profile.name}_{signal.symbol}"
+
                 self._last_signals[cooldown_key] = time.time()
                 
             except Exception as e:
