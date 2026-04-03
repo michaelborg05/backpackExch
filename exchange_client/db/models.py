@@ -288,40 +288,6 @@ class SymbolConfig(Base):
         ),
     )
 
-class TrendHistory(Base):
-    """
-    Stores trend indicator snapshots for cache warmup after deployments.
-    Keeps last N entries per symbol/timeframe to rebuild historical context.
-    """
-    __tablename__ = "trend_history"
-    
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String, nullable=False, index=True)
-    timeframe = Column(String, nullable=False, index=True)
-    
-    # Core indicators (store as JSON for flexibility)
-    trend_data = Column(JSON, nullable=False)
-    
-    # Denormalized for easier querying
-    price = Column(Float, nullable=False)
-    rsi = Column(Float, nullable=False)
-    ema20 = Column(Float, nullable=False)
-    ema50 = Column(Float, nullable=False)
-    vwap = Column(Float, nullable=True)
-    volume_ratio = Column(Float, nullable=True)
-    adx = Column(Float, nullable=True)
-    # Tracking
-    indicators_changed = Column(Boolean, default=True)  # Was this a significant change?
-    data_timestamp = Column(DateTime(timezone=True), nullable=False)  # When data was generated
-    created_at = Column(DateTime(timezone=True), server_default=func.now())  # When saved to DB
-    
-    __table_args__ = (
-        # Composite index for efficient lookups
-        Index('ix_trend_history_symbol_timeframe_timestamp', 'symbol', 'timeframe', 'data_timestamp'),
-        # Prevent exact duplicates
-        UniqueConstraint('symbol', 'timeframe', 'data_timestamp', name='uq_trend_history_entry'),
-    )
-
 class Order(Base):
     __tablename__ = "orders"
     
@@ -451,6 +417,9 @@ class TrendAnalysisLog(Base):
     low = Column(Float)
     close = Column(Float)
     
+    # Live price at time of signal (distinct from prev_candle close)
+    price = Column(Float)
+
     # Indicators
     rsi = Column(Float)
     ema20 = Column(Float)

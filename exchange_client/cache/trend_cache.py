@@ -159,7 +159,6 @@ class TrendCache:
             
             # Persist to database if enabled
             if persist_to_db:
-                self._save_to_database(trend_data)
                 self._log_for_analysis(trend_data)
 
             # Log the change
@@ -176,31 +175,6 @@ class TrendCache:
                 f"Vol: {trend_data.volume_ratio:.2f}x" if trend_data.volume_ratio else "Vol: N/A"
             )
     
-    def _save_to_database(self, trend_data: TrendData):
-        """
-        Save trend snapshot to database for cache warmup after restarts.
-        Uses a separate session to avoid interfering with main application flow.
-        """
-        
-        from db.utils import get_db_session
-
-        with get_db_session() as db:
-            from db.crud_trend import save_trend_snapshot
-            
-            try:
-                save_trend_snapshot(db, trend_data, max_entries_per_symbol=15)
-                self._stats['db_saves'] += 1
-                
-                self.logger.debug(
-                    f"💾 Saved to DB: {trend_data.symbol} ({trend_data.timeframe})"
-                )
-            except Exception as e:
-                self._stats['db_save_errors'] += 1
-                self.logger.error(
-                    f"❌ Failed to save trend to database: {e}",
-                    exc_info=True
-                )
-                
     def _log_for_analysis(self, trend_data: TrendData):
         """Specialized logging for trade pattern analysis"""
         from db.utils import get_db_session

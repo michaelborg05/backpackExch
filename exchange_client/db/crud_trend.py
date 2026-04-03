@@ -1,261 +1,117 @@
-# db/crud_trend_history.py
+# db/crud_trend.py
 """
-CRUD operations for TrendHistory table.
-Handles saving and loading trend data for cache warmup.
+CRUD operations for trend data.
+Handles saving and loading trend data for cache warmup and analysis.
 """
 
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
-from db.models import TrendHistory, TrendAnalysisLog
-from models.webhook import TrendData
+from db.models import TrendAnalysisLog
+from models.webhook import TrendData, PrevCandle, BollingerBands
 from utils.logging import log_manager
 
-logger = log_manager.get_logger("TrendHistoryCRUD")
+logger = log_manager.get_logger("TrendCRUD")
 
-
-def save_trend_snapshot(
-    db: Session,
-    trend_data: TrendData,
-    max_entries_per_symbol: int = 15
-) -> TrendHistory:
-    """
-    Save a trend snapshot to the database.
-    Automatically manages retention - keeps only last N entries per symbol/timeframe.
-    
-    Args:
-        db: Database session
-        trend_data: TrendData object from webhook
-        max_entries_per_symbol: Maximum snapshots to keep per symbol/timeframe (default 5)
-        
-    Returns:
-        Created TrendHistory record
-    """
-    # Convert TrendData to JSON-serializable dict
-    trend_dict = trend_data.model_dump()
-    
-    # Create record
-    history_entry = TrendHistory(
-        symbol=trend_data.symbol,
-        timeframe=trend_data.timeframe,
-        trend_data=trend_dict,
-        price=float(trend_data.price),
-        rsi=float(trend_data.rsi),
-        ema20=float(trend_data.ema20),
-        ema50=float(trend_data.ema50),
-        vwap=float(trend_data.vwap) if trend_data.vwap else None,
-        volume_ratio=float(trend_data.volume_ratio) if trend_data.volume_ratio else None,
-        adx=float(trend_data.adx) if trend_data.adx else None,
-        indicators_changed=getattr(trend_data, 'indicators_changed', True),
-        data_timestamp=datetime.fromtimestamp(
-            getattr(trend_data, 'timestamp', datetime.now(timezone.utc).timestamp()),
-            tz=timezone.utc
-        )
-    )
-    
-    db.add(history_entry)
-    db.commit()
-    db.refresh(history_entry)
-    
-    # Clean up old entries (keep only last N)
-    _cleanup_old_entries(
-        db,
-        symbol=trend_data.symbol,
-        timeframe=trend_data.timeframe,
-        max_entries=max_entries_per_symbol
-    )
-    
-    logger.debug(
-        f"Saved trend snapshot: {trend_data.symbol} ({trend_data.timeframe}) - "
-        f"RSI: {trend_data.rsi:.1f}, Price: ${trend_data.price:.2f}"
-    )
-    
-    return history_entry
-
-
-def _cleanup_old_entries(
-    db: Session,
-    symbol: str,
-    timeframe: str,
-    max_entries: int
-):
-    """
-    Remove old entries, keeping only the most recent N for this symbol/timeframe.
-    
-    Args:
-        db: Database session
-        symbol: Trading symbol
-        timeframe: Timeframe (e.g., '1h', '4h')
-        max_entries: Number of entries to keep
-    """
-    # Get all entries for this symbol/timeframe, ordered by newest first
-    all_entries = (
-        db.query(TrendHistory)
-        .filter(
-            TrendHistory.symbol == symbol,
-            TrendHistory.timeframe == timeframe
-        )
-        .order_by(desc(TrendHistory.data_timestamp))
-        .all()
-    )
-    
-    # If we have more than max_entries, delete the oldest ones
-    if len(all_entries) > max_entries:
-        entries_to_delete = all_entries[max_entries:]
-        for entry in entries_to_delete:
-            db.delete(entry)
-        
-        db.commit()
-        logger.debug(
-            f"Cleaned up {len(entries_to_delete)} old entries for "
-            f"{symbol} ({timeframe}), kept {max_entries} most recent"
-        )
+WARMUP_ENTRIES = 15  # rows per symbol/timeframe to replay on startup
 
 
 def get_trend_history(
     db: Session,
     symbol: str,
     timeframe: str,
-    limit: Optional[int] = None
-) -> List[TrendHistory]:
+    limit: int = WARMUP_ENTRIES,
+) -> List[TrendAnalysisLog]:
     """
-    Retrieve trend history for a symbol/timeframe, ordered by timestamp (oldest first).
-    
-    Args:
-        db: Database session
-        symbol: Trading symbol
-        timeframe: Timeframe (e.g., '1h', '4h')
-        limit: Optional limit on number of records to return
-        
-    Returns:
-        List of TrendHistory records, ordered oldest to newest
+    Retrieve the last N trend_analysis_log rows for a symbol/timeframe,
+    ordered oldest-first so the cache can replay them in sequence.
     """
-    query = (
-        db.query(TrendHistory)
+    # Fetch newest-first with limit, then reverse for oldest-first replay
+    rows = (
+        db.query(TrendAnalysisLog)
         .filter(
-            TrendHistory.symbol == symbol,
-            TrendHistory.timeframe == timeframe
+            TrendAnalysisLog.symbol == symbol,
+            TrendAnalysisLog.timeframe == timeframe,
         )
-        .order_by(TrendHistory.data_timestamp)  # Oldest first for replay
+        .order_by(desc(TrendAnalysisLog.timestamp))
+        .limit(limit)
+        .all()
     )
-    
-    if limit:
-        query = query.limit(limit)
-    
-    return query.all()
+    rows.reverse()
+    return rows
 
 
 def get_all_symbols_with_history(db: Session) -> List[Dict[str, str]]:
     """
-    Get all unique symbol/timeframe combinations that have saved history.
-    
-    Returns:
-        List of dicts with 'symbol' and 'timeframe' keys
+    Return all distinct symbol/timeframe pairs present in trend_analysis_log.
     """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     results = (
-        db.query(TrendHistory.symbol, TrendHistory.timeframe)
+        db.query(TrendAnalysisLog.symbol, TrendAnalysisLog.timeframe)
+        .filter(TrendAnalysisLog.timestamp >= cutoff)
         .distinct()
         .all()
     )
-    
     return [{'symbol': symbol, 'timeframe': timeframe} for symbol, timeframe in results]
 
 
-def load_trend_data_from_history(history_entry: TrendHistory) -> TrendData:
+def load_trend_data_from_history(row: TrendAnalysisLog) -> TrendData:
     """
-    Convert a TrendHistory database record back into a TrendData object.
+    Reconstruct a TrendData object from a TrendAnalysisLog row.
     """
-    # Use the unpacking operator (**) to feed the dict directly into the model
-    return TrendData(**history_entry.trend_data)
-
-def get_latest_trend_snapshot(
-    db: Session,
-    symbol: str,
-    timeframe: str
-) -> Optional[TrendHistory]:
-    """
-    Get the most recent trend snapshot for a symbol/timeframe.
-    
-    Args:
-        db: Database session
-        symbol: Trading symbol
-        timeframe: Timeframe
-        
-    Returns:
-        Latest TrendHistory record or None if not found
-    """
-    return (
-        db.query(TrendHistory)
-        .filter(
-            TrendHistory.symbol == symbol,
-            TrendHistory.timeframe == timeframe
-        )
-        .order_by(desc(TrendHistory.data_timestamp))
-        .first()
+    prev_candle = PrevCandle(
+        prev_open=row.open,
+        prev_high=row.high,
+        prev_low=row.low,
+        prev_close=row.close,
     )
-
-
-def delete_trend_history(
-    db: Session,
-    symbol: Optional[str] = None,
-    timeframe: Optional[str] = None
-) -> int:
-    """
-    Delete trend history. Can delete all, or filter by symbol/timeframe.
-    
-    Args:
-        db: Database session
-        symbol: Optional symbol filter
-        timeframe: Optional timeframe filter
-        
-    Returns:
-        Number of records deleted
-    """
-    query = db.query(TrendHistory)
-    
-    if symbol:
-        query = query.filter(TrendHistory.symbol == symbol)
-    if timeframe:
-        query = query.filter(TrendHistory.timeframe == timeframe)
-    
-    count = query.count()
-    query.delete()
-    db.commit()
-    
-    logger.info(f"Deleted {count} trend history records")
-    return count
+    bb = BollingerBands(
+        bb_upper=row.bb_upper,
+        bb_lower=row.bb_lower,
+        bb_basis=row.bb_basis,
+    )
+    return TrendData(
+        symbol=row.symbol,
+        timeframe=row.timeframe,
+        price=float(row.price) if row.price is not None else float(row.close or 0),
+        rsi=float(row.rsi) if row.rsi is not None else 50.0,
+        ema20=float(row.ema20) if row.ema20 is not None else float(row.close or 0),
+        ema50=float(row.ema50) if row.ema50 is not None else float(row.close or 0),
+        vwap=float(row.vwap) if row.vwap is not None else float(row.close or 0),
+        volume=float(row.volume) if row.volume is not None else None,
+        volume_sma=float(row.volume_sma) if row.volume_sma is not None else None,
+        volume_ratio=float(row.volume_ratio) if row.volume_ratio is not None else None,
+        adx=float(row.adx) if row.adx is not None else None,
+        timestamp=row.timestamp.timestamp() if row.timestamp else None,
+        prev_candle=prev_candle,
+        bb=bb,
+        indicators_changed=True,
+    )
 
 
 def get_trend_history_stats(db: Session) -> Dict[str, Any]:
     """
-    Get statistics about stored trend history.
-    
-    Returns:
-        Dict with stats about the trend history table
+    Return record counts per symbol/timeframe from trend_analysis_log.
     """
-    total_records = db.query(TrendHistory).count()
-    
+    total_records = db.query(TrendAnalysisLog).count()
+
     symbol_timeframe_counts = (
         db.query(
-            TrendHistory.symbol,
-            TrendHistory.timeframe,
-            func.count(TrendHistory.id).label('count')
+            TrendAnalysisLog.symbol,
+            TrendAnalysisLog.timeframe,
+            func.count(TrendAnalysisLog.id).label('count'),
         )
-        .group_by(TrendHistory.symbol, TrendHistory.timeframe)
+        .group_by(TrendAnalysisLog.symbol, TrendAnalysisLog.timeframe)
         .all()
     )
-    
+
     return {
         'total_records': total_records,
         'symbol_timeframe_breakdown': [
-            {
-                'symbol': symbol,
-                'timeframe': timeframe,
-                'record_count': count
-            }
+            {'symbol': symbol, 'timeframe': timeframe, 'record_count': count}
             for symbol, timeframe, count in symbol_timeframe_counts
-        ]
+        ],
     }
 
 def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: int = 72):
@@ -268,6 +124,7 @@ def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: 
     new_log = TrendAnalysisLog(
         symbol=trend_data.symbol,
         timeframe=trend_data.timeframe,
+        price=float(trend_data.price),
         open=getattr(prev, 'prev_open', None),
         high=getattr(prev, 'prev_high', None),
         low=getattr(prev, 'prev_low', None),
