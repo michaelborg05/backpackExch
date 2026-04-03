@@ -614,6 +614,7 @@ class ReplayTrendCache:
                 max_gap_pct = params.get("max_gap_pct", -10.0)
                 ema_value   = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct     = ((current_price - ema_value) / ema_value) * 100 if ema_value else 0
+
                 values      = {"price": current_price, "ema": ema_value, "gap_pct": gap_pct}
                 is_bull     = max_gap_pct <= gap_pct <= min_gap_pct
                 msg         = f"Price below EMA{ema_type}: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"

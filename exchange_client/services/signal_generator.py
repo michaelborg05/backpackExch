@@ -802,7 +802,7 @@ class SignalGenerator:
         
         if indicators_config is None:
             # No entry filter configured - pass
-            return True, "No entry filter configured"
+            return False, "No entry filter configured", None
         
         is_bullish, reason, indicator_results = self.trend_cache.is_bullish(
             symbol=symbol,

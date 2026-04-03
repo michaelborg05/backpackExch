@@ -1120,12 +1120,12 @@ async function loadSymbolsP() {
 
 function renderSymTableP() {
   const tbody = document.getElementById('sym-tbody');
-  document.getElementById('sym-count-label').textContent = _symDataP.length + ' symbol(s)';
-  if (!_symDataP.length) {
+  document.getElementById('sym-count-label').textContent = _symDataP.configs.length + ' symbol(s)';
+  if (!_symDataP.configs.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">No symbol configs</td></tr>';
     return;
   }
-  tbody.innerHTML = _symDataP.map(s => {
+  tbody.innerHTML = _symDataP.configs.map(s => {
     const en = !!s.enabled;
     return `<tr>
       <td style="color:var(--txb);font-weight:700">${s.symbol}</td>

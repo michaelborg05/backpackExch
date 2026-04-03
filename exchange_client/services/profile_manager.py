@@ -450,3 +450,36 @@ def set_profile_manager(pm: ProfileManager) -> None:
 
 def get_profile_manager() -> ProfileManager:
     return _profile_manager
+
+def refresh_profiles_from_db() -> dict:
+    """
+    Reload all active profiles from DB and hot-swap them into the existing
+    ProfileManager singleton. Safe to call from any thread or async context.
+
+    Returns a dict with 'added', 'removed' profile name sets for logging.
+    """
+    from services.signal_generator import invalidate_all_signal_generators
+
+    current_pm = get_profile_manager()
+    if current_pm is None:
+        return {"added": set(), "removed": set(), "error": "ProfileManager not initialised"}
+
+    try:
+        from db.utils import get_db_session
+        with get_db_session() as db:
+            new_pm = load_profiles_from_db(db)
+
+        old_names = set(current_pm.get_profile_names())
+        new_names = set(new_pm.get_profile_names())
+
+        current_pm.replace_profiles(new_pm.get_profiles_dict())
+        invalidate_all_signal_generators()
+
+        return {
+            "added":   new_names - old_names,
+            "removed": old_names - new_names,
+            "error":   None,
+        }
+
+    except Exception as e:
+        return {"added": set(), "removed": set(), "error": str(e)}

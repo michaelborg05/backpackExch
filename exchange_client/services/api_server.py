@@ -1423,6 +1423,7 @@ async def create_indicator(profile_name: str, body: IndicatorCreate):
     """Add a new indicator to a profile."""
     from db.utils import get_db_session
     from db.models import IndicatorDB
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     try:
         with get_db_session() as db:
@@ -1454,6 +1455,8 @@ async def create_indicator(profile_name: str, body: IndicatorCreate):
                 f"Created indicator [{body.indicator_type}] ({body.category}) "
                 f"for profile '{profile_name}' (id={ind.id})"
             )
+
+            refresh_profiles_from_db()
             return IndicatorOut.model_validate(ind)
     except HTTPException:
         raise
@@ -1469,6 +1472,7 @@ async def update_indicator(profile_name: str, indicator_id: int, body: Indicator
     params, is_hard_stop, and enabled. Keeps the same id and profile_id.
     """
     from db.utils import get_db_session
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     try:
         with get_db_session() as db:
@@ -1501,6 +1505,7 @@ async def update_indicator(profile_name: str, indicator_id: int, body: Indicator
                 f"Updated indicator id={indicator_id} [{body.indicator_type}] "
                 f"for profile '{profile_name}'"
             )
+            refresh_profiles_from_db()
             return IndicatorOut.model_validate(ind)
     except HTTPException:
         raise
@@ -1513,6 +1518,7 @@ async def update_indicator(profile_name: str, indicator_id: int, body: Indicator
 async def toggle_indicator(profile_name: str, indicator_id: int):
     """Quick enable/disable toggle without a full PUT."""
     from db.utils import get_db_session
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     try:
         with get_db_session() as db:
@@ -1541,6 +1547,7 @@ async def toggle_indicator(profile_name: str, indicator_id: int):
                 f"Toggled indicator id={indicator_id} enabled={ind.enabled} "
                 f"for profile '{profile_name}'"
             )
+            refresh_profiles_from_db()
             return IndicatorOut.model_validate(ind)
     except HTTPException:
         raise
@@ -1553,6 +1560,7 @@ async def toggle_indicator(profile_name: str, indicator_id: int):
 async def delete_indicator(profile_name: str, indicator_id: int):
     """Permanently delete an indicator."""
     from db.utils import get_db_session
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     try:
         with get_db_session() as db:
@@ -1575,6 +1583,7 @@ async def delete_indicator(profile_name: str, indicator_id: int):
             apiserver_logger.info(
                 f"Deleted indicator id={indicator_id} for profile '{profile_name}'"
             )
+            refresh_profiles_from_db()
             return {"success": True, "message": f"Indicator {indicator_id} deleted"}
     except HTTPException:
         raise
@@ -2405,6 +2414,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest):
     from db.utils import get_db_session
     from db.models import TradingProfileDB, CircuitBreakerConfig, ExchangeAccount
     from services.audit import write_audit
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     with get_db_session() as db:
         # Validate profile name is unique
@@ -2490,7 +2500,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest):
             },
         )
 
-        from db.models import UserProfileMapping
+        from db.models import UserProfileMapping #, SymbolConfig
         usermapping = UserProfileMapping(
             user_id = body.user_id,
             profile_name = body.name,
@@ -2504,6 +2514,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest):
             f"Created profile '{p.name}' (id={p.id}) "
             f"linked to exchange account '{account.name}' (id={account.id})"
         )
+        refresh_profiles_from_db()
         return {
             "id":           p.id,
             "name":         p.name,
@@ -2521,6 +2532,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
     from db.utils import get_db_session
     from db.models import TradingProfileDB
     from services.audit import write_audit
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     _EDITABLE = [
         "display_name", "trading_type", "strategy_type",
@@ -2570,9 +2582,8 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         db.commit()
         db.refresh(p)
 
-        # Invalidate signal generator cache so it picks up new profile
-        from services.signal_generator import invalidate_signal_generator
-        invalidate_signal_generator(profile_name)
+        # refresh profiles in cache
+        refresh_profiles_from_db()
 
         apiserver_logger.info(f"Updated profile '{profile_name}': {list(changes.keys())}")
         return {"name": p.name, "updated_fields": list(changes.keys())}
@@ -2591,6 +2602,7 @@ async def update_profile_credentials(profile_name: str, body: ProfileCredentials
     from db.models import TradingProfileDB
     from utils.db_secrets import encrypt_secret
     from services.audit import write_audit
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     with get_db_session() as db:
         p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
@@ -2609,8 +2621,7 @@ async def update_profile_credentials(profile_name: str, body: ProfileCredentials
         db.commit()
 
         # Force profile reload so new credentials are used immediately
-        from services.signal_generator import invalidate_signal_generator
-        invalidate_signal_generator(profile_name)
+        refresh_profiles_from_db()
 
         return {"message": f"Credentials updated for '{profile_name}'"}
 
@@ -2623,6 +2634,7 @@ async def deactivate_profile_endpoint(profile_name: str):
     from db.utils import get_db_session
     from db.models import TradingProfileDB
     from services.audit import write_audit
+    from services.profile_manager import get_profile_manager, refresh_profiles_from_db
 
     with get_db_session() as db:
         p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
@@ -2648,8 +2660,7 @@ async def deactivate_profile_endpoint(profile_name: str):
         )
         db.commit()
 
-        from services.signal_generator import invalidate_signal_generator
-        invalidate_signal_generator(profile_name)
+        refresh_profiles_from_db()
 
         return {"message": f"Profile '{profile_name}' deactivated"}
 

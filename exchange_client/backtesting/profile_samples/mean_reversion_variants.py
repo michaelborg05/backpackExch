@@ -264,6 +264,33 @@ MEAN_REV_VARIANTS = {
         "min_entry_indicators_required": 4,
         "min_signal_confidence": 75.0,
     },
+    "mr_v10_spike_entry_diffTPSL": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct": 1.5,
+        "stop_loss_pct": 1,   # wider SL — spike entries often have a retest
+        "trailing_stop_pct": 0.7,
+        "arm_trailing_stop_pct": 0.5,
+        "entry_indicators": [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 4,
+                "oversold_threshold": 32,  # needs to have been very oversold
+                "current_min": 28,         # LOW bar — we enter early in the recovery
+                "min_jump": 4.0,           # big single jump required (capitulation candle)
+                "require_sustained": False, # NO sustained requirement — enter on the jump
+                "hard_stop": True,
+            }},
+            {"type": "volume_spike", "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", 
+                                                    "max_pct_b": 0.25}},
+            {"type": "price_below_vwap", "params": {"min_gap_pct": -0.5, "max_gap_pct": -6.0}},
+            {"type": "rsi_overbought", "params": {"min_value": 48}},
+            {"type": "reversal_candle", "params": {"pattern": "bull_close", 
+                                                    "min_close_pct": 0.45,
+                                                    "max_drop_from_close_pct": 0.6}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_signal_confidence": 75.0,
+    },
 
     # -------------------------------------------------------------------------
     # V11: WATERFALL RECOVERY — for the HYPE/SUI pattern where RSI grinds for
@@ -284,7 +311,7 @@ MEAN_REV_VARIANTS = {
                 "lookback_candles": 8,     # look further back for the waterfall low
                 "oversold_threshold": 30,
                 "current_min": 30,         # just needs to be off the extreme low
-                "min_jump": 4.0,
+                "min_jump": 3.0,
                 "require_sustained": False,
                 "sustained_rise_mode": "net",
                 "hard_stop": True,
@@ -306,9 +333,9 @@ MEAN_REV_VARIANTS = {
     # -------------------------------------------------------------------------
     "mr_v12_waterfalladjusted": {
         **_MEAN_REV_BASE,
-        "take_profit_pct": 0.8,   # tighter TP — waterfall recoveries are choppy
+        "take_profit_pct": 1,   # tighter TP — waterfall recoveries are choppy
         "stop_loss_pct": 1,      # wider SL — these grind before recovering
-        "trailing_stop_pct": 0.4,
+        "trailing_stop_pct": 0.5,
         "arm_trailing_stop_pct": 0.4,
         "entry_indicators": [
             {"type": "rsi_reversal_momentum", "params": {
@@ -323,7 +350,7 @@ MEAN_REV_VARIANTS = {
             {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b",
                                                     "max_pct_b": 0.30}},
             {"type": "price_below_vwap", "params": {"min_gap_pct": -0.5, "max_gap_pct": -10.0}},
-            {"type": "rsi_overbought", "params": {"min_value": 42, "hard_stop": True,}},
+            {"type": "rsi_overbought", "params": {"min_value": 44, "hard_stop": True,}},
             # Vol check: don't require elevated current vol — the SMA got inflated
             # by crash candles. Just require it's not dead.
             {"type": "volume_spike", "params": {"min_ratio": 0.7, "max_ratio": 8.0}},
@@ -335,32 +362,32 @@ MEAN_REV_VARIANTS = {
     # actually blocking entries. Check which indicator is failing most often.
     # Not for live use — just for understanding the data.
     # -------------------------------------------------------------------------
-    "mr_v13_min5": {
-        **_MEAN_REV_BASE,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 4, "oversold_threshold": 32, "current_min": 28, "min_jump": 4.0, "require_sustained": False, "sustained_rise_mode": "net","hard_stop": True}},
-            {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
-            {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "pct_b","max_pct_b": 0.25}},
-            {"type": "rsi_overbought",             "params": {"min_value": 48}},
-            {"type": "reversal_candle",            "params": {"pattern": "bull_close", "min_body_pct": 0.45,"max_drop_from_close_pct": 0.5,"require_bull": False}},
-            {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -6.0}},
-        ],
-        "min_entry_indicators_required": 5,
-    },
-    "mr_v13_lowerRSIs": {
-        **_MEAN_REV_BASE,
-        "entry_indicators": [
-            {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 4, "oversold_threshold": 30, "current_min": 30, "min_jump": 2.5, "require_sustained": False, "sustained_rise_mode": "net","hard_stop": True}},
-            {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
-            {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "pct_b","max_pct_b": 0.25}},
-            {"type": "rsi_overbought",             "params": {"min_value": 48}},
-            {"type": "reversal_candle",            "params": {"pattern": "bull_close", "min_body_pct": 0.45,"max_drop_from_close_pct": 0.5,"require_bull": False}},
-            {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -6.0}},
-        ],
-        "min_entry_indicators_required": 3,
-        "min_signal_confidence": 65.0,
-        "min_volume_ratio": 0.6,
-    },
+    # "mr_v13_min5": {
+    #     **_MEAN_REV_BASE,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 4, "oversold_threshold": 32, "current_min": 28, "min_jump": 4.0, "require_sustained": False, "sustained_rise_mode": "net","hard_stop": True}},
+    #         {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
+    #         {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "pct_b","max_pct_b": 0.25}},
+    #         {"type": "rsi_overbought",             "params": {"min_value": 48}},
+    #         {"type": "reversal_candle",            "params": {"pattern": "bull_close", "min_body_pct": 0.45,"max_drop_from_close_pct": 0.5,"require_bull": False}},
+    #         {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -6.0}},
+    #     ],
+    #     "min_entry_indicators_required": 5,
+    # },
+    # "mr_v13_lowerRSIs": {
+    #     **_MEAN_REV_BASE,
+    #     "entry_indicators": [
+    #         {"type": "rsi_reversal_momentum",      "params": {"lookback_candles": 4, "oversold_threshold": 30, "current_min": 30, "min_jump": 2.5, "require_sustained": False, "sustained_rise_mode": "net","hard_stop": True}},
+    #         {"type": "price_extended_below_ema",   "params": {"ema": 20, "min_gap_pct": -0.7, "max_gap_pct": -10.0}},
+    #         {"type": "volume_spike",               "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
+    #         {"type": "bollinger_bands",            "params": {"band": "lower", "mode": "pct_b","max_pct_b": 0.25}},
+    #         {"type": "rsi_overbought",             "params": {"min_value": 48}},
+    #         {"type": "reversal_candle",            "params": {"pattern": "bull_close", "min_body_pct": 0.45,"max_drop_from_close_pct": 0.5,"require_bull": False}},
+    #         {"type": "price_below_vwap",           "params": {"min_gap_pct": -0.5, "max_gap_pct": -6.0}},
+    #     ],
+    #     "min_entry_indicators_required": 3,
+    #     "min_signal_confidence": 65.0,
+    #     "min_volume_ratio": 0.6,
+    # },
 }

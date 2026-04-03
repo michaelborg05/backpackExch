@@ -10,11 +10,11 @@ from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREN
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default=28             ,
+parser.add_argument("--days",    type=int, default=35             ,
                     help="Lookback window in days (default: 7)")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="mr", choices=["all", "range", "mr"],
+parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
@@ -32,8 +32,8 @@ print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H
 VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC","BTC_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC","BTC_USDC"]),
-    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC","BTC_USDC"] ),
-    "4hr_swing": (SWING_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
+    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
+    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC", "SUI_USDC"] ),
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
 symbols_override = [args.symbol] if args.symbol else None
