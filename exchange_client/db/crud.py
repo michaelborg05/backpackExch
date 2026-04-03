@@ -636,11 +636,30 @@ def expire_circuit_breaker(
     event = db.query(CircuitBreakerEvent).filter(
         CircuitBreakerEvent.id == event_id
     ).first()
-    
+
     if not event:
         raise ValueError(f"Circuit breaker event {event_id} not found")
-    
+
     event.is_active = False
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+def manually_expire_event(
+    db: Session,
+    event_id: int,
+) -> Optional[CircuitBreakerEvent]:
+    """Mark a circuit breaker as manually reset (sets manually_reset_at alongside is_active=False)."""
+    event = db.query(CircuitBreakerEvent).filter(
+        CircuitBreakerEvent.id == event_id
+    ).first()
+
+    if not event:
+        return None
+
+    event.is_active = False
+    event.manually_reset_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(event)
     return event

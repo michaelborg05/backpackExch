@@ -2514,6 +2514,8 @@ async def create_profile_endpoint(body: ProfileCreateRequest):
             f"Created profile '{p.name}' (id={p.id}) "
             f"linked to exchange account '{account.name}' (id={account.id})"
         )
+        
+        #Refresh profile data
         refresh_profiles_from_db()
         return {
             "id":           p.id,
@@ -2725,6 +2727,7 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
         )
         db.commit()
         db.refresh(cb)
+        get_circuit_breaker().invalidate_config_cache(profile_name)
         return _serialize_cb(cb)
 
 @app.get("/exchange-accounts", dependencies=[Depends(require_read_permission)])

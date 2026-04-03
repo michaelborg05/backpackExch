@@ -1,5 +1,5 @@
 # services/circuit_breaker.py
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from utils.logging import log_manager
@@ -12,18 +12,54 @@ from db.crud import (
     get_active_circuit_breaker,
     create_circuit_breaker_event,
     expire_circuit_breaker,
-    manually_reset_circuit_breaker,
+    manually_expire_event,
     get_current_daily_snapshot,
     create_daily_snapshot,
     update_daily_snapshot,
     finalize_daily_snapshot,
     reset_circuit_breaker_baseline,
 )
+from models.circuit_breaker import (
+    CachedCircuitBreakerConfig,
+    CachedCircuitBreakerEvent,
+    CachedDailySnapshot,
+)
+
+
+# ── ORM → cache converters ────────────────────────────────────────────────────
+
+def _to_cached_event(event) -> CachedCircuitBreakerEvent:
+    return CachedCircuitBreakerEvent(
+        id=event.id,
+        profile_name=event.profile_name,
+        account_id=event.account_id,
+        reason=event.reason,
+        triggered_at=event.triggered_at,
+        reset_at=event.reset_at,
+        balance_at_trigger=event.balance_at_trigger,
+        trigger_value_pct=event.trigger_value_pct,
+    )
+
+
+def _to_cached_snapshot(snapshot) -> CachedDailySnapshot:
+    return CachedDailySnapshot(
+        id=snapshot.id,
+        snapshot_date=snapshot.snapshot_date,
+        starting_balance=snapshot.starting_balance,
+        highest_balance=snapshot.highest_balance or snapshot.starting_balance,
+        circuit_breaker_baseline=snapshot.circuit_breaker_baseline,
+    )
 
 
 class CircuitBreakerService:
     """
-    Database-backed circuit breaker service.
+    Cache-backed circuit breaker service.
+
+    In-memory caches for config, active events, and daily snapshots eliminate
+    per-call DB reads during normal operation.  The DB is only hit on:
+      - first use (state recovery after restart)
+      - write-path operations (trigger, expire, reset, snapshot persist)
+      - config TTL refresh (every 5 minutes)
 
     Account-aware: when multiple profiles share the same ExchangeAccount,
     circuit breaker limits and daily snapshots are keyed by account_id so
@@ -36,7 +72,115 @@ class CircuitBreakerService:
     def __init__(self):
         self.logger = log_manager.get_logger("CircuitBreaker")
         self._snapshot_update_counter = 0
-        self._snapshot_update_interval = 10  # cycles between snapshot updates
+        self._snapshot_update_interval = 10  # cycles between snapshot DB writes
+
+        # In-memory caches
+        self._config_cache: Dict[str, CachedCircuitBreakerConfig] = {}   # keyed by profile_name
+        self._event_cache: Dict[str, Optional[CachedCircuitBreakerEvent]] = {}   # keyed by cache_key
+        self._snapshot_cache: Dict[str, CachedDailySnapshot] = {}                # keyed by cache_key
+        self._initialized = False
+
+    # ── Cache helpers ─────────────────────────────────────────────────────────
+
+    def _cache_key(self, profile_name: str, account_id: Optional[int]) -> str:
+        return f"acct_{account_id}" if account_id is not None else f"prof_{profile_name}"
+
+    def _ensure_initialized(self):
+        if not self._initialized:
+            self._load_state_from_db()
+
+    def _load_state_from_db(self):
+        """Bulk-load active events, snapshots, and configs from DB on startup."""
+        self.logger.info("CircuitBreaker: loading state from DB")
+        from services.profile_manager import get_profile_manager
+        pm = get_profile_manager()
+        if not pm:
+            self._initialized = True
+            return
+
+        seen: set = set()
+        try:
+            with get_db_session() as db:
+                for profile in pm.get_all_profiles():
+                    account_id = self._get_account_id(profile.name)
+                    key = self._cache_key(profile.name, account_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    event = get_active_circuit_breaker(db, profile.name, account_id)
+                    self._event_cache[key] = _to_cached_event(event) if event else None
+
+                    snapshot = get_current_daily_snapshot(db, profile.name, account_id)
+                    if snapshot:
+                        self._snapshot_cache[key] = _to_cached_snapshot(snapshot)
+
+                    config = get_circuit_breaker_config(db, profile.name)
+                    if config:
+                        self._config_cache[profile.name] = CachedCircuitBreakerConfig(
+                            max_daily_profit_pct=config.max_daily_profit_pct,
+                            max_daily_loss_pct=config.max_daily_loss_pct,
+                            profit_lock_hours=config.profit_lock_hours,
+                            loss_lock_hours=config.loss_lock_hours,
+                        )
+        except Exception as e:
+            self.logger.error(
+                f"Error loading circuit breaker state from DB: {e}", exc_info=True
+            )
+        self._initialized = True
+
+    def _get_cached_config(self, profile_name: str) -> Optional[CachedCircuitBreakerConfig]:
+        """Return config from cache. Only hits DB on cache miss (startup or after invalidate_config_cache())."""
+        cached = self._config_cache.get(profile_name)
+        if cached:
+            return cached
+
+        with get_db_session() as db:
+            config = get_circuit_breaker_config(db, profile_name)
+
+        if not config:
+            return None
+
+        cached = CachedCircuitBreakerConfig(
+            max_daily_profit_pct=config.max_daily_profit_pct,
+            max_daily_loss_pct=config.max_daily_loss_pct,
+            profit_lock_hours=config.profit_lock_hours,
+            loss_lock_hours=config.loss_lock_hours,
+        )
+        self._config_cache[profile_name] = cached
+        return cached
+
+    def _get_cached_event(
+        self, profile_name: str, account_id: Optional[int]
+    ) -> Optional[CachedCircuitBreakerEvent]:
+        """Return active event from cache; loads from DB on first access for new profiles."""
+        key = self._cache_key(profile_name, account_id)
+        if key not in self._event_cache:
+            with get_db_session() as db:
+                event = get_active_circuit_breaker(db, profile_name, account_id)
+            self._event_cache[key] = _to_cached_event(event) if event else None
+        return self._event_cache[key]
+
+    def _get_cached_snapshot(
+        self, profile_name: str, account_id: Optional[int]
+    ) -> Optional[CachedDailySnapshot]:
+        """Return snapshot from cache; loads from DB on first access for new profiles."""
+        key = self._cache_key(profile_name, account_id)
+        if key not in self._snapshot_cache:
+            with get_db_session() as db:
+                snapshot = get_current_daily_snapshot(db, profile_name, account_id)
+            if snapshot:
+                self._snapshot_cache[key] = _to_cached_snapshot(snapshot)
+            else:
+                return None
+        return self._snapshot_cache.get(key)
+
+    def invalidate_config_cache(self, profile_name: Optional[str] = None):
+        """Force config re-fetch from DB on next access. Call after updating config."""
+        if profile_name:
+            self._config_cache.pop(profile_name, None)
+        else:
+            self._config_cache.clear()
 
     # ── Account helpers ───────────────────────────────────────────────────────
 
@@ -96,56 +240,52 @@ class CircuitBreakerService:
         """
         Check if any circuit breakers should prevent trading.
 
-        Uses account_id for DB lookups when available so a lock triggered
-        by one profile blocks all siblings on the same account.
+        Hot path reads entirely from cache — no DB I/O unless a breaker
+        expires (writes to DB) or a new limit is hit (writes to DB).
 
         Returns:
             (can_trade, block_reason)
         """
+        self._ensure_initialized()
         account_id = self._get_account_id(profile_name)
 
-        with get_db_session() as db:
-            active_breaker = get_active_circuit_breaker(
-                db, profile_name, account_id
-            )
+        active_event = self._get_cached_event(profile_name, account_id)
+        if active_event:
+            now = datetime.now(timezone.utc)
+            time_remaining = (active_event.reset_at - now).total_seconds()
 
-            if active_breaker:
-                now = datetime.now(timezone.utc)
-                time_remaining = (active_breaker.reset_at - now).total_seconds()
-
-                if time_remaining > 0:
-                    reason = (
-                        f"Circuit breaker active: {active_breaker.reason} "
-                        f"({int(time_remaining)}s remaining)"
-                    )
-                    self.logger.debug(f"[{profile_name}] {reason}")
-                    return False, reason
-                else:
-                    self._handle_breaker_expiration(
-                        db, active_breaker, profile_name, account_id
-                    )
-
-            if alert_action.lower() != "buy":
-                return True, None
-
-            if check_pnl:
-                should_trigger, trigger_reason = self._check_daily_pnl_limits(
-                    db, profile_name, account_id
+            if time_remaining > 0:
+                reason = (
+                    f"Circuit breaker active: {active_event.reason} "
+                    f"({int(time_remaining)}s remaining)"
                 )
-                if should_trigger:
-                    return False, trigger_reason
+                self.logger.debug(f"[{profile_name}] {reason}")
+                return False, reason
+            else:
+                self._handle_breaker_expiration(active_event, profile_name, account_id)
 
+        if alert_action.lower() != "buy":
             return True, None
+
+        if check_pnl:
+            should_trigger, trigger_reason = self._check_daily_pnl_limits(
+                profile_name, account_id
+            )
+            if should_trigger:
+                return False, trigger_reason
+
+        return True, None
 
     def monitor_all_profiles(self):
         """
         Monitor all profiles and trigger circuit breakers if needed.
 
-        Deduplicates by account_id so shared-account profiles are only
-        checked once — avoids redundant balance reads and duplicate events.
+        Snapshot writes are batched into a single DB session every N cycles.
+        PnL limit checks read from cache; DB is only opened if a breaker fires.
         """
         from services.profile_manager import get_profile_manager
 
+        self._ensure_initialized()
         profile_manager = get_profile_manager()
         if not profile_manager:
             return
@@ -155,7 +295,6 @@ class CircuitBreakerService:
             self._snapshot_update_counter >= self._snapshot_update_interval
         )
 
-        # Track which account_ids (and standalone profile names) we've processed
         seen_account_ids: set = set()
         seen_standalone: set = set()
 
@@ -163,7 +302,6 @@ class CircuitBreakerService:
             for profile in profile_manager.get_all_profiles():
                 account_id = self._get_account_id(profile.name)
 
-                # Deduplicate shared accounts
                 if account_id is not None:
                     if account_id in seen_account_ids:
                         self.logger.debug(
@@ -173,17 +311,15 @@ class CircuitBreakerService:
                         continue
                     seen_account_ids.add(account_id)
                 else:
-                    # Standalone profile — deduplicate by name
                     if profile.name in seen_standalone:
                         continue
                     seen_standalone.add(profile.name)
 
                 try:
                     if should_update_snapshots:
-                        self._update_balance_snapshot(
-                            db, profile.name, account_id
-                        )
-                    self._check_daily_pnl_limits(db, profile.name, account_id)
+                        self._update_balance_snapshot(db, profile.name, account_id)
+                    # PnL check reads from cache; opens its own session only on trigger
+                    self._check_daily_pnl_limits(profile.name, account_id)
 
                 except Exception as e:
                     self.logger.error(
@@ -197,98 +333,143 @@ class CircuitBreakerService:
 
     # ── Internal checks ───────────────────────────────────────────────────────
 
-    def _handle_breaker_expiration(
+    def _apply_baseline_reset(
         self,
         db,
-        active_breaker,
+        event: CachedCircuitBreakerEvent,
+        key: str,
+        profile_name: str,
+        reset_label: str,
+    ):
+        """
+        Recalculate and persist the CB baseline after a breaker clears.
+
+        Called by both natural expiry and manual reset so the next PnL check
+        starts from a shifted baseline rather than immediately re-triggering.
+
+        - Profit limit reset: baseline moves to balance_at_trigger (lock in the
+          gains as the new floor).
+        - Loss limit reset: baseline is averaged between old baseline and
+          balance_at_trigger (partial recovery — softer re-entry).
+        """
+        if not event.balance_at_trigger:
+            return
+
+        cached_snap = self._snapshot_cache.get(key)
+        if not cached_snap:
+            return
+
+        is_profit_limit = "profit" in event.reason.lower()
+        old_baseline = (
+            cached_snap.circuit_breaker_baseline or cached_snap.starting_balance
+        )
+        new_baseline = (
+            event.balance_at_trigger
+            if is_profit_limit
+            else (old_baseline + event.balance_at_trigger) / 2
+        )
+
+        reset_circuit_breaker_baseline(db, cached_snap.id, new_baseline)
+        cached_snap.circuit_breaker_baseline = new_baseline
+
+        daily_pnl_pct = (
+            (new_baseline - cached_snap.starting_balance)
+            / cached_snap.starting_balance
+            * 100
+        )
+        self.logger.info(
+            f"[{profile_name}] 🔄 Reset CB baseline: "
+            f"${old_baseline:.2f} → ${new_baseline:.2f} "
+            f"(Daily start: ${cached_snap.starting_balance:.2f} unchanged)"
+        )
+        self._send_telegram(
+            f"🔄 Circuit Breaker Reset [{profile_name}]\n"
+            f"{reset_label}\n"
+            f"New CB baseline: ${new_baseline:.2f}\n"
+            f"Previous CB baseline: ${old_baseline:.2f}\n"
+            f"Daily start (unchanged): ${cached_snap.starting_balance:.2f}\n"
+            f"% from day start: {daily_pnl_pct:+.2f}%"
+        )
+
+    def _clear_breaker(
+        self,
+        event: CachedCircuitBreakerEvent,
+        profile_name: str,
+        account_id: Optional[int],
+        *,
+        manually_reset: bool = False,
+    ):
+        """
+        Single code path for deactivating a breaker and resetting the CB baseline.
+        Used by both natural expiry and manual reset.
+
+        Clears the event cache immediately, then writes to DB and updates the
+        snapshot cache via _apply_baseline_reset.
+        """
+        key = self._cache_key(profile_name, account_id)
+        self._event_cache[key] = None
+
+        reset_label = "Manually reset" if manually_reset else "Lock expired"
+
+        with get_db_session() as db:
+            if manually_reset:
+                manually_expire_event(db, event.id)
+            else:
+                expire_circuit_breaker(db, event.id)
+            self._apply_baseline_reset(db, event, key, profile_name, reset_label)
+
+    def _handle_breaker_expiration(
+        self,
+        event: CachedCircuitBreakerEvent,
         profile_name: str,
         account_id: Optional[int],
     ):
-        """
-        Handle circuit breaker expiration and CB baseline reset.
-        Logs using profile_name for readability; all DB ops use account_id.
-        """
+        """Handle natural expiration — delegates to _clear_breaker."""
         self.logger.info(
-            f"[{profile_name}] Circuit breaker expired: {active_breaker.reason}"
+            f"[{profile_name}] Circuit breaker expired: {event.reason}"
         )
-
-        expire_circuit_breaker(db, active_breaker.id)
-
-        is_profit_limit = "profit" in active_breaker.reason.lower()
-
-        if active_breaker.balance_at_trigger:
-            snapshot = get_current_daily_snapshot(db, profile_name, account_id)
-
-            if snapshot:
-                old_baseline = (
-                    snapshot.circuit_breaker_baseline or snapshot.starting_balance
-                )
-                new_baseline = (
-                    active_breaker.balance_at_trigger
-                    if is_profit_limit
-                    else (old_baseline + active_breaker.balance_at_trigger) / 2
-                )
-
-                reset_circuit_breaker_baseline(db, snapshot.id, new_baseline)
-
-                daily_pnl_pct = (
-                    (new_baseline - snapshot.starting_balance)
-                    / snapshot.starting_balance
-                    * 100
-                )
-                self.logger.info(
-                    f"[{profile_name}] 🔄 Reset CB baseline: "
-                    f"${old_baseline:.2f} → ${new_baseline:.2f} "
-                    f"(Daily start: ${snapshot.starting_balance:.2f} unchanged)"
-                )
-                self._send_telegram(
-                    f"🔄 Circuit Breaker Reset [{profile_name}]\n"
-                    f"Lock expired\n"
-                    f"New CB baseline: ${new_baseline:.2f}\n"
-                    f"Previous CB baseline: ${old_baseline:.2f}\n"
-                    f"Daily start (unchanged): ${snapshot.starting_balance:.2f}\n"
-                    f"% from day start: {daily_pnl_pct:+.2f}%"
-                )
+        self._clear_breaker(event, profile_name, account_id, manually_reset=False)
 
     def _check_daily_pnl_limits(
         self,
-        db,
         profile_name: str,
         account_id: Optional[int],
     ) -> Tuple[bool, Optional[str]]:
         """
-        Check daily P&L limits.
+        Check daily P&L limits using cached config and snapshot.
 
-        - Config is per-profile (each profile can have its own limits).
-        - Snapshot and events are per-account when account_id is set.
-        - Balance is read from the canonical profile to avoid double-counting.
+        highest_balance is updated in-memory every call so drawdown tracking
+        is always current even between periodic DB snapshot writes.
+        DB is opened only when a limit is hit (to create the breaker event).
         """
         try:
-            # Re-check for an active breaker first to avoid duplicate events
-            active_breaker = get_active_circuit_breaker(
-                db, profile_name, account_id
-            )
-            if active_breaker:
+            # Re-check for an active event from cache to avoid duplicate triggers
+            active_event = self._get_cached_event(profile_name, account_id)
+            if active_event:
                 now = datetime.now(timezone.utc)
-                time_remaining = (active_breaker.reset_at - now).total_seconds()
+                time_remaining = (active_event.reset_at - now).total_seconds()
                 if time_remaining > 0:
-                    return True, active_breaker.reason
+                    return True, active_event.reason
                 else:
                     self._handle_breaker_expiration(
-                        db, active_breaker, profile_name, account_id
+                        active_event, profile_name, account_id
                     )
 
-            config = get_circuit_breaker_config(db, profile_name)
+            config = self._get_cached_config(profile_name)
             if not config:
                 return False, None
 
-            snapshot = get_current_daily_snapshot(db, profile_name, account_id)
+            snapshot = self._get_cached_snapshot(profile_name, account_id)
             if not snapshot:
                 return False, None
 
             current_value = self._get_portfolio_value(profile_name, account_id)
             if current_value is None or current_value <= 0:
                 return False, "Current value not available or invalid"
+
+            # Keep highest_balance up-to-date in the cache on every check
+            if current_value > (snapshot.highest_balance or Decimal(0)):
+                snapshot.highest_balance = current_value
 
             # Daily P&L — always from starting_balance for user-facing reporting
             daily_pnl = current_value - snapshot.starting_balance
@@ -318,16 +499,19 @@ class CircuitBreakerService:
                     f"+{cb_pnl_pct:.2f}% "
                     f"(limit: +{config.max_daily_profit_pct}%)"
                 )
-                create_circuit_breaker_event(
-                    db=db,
-                    profile_name=profile_name,
-                    account_id=account_id,
-                    reason=reason,
-                    trigger_value_pct=cb_pnl_pct,
-                    balance_at_trigger=current_value,
-                    daily_start_balance=cb_baseline,
-                    lock_hours=config.profit_lock_hours,
-                )
+                key = self._cache_key(profile_name, account_id)
+                with get_db_session() as db:
+                    event = create_circuit_breaker_event(
+                        db=db,
+                        profile_name=profile_name,
+                        account_id=account_id,
+                        reason=reason,
+                        trigger_value_pct=cb_pnl_pct,
+                        balance_at_trigger=current_value,
+                        daily_start_balance=cb_baseline,
+                        lock_hours=config.profit_lock_hours,
+                    )
+                    self._event_cache[key] = _to_cached_event(event)
                 self._send_telegram(
                     f"🚨 CIRCUIT BREAKER TRIGGERED [{profile_name}]\n"
                     f"Profit limit: +{cb_pnl_pct:.2f}%\n"
@@ -350,16 +534,19 @@ class CircuitBreakerService:
                     f"{drawdown_pnl_pct:.2f}% "
                     f"(limit: -{config.max_daily_loss_pct}%)"
                 )
-                create_circuit_breaker_event(
-                    db=db,
-                    profile_name=profile_name,
-                    account_id=account_id,
-                    reason=reason,
-                    trigger_value_pct=cb_pnl_pct,
-                    balance_at_trigger=current_value,
-                    daily_start_balance=cb_baseline,
-                    lock_hours=config.loss_lock_hours,
-                )
+                key = self._cache_key(profile_name, account_id)
+                with get_db_session() as db:
+                    event = create_circuit_breaker_event(
+                        db=db,
+                        profile_name=profile_name,
+                        account_id=account_id,
+                        reason=reason,
+                        trigger_value_pct=cb_pnl_pct,
+                        balance_at_trigger=current_value,
+                        daily_start_balance=cb_baseline,
+                        lock_hours=config.loss_lock_hours,
+                    )
+                    self._event_cache[key] = _to_cached_event(event)
                 self._send_telegram(
                     f"🚨 CIRCUIT BREAKER TRIGGERED [{profile_name}]\n"
                     f"Loss limit: {drawdown_pnl_pct:.2f}%\n"
@@ -385,12 +572,12 @@ class CircuitBreakerService:
         account_id: Optional[int],
     ):
         """
-        Update the daily balance snapshot.
-        Snapshot is stored under account_id when available so all sibling
-        profiles share one snapshot row.
+        Persist the daily balance snapshot to DB and keep the cache in sync.
+        Called every N cycles from monitor_all_profiles with a shared session.
         """
         try:
-            snapshot = get_current_daily_snapshot(db, profile_name, account_id)
+            key = self._cache_key(profile_name, account_id)
+            cached_snap = self._snapshot_cache.get(key)
             current_value = self._get_portfolio_value(profile_name, account_id)
 
             if current_value is None:
@@ -402,32 +589,38 @@ class CircuitBreakerService:
 
             now_utc = datetime.now(timezone.utc)
 
-            if not snapshot:
-                create_daily_snapshot(
+            if not cached_snap:
+                new_snap = create_daily_snapshot(
                     db, profile_name, current_value, account_id
                 )
+                self._snapshot_cache[key] = _to_cached_snapshot(new_snap)
                 self.logger.info(
                     f"[{profile_name}] Created initial snapshot: "
                     f"${current_value:.2f}"
                 )
                 return
 
-            snapshot_date = snapshot.snapshot_date.date()
+            snapshot_date = cached_snap.snapshot_date.date()
             current_date = now_utc.date()
 
             if current_date > snapshot_date:
                 # New UTC day — finalise old snapshot and open a new one
-                finalize_daily_snapshot(db, snapshot.id, current_value)
-                create_daily_snapshot(
+                finalize_daily_snapshot(db, cached_snap.id, current_value)
+                new_snap = create_daily_snapshot(
                     db, profile_name, current_value, account_id
                 )
+                self._snapshot_cache[key] = _to_cached_snapshot(new_snap)
                 self.logger.info(
                     f"[{profile_name}] 🔄 UTC date changed — "
                     f"new snapshot: ${current_value:.2f} "
                     f"(previous day: {snapshot_date})"
                 )
             else:
-                update_daily_snapshot(db, snapshot.id, current_value)
+                update_daily_snapshot(db, cached_snap.id, current_value)
+
+                # Keep cache in sync with what we just persisted
+                if current_value > (cached_snap.highest_balance or Decimal(0)):
+                    cached_snap.highest_balance = current_value
 
                 next_midnight = datetime.combine(
                     current_date + timedelta(days=1),
@@ -452,167 +645,169 @@ class CircuitBreakerService:
     # ── Public management methods ─────────────────────────────────────────────
 
     def force_reset_breaker(self, profile_name: str) -> bool:
-        """Manually reset the active circuit breaker for a profile or account."""
+        """
+        Manually reset the active circuit breaker for a profile or account.
+
+        Delegates to _clear_breaker so the baseline reset logic is identical
+        to natural expiry — preventing an immediate re-trigger on the next cycle.
+        """
+        self._ensure_initialized()
         account_id = self._get_account_id(profile_name)
-        with get_db_session() as db:
-            # manually_reset_circuit_breaker needs to know which row to reset
-            # so we fetch it first using our account-aware helper
-            event = get_active_circuit_breaker(db, profile_name, account_id)
-            if not event:
-                return False
-            event.is_active = False
-            event.manually_reset_at = datetime.now(timezone.utc)
-            db.commit()
-            self.logger.info(
-                f"[{profile_name}] Circuit breaker manually reset: "
-                f"{event.reason}"
-            )
-            return True
+        key = self._cache_key(profile_name, account_id)
+
+        cached_event = self._event_cache.get(key)
+        if not cached_event:
+            return False
+
+        self._clear_breaker(cached_event, profile_name, account_id, manually_reset=True)
+        self.logger.info(
+            f"[{profile_name}] Circuit breaker manually reset: "
+            f"{cached_event.reason}"
+        )
+        return True
 
     def get_all_breakers(self) -> dict:
         """
         Get status of all active circuit breakers, deduplicated by account.
         Returns a dict keyed by account_id (or profile_name for standalones).
+        Reads entirely from cache — no DB I/O.
         """
+        self._ensure_initialized()
         results = {}
         seen_account_ids: set = set()
         seen_standalone: set = set()
+        now = datetime.now(timezone.utc)
 
-        with get_db_session() as db:
-            from services.profile_manager import get_profile_manager
-            profile_manager = get_profile_manager()
-            if not profile_manager:
-                return results
+        from services.profile_manager import get_profile_manager
+        profile_manager = get_profile_manager()
+        if not profile_manager:
+            return results
 
-            for profile in profile_manager.get_all_profiles():
-                account_id = self._get_account_id(profile.name)
+        for profile in profile_manager.get_all_profiles():
+            account_id = self._get_account_id(profile.name)
 
-                if account_id is not None:
-                    if account_id in seen_account_ids:
-                        continue
-                    seen_account_ids.add(account_id)
-                    result_key = f"account_{account_id}"
-                else:
-                    if profile.name in seen_standalone:
-                        continue
-                    seen_standalone.add(profile.name)
-                    result_key = profile.name
-
-                breaker = get_active_circuit_breaker(
-                    db, profile.name, account_id
-                )
-                if not breaker:
+            if account_id is not None:
+                if account_id in seen_account_ids:
                     continue
+                seen_account_ids.add(account_id)
+                result_key = f"account_{account_id}"
+            else:
+                if profile.name in seen_standalone:
+                    continue
+                seen_standalone.add(profile.name)
+                result_key = profile.name
 
-                now = datetime.now(timezone.utc)
-                time_remaining = max(
-                    0, (breaker.reset_at - now).total_seconds()
-                )
-                if time_remaining > 0:
-                    results[result_key] = {
-                        "profile":               profile.name,
-                        "account_id":            account_id,
-                        "reason":                breaker.reason,
-                        "triggered_at":          breaker.triggered_at.isoformat(),
-                        "reset_at":              breaker.reset_at.isoformat(),
-                        "time_remaining_seconds": int(time_remaining),
-                        "trigger_value":         (
-                            str(breaker.trigger_value_pct)
-                            if breaker.trigger_value_pct else None
-                        ),
-                    }
+            key = self._cache_key(profile.name, account_id)
+            event = self._event_cache.get(key)
+            if not event:
+                continue
+
+            time_remaining = max(0, (event.reset_at - now).total_seconds())
+            if time_remaining <= 0:
+                continue
+
+            results[result_key] = {
+                "profile":                profile.name,
+                "account_id":             account_id,
+                "reason":                 event.reason,
+                "triggered_at":           event.triggered_at.isoformat(),
+                "reset_at":               event.reset_at.isoformat(),
+                "time_remaining_seconds": int(time_remaining),
+                "trigger_value":          (
+                    str(event.trigger_value_pct)
+                    if event.trigger_value_pct else None
+                ),
+            }
 
         return results
 
     def get_daily_summary(self, profile_name: str) -> dict:
         """
         Get daily P&L summary for a profile.
-        Snapshot is read from the account-level row when account_id is set.
+        Reads from cache — no DB I/O.
         """
+        self._ensure_initialized()
         account_id = self._get_account_id(profile_name)
 
-        with get_db_session() as db:
-            config = get_circuit_breaker_config(db, profile_name)
-            snapshot = get_current_daily_snapshot(db, profile_name, account_id)
-            active_breaker = get_active_circuit_breaker(
-                db, profile_name, account_id
-            )
-            current_value = self._get_portfolio_value(profile_name, account_id)
+        config = self._get_cached_config(profile_name)
+        snapshot = self._get_cached_snapshot(profile_name, account_id)
+        active_event = self._get_cached_event(profile_name, account_id)
+        current_value = self._get_portfolio_value(profile_name, account_id)
 
-            if snapshot and current_value:
-                daily_pnl = current_value - snapshot.starting_balance
-                daily_pnl_pct = (daily_pnl / snapshot.starting_balance) * 100
+        if snapshot and current_value:
+            daily_pnl = current_value - snapshot.starting_balance
+            daily_pnl_pct = (daily_pnl / snapshot.starting_balance) * 100
 
-                cb_baseline = (
-                    snapshot.circuit_breaker_baseline
-                    if snapshot.circuit_breaker_baseline
-                    else max(
-                        snapshot.starting_balance, snapshot.highest_balance
-                    )
+            cb_baseline = (
+                snapshot.circuit_breaker_baseline
+                if snapshot.circuit_breaker_baseline
+                else max(
+                    snapshot.starting_balance, snapshot.highest_balance
                 )
-
-                cb_pnl = current_value - cb_baseline
-                cb_pnl_pct = (cb_pnl / cb_baseline) * 100
-
-                now_utc = datetime.now(timezone.utc)
-                next_midnight = datetime.combine(
-                    now_utc.date() + timedelta(days=1),
-                    datetime.min.time(),
-                ).replace(tzinfo=timezone.utc)
-                hours_until_reset = (
-                    next_midnight - now_utc
-                ).total_seconds() / 3600
-            else:
-                daily_pnl = daily_pnl_pct = None
-                cb_pnl_pct = cb_baseline = hours_until_reset = None
-
-            hours_remaining = (
-                (
-                    active_breaker.reset_at - datetime.now(timezone.utc)
-                ).total_seconds() / 3600
-                if active_breaker
-                else None
             )
 
-            return {
-                "profile":                  profile_name,
-                "account_id":               account_id,
-                "daily_start_balance":      (
-                    str(snapshot.starting_balance)
-                    if snapshot else "No snapshot"
-                ),
-                "circuit_breaker_baseline": (
-                    str(cb_baseline)
-                    if cb_baseline else "Same as daily start"
-                ),
-                "current_balance":          str(current_value),
-                "daily_pnl":                (
-                    str(daily_pnl) if daily_pnl is not None else "N/A"
-                ),
-                "daily_pnl_pct":            (
-                    f"{daily_pnl_pct:+.2f}%"
-                    if daily_pnl_pct is not None else "N/A"
-                ),
-                "cb_pnl_pct":               (
-                    f"{cb_pnl_pct:+.2f}%"
-                    if cb_pnl_pct is not None else "N/A"
-                ),
-                "hours_until_reset":        (
-                    round(hours_until_reset, 1)
-                    if hours_until_reset else "N/A"
-                ),
-                "profit_limit":             (
-                    f"+{config.max_daily_profit_pct}%" if config else "N/A"
-                ),
-                "loss_limit":               (
-                    f"-{config.max_daily_loss_pct}%" if config else "N/A"
-                ),
-                "circuit_breaker_active":   active_breaker is not None,
-                "hours_remaining":          (
-                    round(hours_remaining, 2)
-                    if hours_remaining else "N/A"
-                ),
-            }
+            cb_pnl = current_value - cb_baseline
+            cb_pnl_pct = (cb_pnl / cb_baseline) * 100
+
+            now_utc = datetime.now(timezone.utc)
+            next_midnight = datetime.combine(
+                now_utc.date() + timedelta(days=1),
+                datetime.min.time(),
+            ).replace(tzinfo=timezone.utc)
+            hours_until_reset = (
+                next_midnight - now_utc
+            ).total_seconds() / 3600
+        else:
+            daily_pnl = daily_pnl_pct = None
+            cb_pnl_pct = cb_baseline = hours_until_reset = None
+
+        hours_remaining = (
+            (
+                active_event.reset_at - datetime.now(timezone.utc)
+            ).total_seconds() / 3600
+            if active_event
+            else None
+        )
+
+        return {
+            "profile":                  profile_name,
+            "account_id":               account_id,
+            "daily_start_balance":      (
+                str(snapshot.starting_balance)
+                if snapshot else "No snapshot"
+            ),
+            "circuit_breaker_baseline": (
+                str(cb_baseline)
+                if cb_baseline else "Same as daily start"
+            ),
+            "current_balance":          str(current_value),
+            "daily_pnl":                (
+                str(daily_pnl) if daily_pnl is not None else "N/A"
+            ),
+            "daily_pnl_pct":            (
+                f"{daily_pnl_pct:+.2f}%"
+                if daily_pnl_pct is not None else "N/A"
+            ),
+            "cb_pnl_pct":               (
+                f"{cb_pnl_pct:+.2f}%"
+                if cb_pnl_pct is not None else "N/A"
+            ),
+            "hours_until_reset":        (
+                round(hours_until_reset, 1)
+                if hours_until_reset else "N/A"
+            ),
+            "profit_limit":             (
+                f"+{config.max_daily_profit_pct}%" if config else "N/A"
+            ),
+            "loss_limit":               (
+                f"-{config.max_daily_loss_pct}%" if config else "N/A"
+            ),
+            "circuit_breaker_active":   active_event is not None,
+            "hours_remaining":          (
+                round(hours_remaining, 2)
+                if hours_remaining else "N/A"
+            ),
+        }
 
     # ── Telegram helper ───────────────────────────────────────────────────────
 
