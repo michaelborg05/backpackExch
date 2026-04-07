@@ -155,6 +155,7 @@ def get_user_profile_data(db: Session, user_id: int) -> dict:
             "exchange_api_key": raw_key,
             "display_name":     row.display_name,
             "key_hint":         f"...{raw_key[-6:]}" if raw_key else None,
+            "account_id":       row.account_id,
         }
 
     return result

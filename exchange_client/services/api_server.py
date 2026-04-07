@@ -244,29 +244,133 @@ def price_endpoint(symbol: str):
 
 @app.get("/balances", dependencies=[Depends(require_read_permission)])
 def balance_endpoint():
-    """Get account balances"""
+    """
+    Get live account balances from the exchange.
+    Deduplicates by exchange account — profiles sharing an account are only
+    queried once.  Returns a flat array of asset rows with USD values.
+    """
     try:
-        balances = get_balances()
-        return balances if balances else {}
-        
+        from cache.price_cache import get_price_cache
+        price_cache = get_price_cache()
+
+        profile_manager = get_profile_manager()
+        if not profile_manager:
+            raise HTTPException(status_code=503, detail="Profile manager not ready")
+
+        # Fetch balances, deduplicating per account
+        all_balances = get_balances(update_cache=True)  # Dict[profile_name, BalanceReader]
+
+        # Collapse to unique accounts (first profile per account_id wins)
+        seen_accounts: set = set()
+        merged: dict = {}  # asset → {available, locked, staked}
+
+        profiles = profile_manager.get_all_profiles()
+        for profile in profiles:
+            account_id = getattr(profile, 'account_id', None)
+            dedup_key = account_id if account_id else profile.name
+            if dedup_key in seen_accounts:
+                continue
+            seen_accounts.add(dedup_key)
+            reader = all_balances.get(profile.name)
+            if not reader:
+                continue
+            for symbol, ab in reader._balances.items():
+                if symbol not in merged:
+                    merged[symbol] = {"available": ab.available, "locked": ab.locked, "staked": ab.staked}
+                else:
+                    merged[symbol]["available"] += ab.available
+                    merged[symbol]["locked"]    += ab.locked
+                    merged[symbol]["staked"]    += ab.staked
+
+        result = []
+        for asset, bal in sorted(merged.items()):
+            free = float(bal["available"])
+            locked = float(bal["locked"])
+            total = free + locked + float(bal["staked"])
+            if total < 0.0001:
+                continue
+            if asset == "USDC":
+                price = 1.0
+            else:
+                raw = price_cache.get_price(f"{asset}_USDC")
+                price = float(raw) if raw else 0.0
+            usd_value   = round(total  * price, 2)
+            locked_usd  = round(locked * price, 2)
+            result.append({
+                "asset":      asset,
+                "free":       free,
+                "locked":     locked,
+                "total":      total,
+                "price":      price,
+                "usd_value":  usd_value,
+                "locked_usd": locked_usd,
+            })
+
+        result.sort(key=lambda x: x["usd_value"], reverse=True)
+        return {"balances": result}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/balances/cached", dependencies=[Depends(require_read_permission)])
 def get_cached_balances():
-    """Get balances from cache (fast, no API call)"""
+    """
+    Get balances from cache (fast, no API call).
+    Returns per-account entries (no duplicates across profiles sharing an account).
+    """
+    from cache.price_cache import get_price_cache
     cache = get_balance_cache()
-    balances = cache.get_all_balances()
-    
-    if balances is None:
+    price_cache = get_price_cache()
+
+    accounts = cache.get_all_accounts()
+
+    if not accounts:
         return {
             "error": "Balance cache is empty or stale",
             "cache_info": cache.get_cache_info()
         }
-    
+
+    # Flatten all accounts into a single deduplicated asset list
+    merged: dict = {}
+    for _account_key, balances in accounts.items():
+        for asset, info in balances.items():
+            if asset not in merged:
+                from decimal import Decimal
+                merged[asset] = {
+                    "available": Decimal(info.get("available", "0")),
+                    "locked":    Decimal(info.get("locked",    "0")),
+                    "staked":    Decimal(info.get("staked",    "0")),
+                }
+            else:
+                from decimal import Decimal
+                merged[asset]["available"] += Decimal(info.get("available", "0"))
+                merged[asset]["locked"]    += Decimal(info.get("locked",    "0"))
+                merged[asset]["staked"]    += Decimal(info.get("staked",    "0"))
+
+    result = []
+    for asset, bal in sorted(merged.items()):
+        free   = float(bal["available"])
+        locked = float(bal["locked"])
+        total  = free + locked + float(bal["staked"])
+        if total < 0.0001:
+            continue
+        price = 1.0 if asset == "USDC" else float(price_cache.get_price(f"{asset}_USDC") or 0)
+        result.append({
+            "asset":      asset,
+            "free":       free,
+            "locked":     locked,
+            "total":      total,
+            "price":      price,
+            "usd_value":  round(total  * price, 2),
+            "locked_usd": round(locked * price, 2),
+        })
+
+    result.sort(key=lambda x: x["usd_value"], reverse=True)
     return {
-        "balances": balances,
-        "cache_info": cache.get_cache_info()
+        "balances":   result,
+        "cache_info": cache.get_cache_info(),
     }
 
 
@@ -810,6 +914,71 @@ def get_total_portfolio_value(profile_name: str, quote_asset: str = "USDC"):
         "total_value": str(total),
         "quote_asset": quote_asset
     }
+
+@app.get("/accounts/{account_id}/portfolio", dependencies=[Depends(require_read_permission)])
+def get_account_portfolio(account_id: int, quote_asset: str = "USDC"):
+    """
+    Get portfolio value for an exchange account.
+    Reads the balance cache keyed by account (no double-counting across profiles).
+    Positions are aggregated from all profiles linked to this account.
+    """
+    from cache.balance_cache import get_balance_cache
+    from cache.price_cache import get_price_cache
+    from cache.portfolio_cache import get_portfolio_cache
+    from decimal import Decimal
+
+    cache = get_balance_cache()
+    price_cache = get_price_cache()
+    account_key = f"account_{account_id}"
+    balances = cache.get_account_balances(account_key)
+
+    if not balances:
+        # Fall back to first profile for this account
+        pm = get_profile_manager()
+        if pm:
+            canonical = pm.get_canonical_profile_for_account(account_id)
+            if canonical:
+                balances = cache.get_profile_balances(canonical.name)
+
+    if not balances:
+        return {
+            "account_id": account_id,
+            "total_value": "0",
+            "assets": [],
+            "error": "No balance data cached for this account"
+        }
+
+    DUST = Decimal("0.0001")
+    assets = []
+    total_value = Decimal("0")
+
+    for asset, info in balances.items():
+        avail  = Decimal(info.get("available", "0"))
+        locked = Decimal(info.get("locked",    "0"))
+        staked = Decimal(info.get("staked",    "0"))
+        total_qty = avail + locked + staked
+        if total_qty < DUST:
+            continue
+        price = Decimal("1") if asset == quote_asset else (price_cache.get_price(f"{asset}_{quote_asset}") or Decimal("0"))
+        val = round(total_qty * price, 2)
+        if val < Decimal("0.01"):
+            continue
+        assets.append({
+            "asset":       asset,
+            "total":       str(total_qty),
+            "price":       str(price),
+            "total_value": str(val),
+        })
+        total_value += val
+
+    assets.sort(key=lambda x: Decimal(x["total_value"]), reverse=True)
+    return {
+        "account_id":  account_id,
+        "total_value": str(round(total_value, 2)),
+        "asset_count": len(assets),
+        "assets":      assets,
+    }
+
 
 @app.get("/market/{symbol}", dependencies=[Depends(require_read_permission)])
 def get_market_info_endpoint(symbol: str):
@@ -2816,6 +2985,9 @@ def _serialize_profile(p, cb=None) -> dict:
 
         # Circuit breaker (embedded)
         "circuit_breaker":             _serialize_cb(cb) if cb else None,
+
+        # Account linkage
+        "account_id":                  p.account_id,
 
         # Timestamps
         "created_at":                  p.created_at.isoformat() if p.created_at else None,

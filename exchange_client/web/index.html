@@ -865,7 +865,7 @@ async function loadOv(){
   document.getElementById('knprofs').textContent=profs.map(p=>S.profiles[p].display_name??p).join(', ');
   document.getElementById('ovlast').textContent='UPDATED '+new Date().toLocaleTimeString();
 
-  // Fetch all profiles in parallel: portfolio + circuit breaker daily summary
+  // Fetch all profiles in parallel: portfolio (for positions) + circuit breaker daily summary
   const results=await Promise.all(profs.map(async p=>{
     const [port,cb,mon]=await Promise.all([
       api('/portfolio/'+p),
@@ -890,10 +890,27 @@ async function loadOv(){
     b.className='cb'+(pass===true?' g':pass===false?' r':'');
   }
 
-  // Aggregate totals across all profiles
-  let totalVal=0,totalPnl=0,totalPos=0,totalDayPnl=0;
+  // ── Balance total: fetch once per unique exchange account (no double-counting) ──
+  const seenAccounts=new Set();
+  const accountPortfolioPromises=[];
+  for(const p of profs){
+    const accountId=S.profiles[p]?.account_id;
+    const dedup=accountId??p;
+    if(!seenAccounts.has(dedup)){
+      seenAccounts.add(dedup);
+      accountPortfolioPromises.push(
+        accountId
+          ? api('/accounts/'+accountId+'/portfolio')
+          : api('/portfolio/'+p)
+      );
+    }
+  }
+  const accountPortfolios=await Promise.all(accountPortfolioPromises);
+  let totalVal=accountPortfolios.reduce((s,ap)=>s+parseFloat(ap?.total_value??0),0);
+
+  // PnL and position counts still come from profile-level data (positions are per-profile)
+  let totalPnl=0,totalPos=0,totalDayPnl=0;
   results.forEach(({port,cb,mon:m})=>{
-    totalVal+=parseFloat(port?.total_value??0);
     totalPnl+=parseFloat(m?.total_unrealised_pnl??m?.unrealised_pnl??0);
     totalPos+=parseInt(m?.open_positions_count??m?.positions??0);
     totalDayPnl+=parseFloat(cb?.daily_pnl??cb?.pnl??0);
@@ -911,12 +928,28 @@ async function loadOv(){
   document.getElementById('kdpnls').textContent=(totalDayPnl>=0?'+':'')+
     (totalVal>0?(totalDayPnl/totalVal*100).toFixed(2):'0.00')+'% today';
 
-  // Render per-profile cards
+  // Render per-profile cards (balance shown from account portfolio for primary profile)
   const grid=document.getElementById('profgrid');
   if(!grid)return;
+  // Build account_id → portfolio map for balance display
+  const accountPortMap={};
+  let apIdx=0;
+  const seenAcc2=new Set();
+  for(const p of profs){
+    const accountId=S.profiles[p]?.account_id;
+    const dedup=accountId??p;
+    if(!seenAcc2.has(dedup)){
+      seenAcc2.add(dedup);
+      accountPortMap[dedup]=accountPortfolios[apIdx++];
+    }
+  }
+
   grid.innerHTML='<div class="pg">'+results.map(({prof,port,cb})=>{
     const dispName=S.profiles[prof]?.display_name??prof;
-    const curVal=parseFloat(port?.total_value??0);
+    const accountId=S.profiles[prof]?.account_id;
+    const dedup=accountId??prof;
+    const acctPort=accountPortMap[dedup];
+    const curVal=parseFloat(acctPort?.total_value??port?.total_value??0);
     const dayPnl=parseFloat(cb?.daily_pnl??cb?.pnl??0);
     const dayPnlPct=parseFloat(cb?.daily_pnl_pct??cb?.pnl_pct??0);
     const posCount=parseInt(port?.positions?.length??port?.open_positions?.length??0);
@@ -935,7 +968,7 @@ async function loadOv(){
       '</div>'+
       '<div class="pcr">'+
         '<div class="pci">'+
-          '<div class="pcil">Current</div>'+
+          '<div class="pcil">Acct Balance</div>'+
           '<div class="pciv">'+fusd(curVal)+'</div>'+
           '<div class="pcsub">'+posCount+' position'+(posCount!==1?'s':'')+'</div>'+
         '</div>'+

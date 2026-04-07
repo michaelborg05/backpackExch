@@ -613,45 +613,91 @@ class TelegramService:
             return f"❌ Error fetching balances: {str(e)}"
 
     def get_balance_data(self):
+        """Return balance text grouped by exchange account (no double-counting)."""
         try:
-            cache = get_portfolio_cache()
-            balance_text = ""
+            from cache.balance_cache import get_balance_cache
+            from cache.price_cache import get_price_cache
+            from services.circuit_breaker import get_circuit_breaker
+            from decimal import Decimal
+
+            balance_cache = get_balance_cache()
+            price_cache = get_price_cache()
+            circuit_breaker = get_circuit_breaker()
 
             if not self.profile_manager:
                 self.logger.warning("Profile manager not initialized")
-                balances = cache.print_portfolio_summary(profile_name="default")
-                return (
-                    f"💰 <b>Current Balances:</b>\n\n{balances}"
-                    if balances else "❌ No balance data available"
-                )
-                
+                return "❌ Profile manager not available"
+
             profiles = self.profile_manager.get_all_profiles()
-            
-            reported_accounts = set()
             balance_text = ""
-            # Send each profile's balance
+            seen_accounts: set = set()
+
             for profile in profiles:
-                account_key = profile.account_id or profile.name  # fallback for standalone
-                if account_key in reported_accounts:
-                    continue  # Skip duplicate account
-                reported_accounts.add(account_key)
+                account_id = getattr(profile, 'account_id', None)
+                dedup_key = account_id if account_id else profile.name
 
-                balances = cache.print_portfolio_summary(
-                    profile_name=profile.name,
-                    display_name=profile.display_name
-                )
+                if dedup_key in seen_accounts:
+                    continue
+                seen_accounts.add(dedup_key)
 
-                balance_text += (
-                    f"💰 {balances}"
-                    if balances 
-                    else f"❌ No balance for {profile.display_name}"
-                )
+                # Label: use account name if available, else profile display name
+                label = profile.display_name
+                if account_id:
+                    # Try to get the account name from DB
+                    try:
+                        with get_db_session() as db:
+                            from db.models import ExchangeAccount
+                            acct = db.query(ExchangeAccount).filter(
+                                ExchangeAccount.id == account_id
+                            ).first()
+                            if acct:
+                                label = acct.name
+                    except Exception:
+                        pass
+
+                account_key = f"account_{account_id}" if account_id else profile.name
+                balances = balance_cache.get_account_balances(account_key)
+
+                # Fall back to profile-keyed lookup if account key isn't populated yet
+                if not balances:
+                    balances = balance_cache.get_profile_balances(profile.name)
+
+                if not balances:
+                    balance_text += f"❌ No balance data for <b>{label}</b>\n"
+                    continue
+
+                # Compute total value
+                total_value = Decimal("0")
+                asset_lines = []
+                DUST = Decimal("0.0001")
+
+                for asset, info in balances.items():
+                    avail  = Decimal(info.get("available", "0"))
+                    locked = Decimal(info.get("locked",    "0"))
+                    staked = Decimal(info.get("staked",    "0"))
+                    qty = avail + locked + staked
+                    if qty < DUST:
+                        continue
+                    price = Decimal("1") if asset == "USDC" else (price_cache.get_price(f"{asset}_USDC") or Decimal("0"))
+                    val = round(qty * price, 2)
+                    if val < Decimal("0.01"):
+                        continue
+                    total_value += val
+                    asset_lines.append(f" - {asset}: {qty} → ${val}")
+
+                limit_summary = circuit_breaker.get_daily_summary(profile.name)
+                if limit_summary:
+                    status = f"⛔ {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
+                    header = f"\n💰 <b>{label}\nTotal: ${round(total_value, 2)}</b> ({limit_summary['daily_pnl_pct']}) {status}\n"
+                else:
+                    header = f"\n💰 <b>{label}\nTotal: ${round(total_value, 2)}</b>\n"
+
+                balance_text += header + "\n".join(asset_lines) + "\n"
 
         except Exception as e:
-            # Delete processing message and show error
-            balance_text += f"❌ Error fetching balances: {str(e)}"
+            balance_text = f"❌ Error fetching balances: {str(e)}"
 
-        return balance_text
+        return balance_text or "❌ No balance data available"
 
     def get_position_data(self):
         """Fetch position data from the exchange."""
