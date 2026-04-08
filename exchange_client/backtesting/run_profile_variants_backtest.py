@@ -16,7 +16,7 @@ parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
 parser.add_argument("--set",     default="range", choices=["all", "range", "mr"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=True,
+parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
 parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
 #parser.add_argument("--csv",     default="",
@@ -39,7 +39,7 @@ sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, V
 symbols_override = [args.symbol] if args.symbol else None
 
 csv_path = None
-if args.csv:
+if args.csv and args.trades:
     base     = args.csv.replace(".csv", "")
     csv_path = f"{base}_{args.set}.csv"
     import os

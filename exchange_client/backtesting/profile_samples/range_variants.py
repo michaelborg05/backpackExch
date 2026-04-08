@@ -97,6 +97,20 @@ RANGE_VARIANTS = {
         "min_entry_indicators_required": 5,
     },
 
+    "range_v3_newbb_widthwithReversalCandle": {
+        **_RANGE_BASE,
+        "entry_indicators": [
+            {"type": "rsi_range",   "params": { "min_rsi": 35, "max_rsi": 62,"invert": True, "hard_stop": True,}},
+            {"type": "price_below_vwap","params": {"min_gap_pct": 0.05, "max_gap_pct": -2.0, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.15, "max_pct_b": 0.45, "hard_stop": True}},
+            {"type": "bb_width_regime", "params": {"required_direction": "not_expanding", "lookback": 4,"min_width": 0.02,"hard_stop": True}},
+            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False,"max_drop_from_close_pct": 0.5}},
+            {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55,"max_drop_from_close_pct": 0.5}},
+            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.2,"max_drop_from_close_pct": 0.5}},
+        ],
+        "min_entry_indicators_required": 5,
+    },
+
     "range_v4_newbb_bbmom": {
         **_RANGE_BASE,
         "entry_indicators": [

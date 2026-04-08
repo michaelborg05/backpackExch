@@ -325,19 +325,18 @@ class TelegramService:
                             await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
                             
                             # Send each profile's balance
+                            summary_text = f"\n=== Recent Exits for (24h) ==="
                             for profile in profiles:                    
                                 summary = reentry_mgr.get_recent_exits_summary(profile.name, hours=24)
-                                summary_text = f"\n=== Recent Exits for {profile.display_name} (24h) ==="
-                                summary_text += f"Total exits: {summary['total_exits']}"
-                                summary_text += f"\nBy reason:"
+                                summary_text += f"\n{profile.display_name} Total exits: {summary['total_exits']}"
                                 for reason, count in summary['by_reason'].items():
                                     summary_text += f"\n  {reason}: {count}"
 
-                                await bot.send_message(
-                                    chat_id=chat_id,
-                                    text=summary_text,
-                                    parse_mode="HTML"
-                                )
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=summary_text,
+                                parse_mode="HTML"
+                            )
                     
                     except Exception as e:
                         # Delete processing message and show error
