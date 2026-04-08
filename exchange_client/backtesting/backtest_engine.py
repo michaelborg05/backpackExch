@@ -254,12 +254,12 @@ class ReplayTrendCache:
         self, symbol: str, timeframe: str, lookback: int = 4,
         expand_threshold_pct: float = 0.08,   # 8% change per step = expanding
         contract_threshold_pct: float = 0.08, # 8% change per step = contracting
-    ) -> Tuple[Optional[float], Optional[str]]:
+    ) -> Tuple[Optional[float], Optional[str], Optional[float]]:
         key = f"{symbol}_{timeframe}"
         history = self._bb_history.get(key, [])
 
         if len(history) < 2:
-            return None, None
+            return None, None, None
 
         window = history[-lookback:] if len(history) >= lookback else history
 
@@ -272,10 +272,11 @@ class ReplayTrendCache:
                 widths.append((upper - lower) / basis)
 
         if len(widths) < 2:
-            return None, None
+            return None, None, None
 
-        avg_change = (widths[-1] - widths[0]) / (len(widths) - 1)
-        avg_width  = sum(widths) / len(widths)
+        avg_change    = (widths[-1] - widths[0]) / (len(widths) - 1)
+        avg_width     = sum(widths) / len(widths)
+        current_width = widths[-1]
 
         # Threshold scales with the typical width of this symbol/timeframe
         expand_threshold   =  avg_width * expand_threshold_pct
@@ -288,7 +289,7 @@ class ReplayTrendCache:
         else:
             direction = "stable"
 
-        return avg_change, direction
+        return avg_change, direction, current_width
 
     def _get_pct_b_trend(
         self, symbol: str, timeframe: str, lookback: int = 4
@@ -1051,21 +1052,28 @@ class ReplayTrendCache:
                 lookback           = params.get("lookback", 4)
                 expand_threshold_pct   = params.get("expand_threshold_pct", 0.08)
                 contract_threshold_pct = params.get("contract_threshold_pct", 0.08)
+                min_width          = params.get("min_width", None)
 
-
-                width_change, width_direction = self._get_bb_width_trend(
+                width_change, width_direction, current_width = self._get_bb_width_trend(
                     symbol, timeframe, lookback,
                     expand_threshold_pct, contract_threshold_pct
                 )
 
                 values["width_direction"] = width_direction
                 values["width_change"]    = round(width_change, 6) if width_change is not None else None
+                values["current_width"]   = round(current_width, 6) if current_width is not None else None
                 values["required"]        = required_direction
                 values["lookback"]        = lookback
 
                 if width_direction is None:
                     is_bull = False
                     msg = f"BB width regime: ✗ (insufficient BB history — need {lookback} candles)"
+                elif min_width is not None and current_width < min_width:
+                    is_bull = False
+                    msg = (
+                        f"BB width regime: ✗ "
+                        f"(bands too narrow: width={current_width:.4f} < min_width={min_width})"
+                    )
                 else:
                     if required_direction == "not_expanding":
                         is_bull = width_direction != "expanding"
@@ -1079,14 +1087,14 @@ class ReplayTrendCache:
                     if is_bull:
                         msg = (
                             f"BB width regime: ✓ "
-                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
-                            f"need {required_direction})"
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle, "
+                            f"width={current_width:.4f} — need {required_direction})"
                         )
                     else:
                         msg = (
                             f"BB width regime: ✗ "
-                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
-                            f"need {required_direction})"
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle, "
+                            f"width={current_width:.4f} — need {required_direction})"
                         )
 
             elif indicator_type == "bb_pct_b_momentum":
@@ -1163,6 +1171,219 @@ class ReplayTrendCache:
             return True, f"{bullish_count}/{total_count} bullish ({details})", indicator_results
         else:
             return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})", indicator_results
+
+
+# ===========================================================================
+# ReplayRegimeFilter
+# ===========================================================================
+
+class ReplayRegimeFilter:
+    """
+    Self-contained regime filter for backtesting.
+
+    Mirrors the logic of cache/regime_filter.py but operates entirely on a
+    ReplayTrendCache — no singleton caches, no DB calls, no live price feed.
+
+    ATR-spike check is omitted: ATR ratio is not stored in TrendAnalysisLog.
+
+    Returns:
+        "SAFE"      — conditions safe for trend entries
+        "CHOPPY"    — range / indecision (good for range trading, skip for trend)
+        "HIGH_RISK" — dangerous for all entries
+    """
+
+    # --- thresholds (same as live RegimeFilter) ---
+    CHOP_EMA_RANGE_PCT      = 0.5
+    CHOP_RSI_NEUTRAL        = (45, 55)
+    ADX_TRENDING_THRESHOLD  = 22
+    RSI_PANIC               = 30
+    RSI_EUPHORIA            = 78
+    MIN_VOLUME_RATIO        = 0.4
+    MIN_VOLUME_RATIO_CONFIRM= 0.5
+    DISTRIBUTION_VOLUME     = 1.5
+    WHIPSAW_THRESHOLD       = 1.0    # HTF EMA diff % to consider "strong uptrend"
+    REVERSAL_THRESHOLD      = -0.8   # LTF EMA diff % to consider "strong bearish reversal"
+
+    def __init__(self, replay_cache: "ReplayTrendCache"):
+        self._cache = replay_cache
+
+    def can_trade(
+        self,
+        symbol: str,
+        primary_tf: str,
+        confirm_tf: str,
+        strategy_type: str = "trend_following",
+    ) -> Tuple[bool, str]:
+        """
+        Returns (allowed, reason).
+        Logic mirrors RegimeFilter.can_trade() per strategy type.
+        """
+        regime, reason = self._get_regime(symbol, primary_tf, confirm_tf, strategy_type)
+
+        if strategy_type == "range_trading":
+            if regime == "HIGH_RISK":
+                return False, reason
+            return True, reason  # SAFE and CHOPPY both allowed for range
+        else:
+            # trend_following / mean_reversion
+            if regime == "SAFE":
+                return True, reason
+            return False, reason  # CHOPPY or HIGH_RISK both blocked
+
+    def _get_regime(
+        self,
+        symbol: str,
+        primary_tf: str,
+        confirm_tf: str,
+        strategy_type: str,
+    ) -> Tuple[str, str]:
+        primary = self._cache.get(symbol, primary_tf)
+        confirm = self._cache.get(symbol, confirm_tf)
+
+        if primary is None:
+            return "SAFE", f"No {primary_tf}m data — regime check skipped"
+
+        high_risk, risk_reason = self._check_high_risk(
+            symbol, primary, confirm, primary_tf, strategy_type
+        )
+        if high_risk:
+            return "HIGH_RISK", f"🚫 {risk_reason}"
+
+        choppy, chop_reason = self._check_choppy(
+            symbol, primary, confirm, primary_tf, confirm_tf
+        )
+        if choppy:
+            prefix = (
+                "✅ - Good for Range Trading profile - "
+                if strategy_type == "range_trading"
+                else "⚠️"
+            )
+            return "CHOPPY", f"{prefix} {chop_reason}"
+
+        return "SAFE", "✅ Market conditions safe"
+
+    def _check_high_risk(
+        self,
+        symbol: str,
+        primary,
+        confirm,
+        primary_tf: str,
+        strategy_type: str,
+    ) -> Tuple[bool, Optional[str]]:
+        rsi = primary.rsi
+        price = primary.price
+
+        # 1. RSI panic / euphoria
+        if strategy_type in ("trend_following", "range_trading"):
+            if rsi < self.RSI_PANIC:
+                return True, f"Panic zone - RSI {rsi:.0f}"
+        elif strategy_type == "mean_reversion":
+            if rsi < 20:
+                return True, f"Extreme panic - RSI {rsi:.0f}"
+            rsi_mom, _ = self._cache._get_rsi_momentum(symbol, primary_tf)
+            if rsi_mom is not None and rsi_mom < -10:
+                return True, f"Free fall - RSI dropping {rsi_mom:.1f}"
+
+        if rsi > self.RSI_EUPHORIA:
+            return True, f"Euphoria zone - RSI {rsi:.0f}"
+
+        # 2. Whipsaw: strong bullish HTF + strong bearish LTF reversal
+        if strategy_type == "mean_reversion":
+            if confirm is not None:
+                primary_diff = ((primary.ema20 - primary.ema50) / primary.ema50) * 100
+                confirm_diff = ((confirm.ema20 - confirm.ema50) / confirm.ema50) * 100
+                if primary_diff < -2.0 and confirm_diff < -2.0:
+                    return True, (
+                        f"Coordinated crash "
+                        f"(HTF {primary_diff:+.2f}%, LTF {confirm_diff:+.2f}%)"
+                    )
+        elif strategy_type not in ("range_trading",):
+            if confirm is not None:
+                primary_diff = ((primary.ema20 - primary.ema50) / primary.ema50) * 100
+                confirm_diff = ((confirm.ema20 - confirm.ema50) / confirm.ema50) * 100
+                if primary_diff > self.WHIPSAW_THRESHOLD:
+                    if confirm_diff < self.REVERSAL_THRESHOLD:
+                        if price <= confirm.ema20:
+                            return True, (
+                                f"Whipsaw reversal "
+                                f"(HTF {primary_diff:+.2f}%, LTF {confirm_diff:+.2f}%)"
+                            )
+
+        # 3. Distribution: high volume + below VWAP + RSI decreasing
+        if primary.volume_ratio is not None:
+            if primary.volume_ratio > self.DISTRIBUTION_VOLUME:
+                if primary.vwap and price < primary.vwap:
+                    rsi_mom, rsi_dir = self._cache._get_rsi_momentum(symbol, primary_tf)
+                    if rsi_dir == "decreasing":
+                        return True, (
+                            f"Distribution pattern - "
+                            f"high volume ({primary.volume_ratio:.1f}x) selling below VWAP"
+                        )
+
+        return False, None
+
+    def _check_choppy(
+        self,
+        symbol: str,
+        primary,
+        confirm,
+        primary_tf: str,
+        confirm_tf: str,
+    ) -> Tuple[bool, str]:
+        issues = []
+        price = primary.price
+
+        # 1. EMA compression
+        ema_diff_pct = abs(((primary.ema20 - primary.ema50) / primary.ema50) * 100)
+        _, ema20_slope_dir = self._cache._get_ema_slope(symbol, primary_tf, "ema20")
+        adx_value = getattr(primary, "adx", None)
+        adx_is_trending = (
+            adx_value is not None and float(adx_value) > self.ADX_TRENDING_THRESHOLD
+        )
+
+        if ema_diff_pct < self.CHOP_EMA_RANGE_PCT:
+            if ema20_slope_dir != "rising" and not adx_is_trending:
+                issues.append(f"60m EMAs compressed ({ema_diff_pct:.2f}%)")
+
+        if confirm is not None:
+            confirm_ema_diff = abs(
+                ((confirm.ema20 - confirm.ema50) / confirm.ema50) * 100
+            )
+            if (confirm_ema_diff < self.CHOP_EMA_RANGE_PCT
+                    and ema_diff_pct < self.CHOP_EMA_RANGE_PCT):
+                if not adx_is_trending and ema20_slope_dir != "rising":
+                    issues.append(
+                        f"Both TFs compressed "
+                        f"(60m: {ema_diff_pct:.2f}%, {confirm_tf}m: {confirm_ema_diff:.2f}%)"
+                    )
+
+        # 2. RSI stuck neutral
+        rsi_low, rsi_high = self.CHOP_RSI_NEUTRAL
+        if rsi_low < primary.rsi < rsi_high:
+            rsi_mom, _ = self._cache._get_rsi_momentum(symbol, primary_tf)
+            if rsi_mom is not None and abs(rsi_mom) < 1.0:
+                issues.append(f"RSI stuck neutral ({primary.rsi:.0f}, momentum {rsi_mom:+.1f})")
+
+        # 3. Dead volume on both TFs
+        if (primary.volume_ratio is not None and confirm is not None
+                and confirm.volume_ratio is not None):
+            if (primary.volume_ratio < self.MIN_VOLUME_RATIO
+                    and confirm.volume_ratio < self.MIN_VOLUME_RATIO_CONFIRM):
+                issues.append(
+                    f"Both TFs dead volume "
+                    f"(HTF: {primary.volume_ratio:.2f}x, LTF: {confirm.volume_ratio:.2f}x)"
+                )
+
+        # 4. Price stagnation
+        price_ema20_gap = abs((price - primary.ema20) / primary.ema20) * 100
+        price_ema50_gap = abs((price - primary.ema50) / primary.ema50) * 100
+        if price_ema20_gap < 0.3 and price_ema50_gap < 0.5:
+            issues.append(f"Price stagnant (EMA20: {price_ema20_gap:.2f}%, EMA50: {price_ema50_gap:.2f}%)")
+            issues.append("Price stagnation detected")
+
+        if len(issues) >= 2:
+            return True, f"Choppy ({len(issues)} issues): {'; '.join(issues)}"
+        return False, ""
 
 
 # ===========================================================================
@@ -1356,6 +1577,7 @@ class BacktestResult:
     end:             datetime
     trades:          List[BacktestTrade] = field(default_factory=list)
     signals_fired:   int = 0
+    regime_blocked:  int = 0
     rows_processed:  int = 0
     profile_params:  Dict[str, Any] = field(default_factory=dict)
 
@@ -1409,6 +1631,7 @@ class BacktestResult:
             f"Period  : {self.start.date()} → {self.end.date()}",
             f"Rows    : {self.rows_processed}",
             f"Signals : {self.signals_fired}",
+            f"Regime⛔ : {self.regime_blocked}",
             f"Trades  : {self.total_trades}",
             f"Win rate: {self.win_rate:.1%}",
             f"Avg P&L : {self.avg_pnl_pct:+.2f}%",
@@ -1600,6 +1823,11 @@ class BacktestEngine:
         entry_tf_rows = by_tf.get(self.profile.entry_timeframe, [])
 
         cache     = ReplayTrendCache()
+        regime_filter = (
+            ReplayRegimeFilter(cache)
+            if getattr(self.profile, "use_market_regime_filter", False)
+            else None
+        )
         open_pos  = None   # currently open simulated position (dict)
         cooldown_until: Optional[datetime] = None
 
@@ -1647,6 +1875,21 @@ class BacktestEngine:
             cooldown_sec = getattr(self.profile, "signal_cooldown_seconds", 900)
             if cooldown_until and row_time < cooldown_until:
                 continue
+
+            # Run market regime filter
+            if regime_filter is not None:
+                strategy_type = getattr(self.profile, "strategy_type", "trend_following")
+                regime_ok, regime_reason = regime_filter.can_trade(
+                    symbol,
+                    self.profile.trend_timeframe,
+                    self.profile.entry_timeframe,
+                    strategy_type=strategy_type,
+                )
+                if not regime_ok:
+                    result.regime_blocked += 1
+                    if self.verbose:
+                        print(f"[{row_time}] Regime filter blocked: {regime_reason}")
+                    continue
 
             # Run trend filter (HTF)
             if self.profile.use_trend_filter:

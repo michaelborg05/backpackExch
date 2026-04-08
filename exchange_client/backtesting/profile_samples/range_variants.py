@@ -50,115 +50,107 @@ RANGE_VARIANTS = {
     # BASELINE — current live config (use for comparison)
     # -------------------------------------------------------------------------
     "range_baseline": _RANGE_BASE,
-
-    # -------------------------------------------------------------------------
-    # V1: Stronger HTF gate — fix the SOL downtrend problem
-    # Change: 60m RSI minimum raised from 40→45, AND make it a hard_stop.
-    # Rationale: SOL 60m RSI was 33.2 when trade fired. A hard_stop at 45
-    # would have killed this trade outright. Slightly stricter but ranges
-    # only form in neutral-to-mild trending markets.
-    # -------------------------------------------------------------------------
-    # "range_v1_rsi_momentum": {
-    #     **_RANGE_BASE,
-    #     "trend_indicators": [
-    #         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": True}},
-    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
-    #     ],
-    # },
-
-    # -------------------------------------------------------------------------
-    # V2: Add 60m BB position gate — block when 60m is already near lower band
-    # Rationale: SOL 60m pct_b=0.12 — price was near the LOWER band of the HTF.
-    # That means the HTF is in a downswing. For range trading you want to see
-    # HTF in the MID band (0.25–0.75), not hugging the lower band.
-    # -------------------------------------------------------------------------
-    # "range_v2_htf_price_vs_emadip": {
-    #     **_RANGE_BASE,
-    #     "trend_indicators": [
-    #         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -1.5, "max_gap_pct": 2.5}},
-    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
-    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
-    #     ],
-    #     "min_indicators_required": 4,
-    # },
-    # -------------------------------------------------------------------------
-    # V3: Make vwap a hard_stop — SOL was actually ABOVE vwap when it fired
-    # Rationale: price_below_vwap was one of the indicators that FAILED, but
-    # since only 4/6 were needed, the trade still fired. Making it a hard_stop
-    # means range entries MUST be below vwap (which is the whole point of a
-    # range dip buy).
-    # -------------------------------------------------------------------------
-    # "range_v3_htf_bb_tighter": {
-    #     **_RANGE_BASE,
-    #     "trend_indicators": [
-    #         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False}},
-    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.55, "hard_stop": True}},
-    #     ],
-    #     "min_indicators_required": 3,
-    # },
-
-    # -------------------------------------------------------------------------
-    # V4: Tighter BB lower requirement — only trade at TRUE range lows
-    # Rationale: SOL pct_b was 0.13 — just inside the 0.30 threshold.
-    # Tightening to 0.20 means we only enter when price is in the bottom 20%
-    # of the band — a more convincing range-low signal.
-    # -------------------------------------------------------------------------
-
-    "range_v1_adx": {
+    
+    "range_v4_regimefilter": {
         **_RANGE_BASE,
-        "trend_indicators": [
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False,}},
-            {"type": "rsi_overbought",  "params": {"min_value": 60, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
-            {"type": "adx_regime",       "params": {"max_adx": 25}},
-        ],
-        "min_indicators_required": 5,
+        "use_market_regime_filter": True,
+    },
+
+    
+    "range_v1_15BB": {
+        **_RANGE_BASE,
         # Entry filter (15m)
         "entry_indicators": [
             {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True,}},
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
             {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.05, "max_pct_b": 0.45, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.15, "max_pct_b": 0.45, "hard_stop": True}},
             {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False,"max_drop_from_close_pct": 0.5}},
             {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55,"max_drop_from_close_pct": 0.5}},
             {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.2,"max_drop_from_close_pct": 0.5}},
+        ],
+    },
+
+    "range_v2_25BB": {
+        **_RANGE_BASE,
+        # Entry filter (15m)
+        "entry_indicators": [
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True,}},
+            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+            {"type": "price_below_vwap","params": {"min_gap_pct": -0.15, "max_gap_pct": -2.0, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.25, "max_pct_b": 0.45, "hard_stop": True}},
+            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False,"max_drop_from_close_pct": 0.5}},
+            {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55,"max_drop_from_close_pct": 0.5}},
+            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.2,"max_drop_from_close_pct": 0.5}},
+        ],
+    },
+    
+    "range_v3_newbb_width": {
+        **_RANGE_BASE,
+        "entry_indicators": [
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True,}},
+            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+            {"type": "price_below_vwap","params": {"min_gap_pct": 0.05, "max_gap_pct": -2.0, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.15, "max_pct_b": 0.45, "hard_stop": True}},
+            {"type": "bb_width_regime", "params": {"required_direction": "not_expanding", "lookback": 4,"min_width": 0.02,"hard_stop": True}},
         ],
         "min_entry_indicators_required": 5,
     },
 
-    "range_v2_noTSL": {
+    "range_v4_newbb_bbmom": {
         **_RANGE_BASE,
-        "use_trailing_stop": False,
-    },
-    
-    "range_v4_claudechanges": {
-        **_RANGE_BASE,
-        "trend_indicators": [
-            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 30, "use_momentum": False,}},
-            {"type": "rsi_overbought",  "params": {"min_value": 60, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.55, "hard_stop": True}},
-        ],
-        "min_indicators_required": 4,
-        # Entry filter (15m)
         "entry_indicators": [
-            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 30, "use_momentum": False, "hard_stop": True,}},
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True,}},
             {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-            {"type": "price_below_vwap","params": {"min_gap_pct": -0.02, "max_gap_pct": -2.0, "hard_stop": True}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": -0.1, "max_pct_b": 0.45, "hard_stop": True}},
-            {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False,"max_drop_from_close_pct": 0.5}},
-            {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55,"max_drop_from_close_pct": 0.5}},
-            {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.2,"max_drop_from_close_pct": 0.5}},
+            {"type": "price_below_vwap","params": {"min_gap_pct": 0.05, "max_gap_pct": -2.0, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.15, "max_pct_b": 0.45, "hard_stop": True}},
+            {"type": "bb_width_regime", "params": {"required_direction": "not_expanding", "lookback": 4,"min_width": 0.02,"hard_stop": True}},
+            {"type": "bb_pct_b_momentum", "params": {"lookback": 3, "required_direction": "not_rising", "hard_stop": True}},
         ],
         "min_entry_indicators_required": 5,
     },
+
+    "range_v5_newbb_bbmomTrend": {
+        **_RANGE_BASE,
+        "trend_indicators": [
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
+            {"type": "rsi_range",   "params": {"min_rsi": 35, "max_rsi": 60, "invert": True,}},
+            {"type": "bb_width_regime", "params": {"required_direction": "not_expanding", "lookback": 4,"min_width": 0.02,"hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.80, "hard_stop": True}},
+        ],
+        "min_indicators_required": 4,
+        "entry_indicators": [
+            {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 35, "use_momentum": False, "hard_stop": True,}},
+            {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+            {"type": "price_below_vwap","params": {"min_gap_pct": 0.05, "max_gap_pct": -2.0, "hard_stop": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": 0.15, "max_pct_b": 0.45, "hard_stop": True}},
+            {"type": "bb_width_regime", "params": {"required_direction": "not_expanding", "lookback": 4,"min_width": 0.02,"hard_stop": True}},
+            {"type": "bb_pct_b_momentum", "params": {"lookback": 3, "required_direction": "not_rising", "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 5,
+    },
+
+    # "range_v4_claudechanges": {
+    #     **_RANGE_BASE,
+    #     "trend_indicators": [
+    #         {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.01}},
+    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 30, "use_momentum": False,}},
+    #         {"type": "rsi_overbought",  "params": {"min_value": 60, "hard_stop": True}},
+    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.55, "hard_stop": True}},
+    #     ],
+    #     "min_indicators_required": 4,
+    #     # Entry filter (15m)
+    #     "entry_indicators": [
+    #         {"type": "rsi_threshold",   "params": {"period": 14, "min_value": 30, "use_momentum": False, "hard_stop": True,}},
+    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
+    #         {"type": "price_below_vwap","params": {"min_gap_pct": -0.02, "max_gap_pct": -2.0, "hard_stop": True}},
+    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b","min_pct_b": -0.1, "max_pct_b": 0.45, "hard_stop": True}},
+    #         {"type": "reversal_candle", "params": {"pattern": "higher_low", "require_bull": False,"max_drop_from_close_pct": 0.5}},
+    #         {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.55,"max_drop_from_close_pct": 0.5}},
+    #         {"type": "reversal_candle", "params": {"pattern": "doji", "max_body_pct": 0.2,"max_drop_from_close_pct": 0.5}},
+    #     ],
+    #     "min_entry_indicators_required": 5,
+    # },
 
     # -------------------------------------------------------------------------
     # V5: Add EMA proximity gate — block if EMA20 is too far above price

@@ -346,7 +346,7 @@ class TrendCache:
         self, symbol: str, timeframe: str, lookback: int = 4,
         expand_threshold_pct: float = 0.08,   # 8% change per step = expanding
         contract_threshold_pct: float = 0.08, # 8% change per step = contracting
-    ) -> Tuple[Optional[float], Optional[str]]:
+    ) -> Tuple[Optional[float], Optional[str], Optional[float]]:
         """
         Is the Bollinger Band expanding, contracting, or stable?
 
@@ -358,15 +358,16 @@ class TrendCache:
         is the opposite of the flat oscillation a range trade needs.
 
         Returns:
-            (avg_change_per_candle, direction)
+            (avg_change_per_candle, direction, current_width)
             direction: "expanding" | "contracting" | "stable"
-            Returns (None, None) if insufficient history.
+            current_width: latest normalised band width (upper - lower) / basis
+            Returns (None, None, None) if insufficient history.
         """
         key = f"{symbol}_{timeframe}"
         history = self._bb_history.get(key, [])
 
         if len(history) < 2:
-            return None, None
+            return None, None, None
 
         window = history[-lookback:] if len(history) >= lookback else history
 
@@ -379,11 +380,12 @@ class TrendCache:
                 widths.append((upper - lower) / basis)
 
         if len(widths) < 2:
-            return None, None
+            return None, None, None
 
         # Average per-step change across the window
-        avg_change = (widths[-1] - widths[0]) / (len(widths) - 1)
-        avg_width  = sum(widths) / len(widths)
+        avg_change    = (widths[-1] - widths[0]) / (len(widths) - 1)
+        avg_width     = sum(widths) / len(widths)
+        current_width = widths[-1]
 
         # Threshold scales with the typical width of this symbol/timeframe
         expand_threshold   =  avg_width * expand_threshold_pct
@@ -396,7 +398,7 @@ class TrendCache:
         else:
             direction = "stable"
 
-        return avg_change, direction
+        return avg_change, direction, current_width
 
     def _get_pct_b_trend(
         self, symbol: str, timeframe: str, lookback: int = 4
@@ -1657,6 +1659,7 @@ class TrendCache:
                 params: {
                     required_direction: "not_expanding",  # "contracting" | "stable" | "not_expanding"
                     lookback: 4,                          # candles of BB history to use
+                    min_width: 0.015,                     # optional: minimum normalised band width floor
                     hard_stop: false
                 }
 
@@ -1665,10 +1668,15 @@ class TrendCache:
                   "contracting"    — only pass when bands are actively narrowing (strict)
                   "stable"         — only pass when bands are flat (very strict)
 
-                YAML example (60m trend filter):
+                min_width: blocks entry when bands are too narrow regardless of direction.
+                  Normalised width = (upper - lower) / basis. Typical values: 0.01–0.03.
+                  ~0.015 is a reasonable floor to avoid entering in dead/squeezed markets.
+
+                YAML example (15m entry filter):
                   - type: "bb_width_regime"
                     params:
                       required_direction: "not_expanding"
+                      min_width: 0.015
                       lookback: 4
                       hard_stop: true
                 """
@@ -1676,21 +1684,28 @@ class TrendCache:
                 lookback           = params.get("lookback", 4)
                 expand_threshold_pct   = params.get("expand_threshold_pct", 0.08)
                 contract_threshold_pct = params.get("contract_threshold_pct", 0.08)
+                min_width          = params.get("min_width", None)
 
-
-                width_change, width_direction = self._get_bb_width_trend(
+                width_change, width_direction, current_width = self._get_bb_width_trend(
                     symbol, timeframe, lookback,
                     expand_threshold_pct, contract_threshold_pct
                 )
 
                 values["width_direction"] = width_direction
                 values["width_change"]    = round(width_change, 6) if width_change is not None else None
+                values["current_width"]   = round(current_width, 6) if current_width is not None else None
                 values["required"]        = required_direction
                 values["lookback"]        = lookback
 
                 if width_direction is None:
                     is_bullish = False
                     msg = f"BB width regime: ✗ (insufficient BB history — need {lookback} candles)"
+                elif min_width is not None and current_width < min_width:
+                    is_bullish = False
+                    msg = (
+                        f"BB width regime: ✗ "
+                        f"(bands too narrow: width={current_width:.4f} < min_width={min_width})"
+                    )
                 else:
                     if required_direction == "not_expanding":
                         is_bullish = width_direction != "expanding"
@@ -1704,14 +1719,14 @@ class TrendCache:
                     if is_bullish:
                         msg = (
                             f"BB width regime: ✓ "
-                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
-                            f"need {required_direction})"
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle, "
+                            f"width={current_width:.4f} — need {required_direction})"
                         )
                     else:
                         msg = (
                             f"BB width regime: ✗ "
-                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle — "
-                            f"need {required_direction})"
+                            f"(bands {width_direction}, Δ={width_change:+.4f}/candle, "
+                            f"width={current_width:.4f} — need {required_direction})"
                         )
 
             elif indicator_type == "bb_pct_b_momentum":
