@@ -10,9 +10,7 @@ smarter TP/SL - Different per token. Maybe variable based on market
 #Ability to add multiple profiles on same acct. Does it cause issues? How to only display balances 1 per acct if multiple profiles using same acct
 #clean up circuit breaker
     - Reporting percent from start but triggering from highest - I.e. Reported CB trigger 1.5% loss even though loss limit was 3%. It was looking at highest price for period instead of cb_trigger amount. Would nee dto 
-#Attack vector - Added user_id as an atribute in CreateProfile (profiles.html) to then link the profile to a user. Could insert different user id here
 # Add TP and SL from AI suggestion to override defaults
-#For range trading maybe check BB slope or width, etc
 #reduce db reads
 
 No need
@@ -100,3 +98,5 @@ Improvement: The "Mean Reversion" Check
 #Fix lookup of symbols on profile - Adding sumbols doesnt show them in the grid
 #Bug - When adding new profile and trying to add symbols, getting 404 error Profile spike_entry not found <b>Endpoint:</b> GET /config/symbols/spike_entry
 #build solution to add a new profile cleanly
+#For range trading maybe check BB slope or width, etc
+#Attack vector - Added user_id as an atribute in CreateProfile (profiles.html) to then link the profile to a user. Could insert different user id here

@@ -36,11 +36,10 @@ from db.crud import (
     update_position_trailing_stop,
     close_invalid_position,
     update_high_low,
-    get_active_symbols,
-    get_active_symbols_per_profile,
     get_active_orders,
     get_position,
 )
+from cache.symbol_cache import get_symbol_cache
 
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
@@ -53,11 +52,10 @@ class MonitoringService:
         self.logger = log_manager.get_logger("MonitoringService")
         self.settings = get_settings_helper()
         #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
-        with get_db_session() as db:
-                db_tickers = get_active_symbols(db)
-                # Fallback to a hardcoded list ONLY if the DB is empty
-                self.tickers = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
+        self._symbol_cache = get_symbol_cache()
 
+        with get_db_session() as db:
+                self._symbol_cache.refresh(db)
                 trend_cache = initialize_trend_cache_with_db()
                 # Warm up from database
                 try:
@@ -93,6 +91,10 @@ class MonitoringService:
         self._trend_invalidation_counter = 0
         self.position_validation_counter = 0
         self._profile_refresh_counter = 0
+
+    @property
+    def tickers(self) -> list:
+        return self._symbol_cache.get_all_symbols()
 
     def start(self):
         """Start the monitoring loop in a background thread"""
@@ -147,16 +149,6 @@ class MonitoringService:
                 self._profile_refresh_counter += 1
                 self.logger.debug(f"Beginning loop #{self.call_count}")
 
-                #refresh profiles from db every X cycles
-                if self._profile_refresh_counter >= self.settings.profile_refresh_interval:
-                    
-                    #also refresh tickers each time profile is refreshed  - no need for separate loop just for tickers
-                    with get_db_session() as db:
-                            db_tickers = get_active_symbols(db)
-                            # Fallback to a hardcoded list ONLY if the DB is empty
-                            self.tickers = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "BTC_USDC"]
-
-                    self._profile_refresh_counter = 0                
                     
                 # Monitor prices for all tickers
                 self._monitor_prices()
@@ -985,8 +977,7 @@ class MonitoringService:
             return None
 
         #retrieve list of tickers for this profile
-        with get_db_session() as db:
-            profile_tickers = get_active_symbols_per_profile(db,profile.name)
+        profile_tickers = self._symbol_cache.get_symbols_for_profile(profile.name)
 
         symbols_to_scan: list[str] = []
         #Filter symbols list down before moving to signal generator to reduce wasted effort of checking for signals on symbols that are blocked already

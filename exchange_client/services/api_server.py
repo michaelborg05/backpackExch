@@ -1361,12 +1361,13 @@ async def set_symbol_config(
     """
     from db.utils import get_db_session
     from db.crud import upsert_symbol_config
-    
+    from cache.symbol_cache import get_symbol_cache
+
     # Validate profile exists
     profile_manager = get_profile_manager()
     if not profile_manager.has_profile(profile_name):
         raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
-    
+
     try:
         with get_db_session() as db:
             symbol_config = upsert_symbol_config(
@@ -1377,7 +1378,8 @@ async def set_symbol_config(
                 max_position_size_pct=config.max_position_size_pct,
                 enabled=config.enabled
             )
-            
+            get_symbol_cache().refresh(db)
+
             return {
                 "success": True,
                 "message": f"Symbol config updated for {symbol}",
@@ -1467,17 +1469,20 @@ async def delete_symbol_config_endpoint(profile_name: str, symbol: str):
     """Delete (disable) symbol-specific configuration"""
     from db.utils import get_db_session
     from db.crud import delete_symbol_config
-    
+    from cache.symbol_cache import get_symbol_cache
+
     try:
         with get_db_session() as db:
             success = delete_symbol_config(db, profile_name, symbol)
-            
+
             if not success:
                 raise HTTPException(
                     status_code=404,
                     detail=f"No config found for {symbol} in profile {profile_name}"
                 )
-            
+
+            get_symbol_cache().refresh(db)
+
             return {
                 "success": True,
                 "message": f"Symbol config deleted for {symbol}"
