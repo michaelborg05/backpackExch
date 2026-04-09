@@ -2579,7 +2579,7 @@ async def get_profile_detail(profile_name: str):
 # POST /profiles  — create new profile
 # ---------------------------------------------------------------------------
 @app.post("/profiles", dependencies=[Depends(require_admin_permission)])
-async def create_profile_endpoint(body: ProfileCreateRequest):
+async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depends(get_dashboard_user)):
     from db.utils import get_db_session
     from db.models import TradingProfileDB, CircuitBreakerConfig, ExchangeAccount
     from services.audit import write_audit
@@ -2671,7 +2671,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest):
 
         from db.models import UserProfileMapping #, SymbolConfig
         usermapping = UserProfileMapping(
-            user_id = body.user_id,
+            user_id = current_user.user_id,
             profile_name = body.name,
             is_active = body.is_active,
         )

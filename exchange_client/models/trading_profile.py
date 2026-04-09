@@ -121,7 +121,6 @@ class ProfileCreateRequest(BaseModel):
     name: str
     display_name: str
     account_id:   int            # Required — links to ExchangeAccount
-    user_id: int                #stored for linking user to app_user_mapping
 
     # Strategy
     trading_type: Optional[str] = "rules_live"
