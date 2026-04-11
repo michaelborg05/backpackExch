@@ -54,19 +54,21 @@ class Candle:
 
 class ATRCalculator:
     """
-    Fetches candle data from Backpack and calculates ATR
+    Fetches candle data from the exchange (or CoinGecko fallback) and calculates ATR.
     """
-    
+
     def __init__(
         self,
         atr_period: int = 14,
-        sma_period: int = 50
+        sma_period: int = 50,
+        profile=None,
     ):
         self.logger = log_manager.get_logger("ATRCalculator")
         self.atr_period = atr_period
         self.sma_period = sma_period
         self.atr_cache = get_atr_cache()
-        
+        self.profile = profile  # Optional TradingProfile — used to route to correct exchange
+
         # Keep a rolling window of ATR values for SMA calculation
         # key: "SYMBOL_TIMEFRAME"
         self._atr_history: dict[str, deque] = {}
@@ -98,60 +100,56 @@ class ATRCalculator:
         return value * multipliers[unit]
     
     def fetch_candles(
-        self, 
-        symbol: str, 
+        self,
+        symbol: str,
         timeframe: str = "1m",
-        limit: int = 100
+        limit: int = 100,
+        profile=None,
     ) -> List[Candle]:
-        """
-        Fetch candle data from Backpack
-        
+        """Fetch candle data from the appropriate exchange (or CoinGecko fallback).
+
         Args:
-            symbol: Trading pair (e.g., "SOL_USDC")
+            symbol:    Trading pair (e.g., "SOL_USDC" for Backpack, "SOL-USD" for Bullet)
             timeframe: Candle interval (1m, 5m, 15m, 1h, etc.)
-            limit: Number of candles to fetch
-            
+            limit:     Number of candles to fetch
+            profile:   Optional TradingProfile — overrides self.profile
+
         Returns:
             List of Candle objects, oldest first
         """
+        active_profile = profile or self.profile
+
         try:
-            # Calculate start time based on limit and timeframe
             seconds_per_candle = self._timeframe_to_seconds(timeframe)
             current_time = int(time.time())
-
-            # Go back enough time to get 'limit' candles
-            # Add a buffer to ensure we get enough data
             lookback = (limit + 5) * seconds_per_candle
             start_time = current_time - lookback
-            
-
 
             self.logger.debug(
                 f"Fetching candles for {symbol} ({timeframe}): "
                 f"startTime={start_time}, lookback={lookback:.0f}s"
             )
 
-            url = APIEndpoints.backpack_klines(ticker=symbol, interval=timeframe, startTime=start_time)
+            if active_profile:
+                from api_builders.factory import get_adapter
+                adapter = get_adapter(active_profile)
+                data = adapter.get_klines(symbol, timeframe, start_time, limit)
+            else:
+                # Backpack fallback — no profile available
+                url = APIEndpoints.backpack_klines(ticker=symbol, interval=timeframe, startTime=start_time)
+                data = api_request(url, timeout=10)
 
-            data = api_request(url, timeout=10)
-
-            if data is None:
+            if not data:
                 self.logger.error(f"No candle data returned for {symbol}")
                 return []
-            
-            # Convert to Candle objects
+
             candles = [Candle(k) for k in data]
-            
-            # Backpack might return more than we need, trim to limit
             if len(candles) > limit:
                 candles = candles[-limit:]
-            
-            self.logger.debug(
-                f"Fetched {len(candles)} candles for {symbol} ({timeframe})"
-            )
 
+            self.logger.debug(f"Fetched {len(candles)} candles for {symbol} ({timeframe})")
             return candles
-            
+
         except ExchangeAPIError as e:
             self.logger.error(f"Exchange API error fetching candles for {symbol}: {e}")
             return []

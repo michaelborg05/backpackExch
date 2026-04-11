@@ -21,7 +21,7 @@ class DustConverter:
         self.logger = log_manager.get_logger("DustConversion")
         
     def convert_dust(
-        self, 
+        self,
         profile: TradingProfile,
         dust_threshold: Optional[Decimal] = None
     ) -> Optional[Dict]:
@@ -37,12 +37,21 @@ class DustConverter:
         """
         if dust_threshold is None:
             dust_threshold = self.DEFAULT_DUST_THRESHOLD
-            
+
+        # Dust conversion is only supported on Backpack
+        exchange_type = getattr(profile, "exchange_type", "backpack") or "backpack"
+        if exchange_type != "backpack":
+            self.logger.debug(
+                f"Skipping dust conversion for [{profile.name}] — "
+                f"not supported on {exchange_type}"
+            )
+            return {}
+
         self.logger.info(
             f"Converting dust for profile [{profile.name}] "
             f"(threshold: ${dust_threshold})"
         )
-        
+
         url = APIEndpoints.backpack_convert_dust()
         
         # Empty body required - Backpack expects {} not null

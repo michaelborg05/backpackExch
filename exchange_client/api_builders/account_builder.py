@@ -37,18 +37,27 @@ def _get_profile_balances(
     source: str = "API",
     update_cache: bool = False
 ) -> Optional[BalanceReader]:
-    """Get balances for a specific profile via the exchange API."""
-    url = APIEndpoints.backpack_balances()
-    headers = data_converters.build_authorisation_header(
-        api_key=profile.api_key,
-        secret=profile.secret,
-        query_params={},
-        body=None,
-        instruction="balanceQuery",
-        window=60000
-    )
+    """Get balances for a specific profile via the appropriate exchange adapter."""
+    from api_builders.factory import get_adapter
 
-    balances = api_request(url, headers)
+    exchange_type = getattr(profile, "exchange_type", "backpack") or "backpack"
+
+    if exchange_type == "backpack":
+        # Existing path: direct REST call + BalanceReader
+        url = APIEndpoints.backpack_balances()
+        headers = data_converters.build_authorisation_header(
+            api_key=profile.api_key,
+            secret=profile.secret,
+            query_params={},
+            body=None,
+            instruction="balanceQuery",
+            window=60000
+        )
+        balances = api_request(url, headers)
+    else:
+        # Generic adapter path (e.g. Bullet)
+        adapter = get_adapter(profile)
+        balances = adapter.get_balances()
 
     if balances:
         account_logger.debug(f"API call for balances completed successfully for profile: {profile.name}")
