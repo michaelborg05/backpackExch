@@ -124,6 +124,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         name=name,
         display_name=display_name,
         account_id=cfg.get("account_id"),
+        exchange_type=cfg.get("exchange_type", "backpack"),
         api_key=api_key,
         secret=secret,
         trading_type=trading_type,
@@ -258,9 +259,11 @@ def load_profiles_from_db(db_session) -> ProfileManager:
     ('trend' | 'entry' | 'exit') and a `params` JSONB column.
     """
     from db.models import TradingProfileDB  # local import to avoid circular deps
+    from sqlalchemy.orm import joinedload
 
     db_profiles: List[TradingProfileDB] = (
         db_session.query(TradingProfileDB)
+        .options(joinedload(TradingProfileDB.account))
         .filter(TradingProfileDB.is_active == True)
         .all()
     )
@@ -298,7 +301,8 @@ def load_profiles_from_db(db_session) -> ProfileManager:
         cfg = {
             "id" : row.id,
             "display_name": row.display_name,
-            "account_id": row.account_id, 
+            "account_id": row.account_id,
+            "exchange_type": getattr(row.account, "exchange_type", "backpack") if row.account else "backpack",
             "trading_type": row.trading_type,
             "strategy_type": row.strategy_type,
             # Position sizing

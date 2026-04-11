@@ -797,9 +797,10 @@ class ExchangeAccount(Base):
     __tablename__ = "exchange_accounts"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)     # e.g. "main_account"
-    api_key = Column(String, nullable=False)               # Encrypted
-    secret = Column(String, nullable=False)                # Encrypted
+    name = Column(String, unique=True, nullable=False)       # e.g. "main_account"
+    exchange_type = Column(String, nullable=False, default="backpack")  # "backpack" | "bullet"
+    api_key = Column(String, nullable=False)                 # Encrypted (Backpack: API key, Bullet: wallet address)
+    secret = Column(String, nullable=False)                  # Encrypted (Backpack: secret, Bullet: Ed25519 private key)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
