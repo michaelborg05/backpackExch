@@ -450,6 +450,7 @@ class ReplayTrendCache:
                 ema_type  = params.get("ema", 20)
                 req_dir   = params.get("direction", "rising")
                 min_slope = params.get("min_slope_pct", 0.01)
+                max_slope = params.get("max_slope_pct", None)
                 ema_name  = f"ema{ema_type}"
                 slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name)
                 if slope_pct is None:
@@ -467,7 +468,11 @@ class ReplayTrendCache:
                     else:
                         is_bull   = abs(slope_pct) <= min_slope
                         direction = "flat"
-                    msg = f"EMA{ema_type} slope: {'✓' if is_bull else '✗'} ({direction} {slope_pct:+.3f}%)"
+                    if is_bull and max_slope is not None and slope_pct > max_slope:
+                        is_bull   = False
+                        direction = "too steep"
+                    max_str = f", max {max_slope:+.3f}%" if max_slope is not None else ""
+                    msg = f"EMA{ema_type} slope: {'✓' if is_bull else '✗'} ({direction} {slope_pct:+.3f}%{max_str})"
 
             elif indicator_type == "rsi_range":
                 min_rsi  = params.get("min", 30)
