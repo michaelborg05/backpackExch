@@ -14,7 +14,7 @@ from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorO
 from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
-from api_builders.trading_builder import TradingService, process_tradingview_alert
+from api_builders.factory import get_adapter
 from cache.trend_cache import get_trend_cache
 from cache.atr_cache import get_atr_cache
 from cache.market_info_cache import get_market_info_cache
@@ -424,21 +424,20 @@ async def place_order(
 ):
     """Place an order"""
     try:
-        # Proceed with trade - trading_builder will adjust quantity if needed
+        # Proceed with trade - adapter routes to correct exchange
         profile_manager = get_profile_manager()
         profile = profile_manager.get(request.profile_name)
-        trading = TradingService(profile)
-
+        adapter = get_adapter(profile)
 
         if request.side.lower() == "buy":
-            result = trading.order_buy(
-                request.symbol, 
+            result = adapter.order_buy(
+                request.symbol,
                 request.quantity,
                 source=TradeReason.API
             )
         elif request.side.lower() == "sell":
-            result = trading.order_sell(
-                request.symbol, 
+            result = adapter.order_sell(
+                request.symbol,
                 request.quantity,
                 source=TradeReason.API
             )
@@ -560,9 +559,8 @@ async def tradingview_webhook(
                     errors.append(f"[{profile_name}] Circuit breaker active")
                     continue  # Skip this profile
                 
-                # Create trading service for this profile
                 profile = profile_manager.get(profile_name)
-                trading = TradingService(profile)
+                adapter = get_adapter(profile)
                 trading_timeframe = getattr(profile, 'signal_timeframe', '15')
                 trend_timeframe = getattr(profile, 'trend_timeframe', '60')  # Higher TF for trend
 
@@ -595,9 +593,9 @@ async def tradingview_webhook(
 
                 # 3. Pre-validate balance for orders
                 # Only rejects if balance is 0 or below minimum/step size
-                is_valid, balance_error = trading.validate_balance_for_trade(
-                    sale_action=alert.action, 
-                    symbol=alert.symbol                    
+                is_valid, balance_error = adapter.validate_balance_for_trade(
+                    sale_action=alert.action,
+                    symbol=alert.symbol
                 )
                 
                 if not is_valid:
@@ -747,12 +745,11 @@ async def tradingview_webhook(
                     profile.stop_loss_pct = Decimal(alert.stop_loss)
 
                 # Process the alert
-                result = await process_tradingview_alert(
-                    trading, 
-                    alert, 
-                    source=TradeReason.WEBHOOK,
+                result = await adapter.process_tradingview_alert(
+                    alert,
                     profile_name=profile_name,
-                    reason_summary = reasons,
+                    source=TradeReason.WEBHOOK,
+                    reason_summary=reasons,
                 )
                 
                 executed_price = None
@@ -1315,12 +1312,9 @@ async def test_signal_execution(
         }
     else:
         # Actually execute (use with caution!)
-        from api_builders.trading_builder import TradingService
-        
-        trading = TradingService(profile)
-        
         try:
-            result = trading.order_buy(
+            adapter = get_adapter(profile)
+            result = adapter.order_buy(
                 symbol=signal.symbol,
                 quantity="MAX",
                 source=f"TEST_SIGNAL_{signal.strength.name}",

@@ -10,7 +10,7 @@ from utils.constants import MessagePriority, OrderStatus
 from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price, get_market_info
-from api_builders.trading_builder import TradingService
+from api_builders.factory import get_adapter
 from api_builders.atr_calculator import get_atr_calculator
 from api_builders.dust_conversion import get_dust_converter
 from cache.balance_cache import get_balance_cache
@@ -278,10 +278,10 @@ class MonitoringService:
                 #get open orders from DB
                 open_orders = get_active_orders(db, profile.name)
 
-                trading = TradingService(profile)
-                
+                adapter = get_adapter(profile)
+
                 for order in open_orders:
-                    order_response = trading.process_limit_order(order=order, position_id=order.position_id)
+                    order_response = adapter.process_limit_order(order=order, position_id=order.position_id)
                     
                     if order_response and order_response.status == OrderStatus.FILLED:
                         entry_price = order_response.entry_price if order_response.entry_price  else "N/A"
@@ -552,8 +552,7 @@ class MonitoringService:
             reason_summary: Optional list of reason strings for trade record
         """
         try:
-            # Create TradingService instance for this profile
-            trading = TradingService(profile)
+            adapter = get_adapter(profile)
             symbol = position.symbol
             validation_summary = ""
             # If stop loss, analyse market conditions and record in db for review later
@@ -561,16 +560,16 @@ class MonitoringService:
             validation_summary = self.record_market_validation_info(symbol, profile)
 
             quantity = str(position.remaining_quantity)
-            
+
             self.logger.info(
                 f"Executing close order: {symbol} x {quantity} "
                 f"[{profile.name}] Reason: {reason}"
             )
-            
+
             # Execute sell order with "MAX" to ensure we sell everything
-            result = trading.order_sell(
+            result = adapter.order_sell(
                 symbol=symbol,
-                quantity=quantity,  # Use MAX to sell all available
+                quantity=quantity,
                 source=reason,
                 profile_name=profile.name,
                 position_id=str(position.id),
@@ -1042,10 +1041,9 @@ class MonitoringService:
                     exc_info=True
                 )
     
-    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile, trading: TradingService = None):
+    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile, trading=None):
         """Execute a trading signal"""
-        if trading is None:
-            trading = TradingService(profile)  # fallback for direct calls
+        adapter = get_adapter(profile)
 
         if signal.action != "BUY":
             self.logger.debug(f"[{profile.name}] Ignoring non-BUY signal")
@@ -1097,9 +1095,9 @@ class MonitoringService:
                     return
 
             # Execute market buy
-            result = trading.order_buy(
+            result = adapter.order_buy(
                 symbol=signal.symbol,
-                quantity=str(quantity),  # Use profile's default order size
+                quantity=str(quantity),
                 source=f"SIGNAL_{signal.strength.name}",
                 profile_name=profile.name,
                 reason_summary=signal.reasons,

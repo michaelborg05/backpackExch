@@ -721,14 +721,15 @@ class TrendCache:
             
             elif indicator_type == "ema_slope":
                 # Check if EMA is rising/falling/flat
-                # params: {ema: 20|50, direction: "rising"|"not_falling", min_slope_pct: 0.01}
+                # params: {ema: 20|50, direction: "rising"|"not_falling", min_slope_pct: 0.01, max_slope_pct: None}
                 ema_type = params.get("ema", 20)
                 required_direction = params.get("direction", "rising")
                 min_slope_pct = params.get("min_slope_pct", 0.01)
-                
+                max_slope_pct = params.get("max_slope_pct", None)
+
                 ema_name = f"ema{ema_type}"
                 slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name)
-                
+
                 if slope_pct is None:
                     is_bullish = False
                     msg = f"EMA{ema_type} slope: ✗ (no data)"
@@ -745,8 +746,13 @@ class TrendCache:
                     else:
                         is_bullish = abs(slope_pct) <= min_slope_pct
                         direction = "flat"
-                    
-                    msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction} {slope_pct:+.3f}%)"
+
+                    if is_bullish and max_slope_pct is not None and slope_pct > max_slope_pct:
+                        is_bullish = False
+                        direction = "too steep"
+
+                    max_str = f", max {max_slope_pct:+.3f}%" if max_slope_pct is not None else ""
+                    msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction} {slope_pct:+.3f}%{max_str})"
                 
             elif indicator_type == "rsi_range":
                 # Block if RSI is in a specific range (indecision zone)

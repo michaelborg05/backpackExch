@@ -10,7 +10,7 @@ from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
-from api_builders.trading_builder import TradingService
+from api_builders.factory import get_adapter
 from cache.regime_filter import get_regime_filter
 from models.signal_validation import SignalValidationResult, ValidationGroup, MarketContext, IndicatorResult
 from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
@@ -39,7 +39,7 @@ class SignalGenerator:
     
     def __init__(self, profile: TradingProfile):
         self.profile = profile
-        self._trading = TradingService(profile) 
+        self._adapter = get_adapter(profile)
         self.logger = log_manager.get_logger(f"SignalGenerator[{profile.display_name}]")
         self.trend_cache = get_trend_cache()
         self.atr_cache = get_atr_cache()
@@ -133,8 +133,8 @@ class SignalGenerator:
             return None
 
         # 1. BALANCE CHECK
-        is_valid, balance_error = self._trading.validate_balance_for_trade(
-            sale_action="BUY", 
+        is_valid, balance_error = self._adapter.validate_balance_for_trade(
+            sale_action="BUY",
             symbol=symbol
         )
         

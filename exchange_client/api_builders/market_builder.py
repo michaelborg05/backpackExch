@@ -67,54 +67,86 @@ def get_depth(symbol: str) -> Optional[TickerDepth]:
         market_logger.error("API call for balances failed")
     return None
 
-def get_price(symbol:str):
-    url = APIEndpoints.backpack_ticker(symbol,"1d")
+def get_price(symbol: str, profile=None) -> Optional[float]:
+    """Get the latest price for *symbol*.
+
+    If *profile* is provided the exchange type is respected (Backpack or Bullet).
+    Falls back to Backpack REST when no profile is given.
+    """
+    if profile:
+        from api_builders.factory import get_adapter
+        try:
+            adapter = get_adapter(profile)
+            price = adapter.get_ticker(symbol)
+            if price:
+                market_logger.debug(f"[{profile.exchange_type}] get_price({symbol}) = {price}")
+            else:
+                market_logger.error(f"[{profile.exchange_type}] get_price({symbol}) returned None")
+            return price
+        except Exception as e:
+            market_logger.error(f"Adapter get_price({symbol}) failed: {e}")
+            return None
+
+    # Backpack fallback (no profile — legacy callers)
+    url = APIEndpoints.backpack_ticker(symbol, "1d")
     ticker = check_ticker(url)
-    
     if ticker:
         market_logger.debug("API call successful")
     else:
         market_logger.error("API call failed")
     print(ticker.simple_summary())
-    return ticker.last_price
+    return ticker.last_price if ticker else None
 
 
+def get_market_info(symbol: str, profile=None) -> Optional[dict]:
+    """Get market information for *symbol*.
 
-def get_market_info(symbol: str) -> Optional[dict]:
+    If *profile* is provided the exchange type is respected.
     """
-    Get market information from API
-    
-    Args:
-        symbol: Trading pair (e.g., "SOL_USDC")
-        
-    Returns:
-        Market info dict or None
-    """
+    if profile:
+        from api_builders.factory import get_adapter
+        try:
+            adapter = get_adapter(profile)
+            result = adapter.get_market_info(symbol)
+            if result:
+                cache = get_market_info_cache()
+                cache.update_market(result)
+            return result
+        except Exception as e:
+            market_logger.error(f"Adapter get_market_info({symbol}) failed: {e}")
+            return None
+
+    # Backpack fallback
     url = APIEndpoints.backpack_MarketInfo(symbol)
     result = api_request(url)
-
     if result:
-        # Update cache
         cache = get_market_info_cache()
         cache.update_market(result)
-    
     return result
 
 
-def get_all_markets() -> Optional[list]:
-    """
-    Get all market information from API
-    
-    Returns:
-        List of market info dicts or None
-    """
-    url = APIEndpoints.backpack_Markets()
+def get_all_markets(profile=None) -> Optional[list]:
+    """Get all available markets.
 
+    If *profile* is provided the exchange type is respected.
+    """
+    if profile:
+        from api_builders.factory import get_adapter
+        try:
+            adapter = get_adapter(profile)
+            result = adapter.get_markets()
+            if result:
+                cache = get_market_info_cache()
+                cache.update_markets(result)
+            return result
+        except Exception as e:
+            market_logger.error(f"Adapter get_all_markets() failed: {e}")
+            return None
+
+    # Backpack fallback
+    url = APIEndpoints.backpack_Markets()
     result = api_request(url)
-    
     if result:
-        # Update cache with all markets
         cache = get_market_info_cache()
         cache.update_markets(result)
-    
     return result
