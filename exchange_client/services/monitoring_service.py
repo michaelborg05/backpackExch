@@ -1028,7 +1028,7 @@ class MonitoringService:
             try:
                 
                 # Execute trade
-                self._execute_signal(signal, profile, trading=signal_gen._trading)
+                self._execute_signal(signal, profile)
                 
                 # Update last signal time
                 cooldown_key = f"{profile.name}_{signal.symbol}"
