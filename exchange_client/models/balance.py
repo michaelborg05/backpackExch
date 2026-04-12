@@ -5,11 +5,11 @@ import json
 class AssetBalance:
     """Represents the balance of a single asset"""
     
-    def __init__(self, symbol: str, available: str, locked: str, staked: str):
+    def __init__(self, symbol: str, available: str, locked: str, staked: str = "0"):
         self.symbol = symbol
         self.available = round(Decimal(available),3) if symbol not in ['BTC', 'ETH'] else Decimal(available)
         self.locked = round(Decimal(locked),3) if symbol not in ['BTC', 'ETH'] else Decimal(locked)
-        self.staked = round(Decimal(staked),3) if symbol not in ['BTC', 'ETH'] else Decimal(staked)
+        self.staked = round(Decimal(staked or "0"),3) if symbol not in ['BTC', 'ETH'] else Decimal(staked or "0")
         self.DUST_THRESHOLD = Decimal("0.0001")
     
     @property
@@ -76,7 +76,7 @@ class BalanceReader:
                 symbol=symbol,
                 available=data['available'],
                 locked=data['locked'],
-                staked=data['staked']
+                staked=data.get('staked', '0')
             )
             
             # Optionally skip zero balances (uncomment if desired)

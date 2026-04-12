@@ -169,11 +169,7 @@ def update_keys():
             )
 
             if existing:
-                print(f"    {name!r} — profile already exists in DB (id={existing.id}) - Updating")
-                existing.api_key=enc_key
-                existing.secret=enc_secret
-                db.commit()
-                db.refresh(existing)
+                print(f"    {name!r} — profile already exists in DB (id={existing.id}) - credentials now stored on ExchangeAccount, skipping")
             else:
                 print(f"  Profile {name!r}  not found")
 
@@ -181,6 +177,60 @@ def update_keys():
         db.rollback()
         logger.error(f"✗ Migration failed, rolled back: {e}", exc_info=True)
         print(f"✗ Migration failed, rolled back: {e}")
+    finally:
+        db.close()
+
+def add_new_exchacct():
+    db = SessionLocal()
+    try:
+        # Create a new ExchangeAccount
+        from utils.db_secrets import encrypt_secret, is_encrypted
+
+        name = input("\nEnter account name: ")
+        print("choose exchange:\n"
+              "1. backpack\n"
+              "2. bullet")
+        exchange = "backpack" if input("\nEnter exchange (1 or 2): ") == "1" else "bullet"
+        raw_key = input("\nEnter api key: ")
+        raw_secret = input("\nEnter secret: ")
+        raw_wallet = input("\nEnter wallet address: ")
+
+        if not os.environ.get("DB_ENCRYPTION_KEY"):
+            print(
+                "ERROR: DB_ENCRYPTION_KEY is not set.\n"
+                "Generate one with:\n"
+                "  python -c \"from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())\"",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+
+        if not raw_key or not raw_secret:
+            print(f"  ERROR - Must include apikey and secret")
+            exit(1)
+
+        enc_key = raw_key if is_encrypted(raw_key) else encrypt_secret(raw_key)
+        enc_secret = raw_secret if is_encrypted(raw_secret) else encrypt_secret(raw_secret)
+        enc_wallet = raw_wallet if is_encrypted(raw_wallet) else encrypt_secret(raw_wallet) 
+
+        new_account = ExchangeAccount(
+            name=name,
+            api_key=enc_key,
+            secret=enc_secret,
+            exchange_type=exchange,
+            wallet_address=enc_wallet,
+            is_active=True,
+        )
+
+        db.add(new_account)
+        db.commit()
+        db.refresh(new_account)
+        print(f"✓ Added new exchange account: {new_account.name} (id={new_account.id})")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"✗ Failed to add new exchange account: {e}", exc_info=True)
+        print(f"✗ Failed to add new exchange account: {e}")
     finally:
         db.close()
 
@@ -505,8 +555,6 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                 profile_row = TradingProfileDB(
                     name=name,
                     display_name=str(cfg.get("display_name", name)),
-                    api_key=enc_key,
-                    secret=enc_secret,
 
                     # Position management
                     take_profit_pct=Decimal(str(cfg.get("take_profit_pct", 0))),
@@ -873,8 +921,6 @@ def add_new_profile():
         profile_row = TradingProfileDB(
             name=profile_name,
             display_name=profile_name,
-            api_key=acct_details.api_key,
-            secret=acct_details.secret,
             account_id=acct_details.id,
             # Position management
             take_profit_pct=2,
@@ -1038,6 +1084,7 @@ commands = {
     "load-dummy": load_dummy_data,
     "migrate_circuit_breaker": migrate_circuit_breaker,
     "setup-symbols": setup_symbol_configs,
+    "add-exchangeacct": add_new_exchacct,
     "add-profile": add_new_profile,
     "populate-settings": populate_default_settings,
     "create-appuser" : setup_appusers,
@@ -1064,6 +1111,7 @@ if __name__ == "__main__":
          print("  create-appuser - Create new user for UI")
          print("  update-keys - Update API keys in db")
          print("  migrate-exchaccts - Migrate profiles to accts table")
+         print("  add-exchangeacct - Add a new exchange account")
          sys.exit(1)
     
     command = sys.argv[1]

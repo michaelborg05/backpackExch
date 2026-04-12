@@ -139,7 +139,7 @@ def get_user_profile_data(db: Session, user_id: int) -> dict:
             continue
 
         try:
-            raw_key = resolve_secret(row.api_key)
+            raw_key = resolve_secret(row.account.api_key) if row.account else None
         except Exception as e:
             # Don't crash the entire login if one profile's key is broken —
             # log it and let the user see the other profiles.
@@ -183,9 +183,12 @@ def get_decrypted_profile_secrets(db: Session, profile_name: str) -> Optional[di
     if not row:
         return None
 
+    if not row.account:
+        return None
+
     return {
-        "api_key": resolve_secret(row.api_key),
-        "secret":  resolve_secret(row.secret),
+        "api_key": resolve_secret(row.account.api_key),
+        "secret":  resolve_secret(row.account.secret),
     }
 
 
@@ -331,29 +334,14 @@ def upsert_trading_profile(
     db: Session,
     profile_name: str,
     display_name: str,
-    raw_api_key: str,
-    raw_secret: str,
     **kwargs,
 ) -> TradingProfileDB:
     """
-    Create or update a TradingProfileDB row, encrypting api_key and secret
-    with Fernet before writing.
-
-    Pass plaintext values — this function handles encryption.
+    Create or update a TradingProfileDB row.
     Any additional TradingProfileDB column values can be passed as kwargs.
-
-    Example:
-        upsert_trading_profile(
-            db, "default", "Default Profile",
-            raw_api_key="abc123", raw_secret="xyz789",
-            take_profit_pct=2.5, stop_loss_pct=1.5,
-        )
+    Credentials (api_key/secret) are stored on ExchangeAccount, not here.
     """
     from db.models import TradingProfileDB
-    from utils.db_secrets import encrypt_secret
-
-    enc_key    = encrypt_secret(raw_api_key)
-    enc_secret = encrypt_secret(raw_secret)
 
     row = db.query(TradingProfileDB).filter(
         TradingProfileDB.profile_name == profile_name
@@ -361,8 +349,6 @@ def upsert_trading_profile(
 
     if row:
         row.display_name = display_name
-        row.api_key      = enc_key
-        row.secret       = enc_secret
         for k, v in kwargs.items():
             if hasattr(row, k):
                 setattr(row, k, v)
@@ -372,8 +358,6 @@ def upsert_trading_profile(
         row = TradingProfileDB(
             profile_name=profile_name,
             display_name=display_name,
-            api_key=enc_key,
-            secret=enc_secret,
             **valid_kw,
         )
         db.add(row)

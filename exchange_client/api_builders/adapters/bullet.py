@@ -67,11 +67,16 @@ class BulletAdapter(ExchangeAdapter):
         """
         Args:
             profile: TradingProfile instance.
-                     profile.api_key = wallet address (bullet1...)
-                     profile.secret  = Ed25519 private key (base64)
+                     profile.wallet_address = main wallet address — used for all read operations
+                                              (balance, open orders, order history, account)
+                     profile.api_key        = delegate wallet address — used for signing write txs
+                     profile.secret         = Ed25519 private key of the delegate (base64-encoded seed)
         """
         self.profile = profile
-        self.address = profile.api_key   # wallet address
+        # Reads use the main wallet. Fall back to api_key for backward compat.
+        self.read_address = profile.wallet_address or profile.api_key
+        # Writes are signed by the delegate keypair.
+        self.delegate_address = profile.api_key
         self.logger = log_manager.get_logger("BulletAdapter")
 
     # ── Market data ───────────────────────────────────────────────────────────
@@ -190,7 +195,7 @@ class BulletAdapter(ExchangeAdapter):
         Bullet returns a list of asset balance objects.
         We normalise to {asset: {available, locked, total}} to match BalanceReader expectations.
         """
-        url = BulletEndpoints.balance(self.address)
+        url = BulletEndpoints.balance(self.read_address)
         try:
             data = api_request(url)
             if not data:
@@ -217,7 +222,7 @@ class BulletAdapter(ExchangeAdapter):
 
     def get_account(self) -> Optional[Dict]:
         """Fetch full account state (positions, PnL) from /fapi/v3/account."""
-        url = BulletEndpoints.account(self.address)
+        url = BulletEndpoints.account(self.read_address)
         try:
             return api_request(url)
         except Exception as e:
@@ -368,7 +373,7 @@ class BulletAdapter(ExchangeAdapter):
     def get_open_orders(self, symbol: str) -> List[Dict]:
         """Fetch open orders from /fapi/v1/openOrders."""
         bullet_symbol = _to_bullet_symbol(symbol)
-        url = BulletEndpoints.open_orders(bullet_symbol, self.address)
+        url = BulletEndpoints.open_orders(bullet_symbol, self.read_address)
         try:
             data = api_request(url)
             if not data:
@@ -381,7 +386,7 @@ class BulletAdapter(ExchangeAdapter):
     def get_single_order(self, order_id: str, symbol: str) -> Optional[Dict]:
         """Fetch a single open order from /fapi/v1/openOrder."""
         bullet_symbol = _to_bullet_symbol(symbol)
-        url = BulletEndpoints.single_order(bullet_symbol, self.address, order_id=order_id)
+        url = BulletEndpoints.single_order(bullet_symbol, self.read_address, order_id=order_id)
         try:
             return api_request(url)
         except Exception as e:
@@ -391,7 +396,7 @@ class BulletAdapter(ExchangeAdapter):
     def get_order_history(self, symbol: str = None, order_id: str = None) -> List[Dict]:
         """Fetch order history from /fapi/v1/allOrders."""
         bullet_symbol = _to_bullet_symbol(symbol) if symbol else None
-        url = BulletEndpoints.order_history(self.address, symbol=bullet_symbol, order_id=order_id)
+        url = BulletEndpoints.order_history(self.read_address, symbol=bullet_symbol, order_id=order_id)
         try:
             data = api_request(url)
             if not data:

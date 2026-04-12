@@ -13,6 +13,7 @@ class TradingProfile(BaseModel):
 
     account_id: Optional[int] = Field(None, description="Exchange account ID (for shared-account profiles)")
     exchange_type: str = Field("backpack", description="Exchange identifier: 'backpack' or 'bullet'")
+    wallet_address: Optional[str] = Field(None, description="Main wallet address for read operations (Bullet only). api_key holds the delegate address used for signing writes.")
 
     trading_type: TradingType = Field(TradingType.RULES_LIVE, description="Type of trading (e.g., 'rules_live, ai_live, shadow')")
     strategy_type: StrategyType = Field(StrategyType.TREND_FOLLOWING, description="Type of strategy (e.g., 'trend_following', 'mean_reversion')")

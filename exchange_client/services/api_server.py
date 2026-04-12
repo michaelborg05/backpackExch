@@ -901,6 +901,56 @@ def get_portfolio(profile_name: str, quote_asset: str = "USDC"):
     portfolio = get_portfolio_cache()
     return portfolio.get_portfolio_summary(profile_name=profile_name, quote_asset=quote_asset)
 
+
+@app.get("/positions", dependencies=[Depends(require_read_permission)])
+async def get_user_open_positions(
+    current_user=Depends(get_dashboard_user),
+):
+    """
+    Return all open DB positions across every profile the logged-in user can access.
+    Enriches each row with live mark price and unrealised PnL from the price cache.
+    """
+    from db.crud import get_open_positions
+    from db.utils import get_db_session
+    from cache.price_cache import get_price_cache
+
+    price_cache = get_price_cache()
+    result = []
+
+    with get_db_session() as db:
+        for profile_name in current_user.profiles:
+            positions = get_open_positions(db, profile_name)
+            for pos in positions:
+                raw_mark = price_cache.get_price(pos.symbol)
+                try:
+                    mark = float(raw_mark) if raw_mark is not None else None
+                    entry = float(pos.entry_price)
+                    qty = float(pos.remaining_quantity or pos.quantity)
+                    unrealised_pnl = round((mark - entry) * qty, 4) if mark is not None else None
+                    pnl_pct = round(((mark - entry) / entry) * 100, 3) if mark and entry else None
+                except (TypeError, ValueError, ZeroDivisionError):
+                    mark = None
+                    unrealised_pnl = None
+                    pnl_pct = None
+
+                result.append({
+                    "profile_name":       profile_name,
+                    "symbol":             pos.symbol,
+                    "side":               "long",
+                    "quantity":           str(pos.remaining_quantity or pos.quantity),
+                    "entry_price":        str(pos.entry_price),
+                    "mark_price":         mark,
+                    "unrealised_pnl":     unrealised_pnl,
+                    "pnl_pct":            pnl_pct,
+                    "tp_price":           str(pos.tp_price) if pos.tp_price else None,
+                    "sl_price":           str(pos.sl_price) if pos.sl_price else None,
+                    "trailing_sl_price":  str(pos.trailing_sl_price) if pos.trailing_sl_price else None,
+                    "trailing_stop_armed": pos.trailing_stop_armed,
+                    "created_at":         pos.created_at.isoformat() if pos.created_at else None,
+                })
+
+    return result
+
 @app.get("/portfolio/{profile_name}/total", dependencies=[Depends(require_read_permission)])
 def get_total_portfolio_value(profile_name: str, quote_asset: str = "USDC"):
     """Get total portfolio value"""
@@ -2603,14 +2653,10 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
                 detail=f"Exchange account {body.account_id} not found or inactive"
             )
 
-        # Copy encrypted credentials from the exchange account
-        # (temporary duplication — will be removed once all reads go through ExchangeAccount)
         p = TradingProfileDB(
             name=body.name,
             display_name=body.display_name,
             account_id=body.account_id,
-            api_key=account.api_key,       # copied from ExchangeAccount (already encrypted)
-            secret=account.secret,         # copied from ExchangeAccount (already encrypted)
             trading_type=body.trading_type,
             strategy_type=body.strategy_type,
             take_profit_pct=body.take_profit_pct,
@@ -2769,7 +2815,7 @@ def _safe_val(v):
 @app.put("/profiles/{profile_name}/credentials", dependencies=[Depends(require_admin_permission)])
 async def update_profile_credentials(profile_name: str, body: ProfileCredentialsRequest):
     from db.utils import get_db_session
-    from db.models import TradingProfileDB
+    from db.models import TradingProfileDB, ExchangeAccount
     from utils.db_secrets import encrypt_secret
     from services.audit import write_audit
     from services.profile_manager import get_profile_manager, refresh_profiles_from_db
@@ -2778,9 +2824,15 @@ async def update_profile_credentials(profile_name: str, body: ProfileCredentials
         p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
         if not p:
             raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+        if not p.account_id:
+            raise HTTPException(status_code=400, detail=f"Profile '{profile_name}' has no linked exchange account")
 
-        p.api_key = encrypt_secret(body.raw_api_key)
-        p.secret = encrypt_secret(body.raw_secret)
+        account = db.query(ExchangeAccount).filter(ExchangeAccount.id == p.account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Linked exchange account not found")
+
+        account.api_key = encrypt_secret(body.raw_api_key)
+        account.secret = encrypt_secret(body.raw_secret)
 
         write_audit(
             db=db, type="profile", subtype="credentials", action="update",
@@ -2793,7 +2845,7 @@ async def update_profile_credentials(profile_name: str, body: ProfileCredentials
         # Force profile reload so new credentials are used immediately
         refresh_profiles_from_db()
 
-        return {"message": f"Credentials updated for '{profile_name}'"}
+        return {"message": f"Credentials updated for '{profile_name}' (via exchange account {account.name})"}
 
 
 # ---------------------------------------------------------------------------
@@ -2928,7 +2980,8 @@ def _serialize_profile(p, cb=None) -> dict:
     from utils.db_secrets import resolve_secret
     raw_key = None
     try:
-        raw_key = resolve_secret(p.api_key)
+        if p.account:
+            raw_key = resolve_secret(p.account.api_key)
     except Exception:
         pass
 

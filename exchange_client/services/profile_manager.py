@@ -125,6 +125,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         display_name=display_name,
         account_id=cfg.get("account_id"),
         exchange_type=cfg.get("exchange_type", "backpack"),
+        wallet_address=cfg.get("wallet_address"),
         api_key=api_key,
         secret=secret,
         trading_type=trading_type,
@@ -303,6 +304,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "display_name": row.display_name,
             "account_id": row.account_id,
             "exchange_type": getattr(row.account, "exchange_type", "backpack") if row.account else "backpack",
+            "wallet_address": None,  # resolved below after credential decrypt
             "trading_type": row.trading_type,
             "strategy_type": row.strategy_type,
             # Position sizing
@@ -344,14 +346,22 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             
         }
         from utils.db_secrets import resolve_secret
-        # Resolve API credentials — stored encrypted in DB, pulled from env as fallback
-        # If you store plaintext in DB just use row.api_key / row.secret directly.
-        api_key = resolve_secret(row.api_key) or os.getenv(f"{row.name.upper()}_API_KEY")
-        secret = resolve_secret(row.secret) or os.getenv(f"{row.name.upper()}_SECRET")
+        # Resolve API credentials from linked ExchangeAccount
+        acct = row.account
+        if not acct:
+            print(f"WARNING: Skipping profile '{row.name}' — no linked exchange account")
+            continue
+        api_key = resolve_secret(acct.api_key)
+        secret = resolve_secret(acct.secret)
 
         if not api_key or not secret:
-            print(f"WARNING: Skipping profile '{row.name}' — missing API credentials")
+            print(f"WARNING: Skipping profile '{row.name}' — missing API credentials on exchange account")
             continue
+
+        # Resolve wallet_address (Bullet only — main wallet for read operations)
+        raw_wallet = getattr(row.account, "wallet_address", None) if row.account else None
+        if raw_wallet:
+            cfg["wallet_address"] = resolve_secret(raw_wallet)
 
         try:
             profile = _build_profile(row.name, cfg, api_key, secret)

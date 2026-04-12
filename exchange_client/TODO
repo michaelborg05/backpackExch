@@ -11,10 +11,12 @@ smarter TP/SL - Different per token. Maybe variable based on market
     - Reporting percent from start but triggering from highest - I.e. Reported CB trigger 1.5% loss even though loss limit was 3%. It was looking at highest price for period instead of cb_trigger amount. Would nee dto 
 # Add TP and SL from AI suggestion to override defaults
 #reduce db reads
+#remove apikey/secret from profile table. Keep only in exchange acct
 # web page changes
   - Market tab - clean up
   - When switching to profiles tab can i keep the tab menu?
   - When switching between profiles/index.html is there a smoother way to keep the session?
+  - Add "exchange accounts" tab similar to profiles
 
 
 No need
