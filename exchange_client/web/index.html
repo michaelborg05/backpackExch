@@ -32,7 +32,6 @@
     </div>
     <div class="hr">
       <div class="clk" id="clk">--:--:-- UTC</div>
-      <select class="psel" id="psel" onchange="onPC()"><option>Loading...</option></select>
       <span style="font-size:11px;color:var(--txd)" id="huser">—</span>
       <button class="bsm a" onclick="refAll()">&#8635; REFRESH</button>
       <button class="bsm dng" onclick="doLogout()">LOGOUT</button>
@@ -128,6 +127,7 @@
         <div class="ch">
           <span class="ct">AI vs Rules — Shadow Monitor</span>
           <span class="cb" id="ai-period-badge">30d window</span>
+          <select class="psel" id="psel" onchange="onPC()" style="margin-left:auto"><option>Loading...</option></select>
         </div>
         <div id="ai-verdict-box" style="padding:14px 18px">
           <div class="ai-empty">Loading AI monitor data...</div>
@@ -682,7 +682,7 @@ function jumpProfile(prof){
   const posTab=Array.from(document.querySelectorAll('.nt')).find(el=>el.textContent.trim()==='Positions');
   if(posTab)st('positions',posTab);
 }
-function onPC(){S.active=document.getElementById('psel').value;const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api'};if(t!=='overview')loadPanel(m[t]??'overview');}
+function onPC(){S.active=document.getElementById('psel').value;loadAI();}
 
 function akey(){
   // Use the INTERNAL API key (API_READONLY_KEY) as X-API-Key for your own FastAPI endpoints.
@@ -934,7 +934,7 @@ async function loadEps(){
 function renderEps(list){const e=document.getElementById('eplist');if(!e)return;e.innerHTML=list.map(e2=>'<div class="er" onclick="tep(\''+e2.m+'\',\''+e2.p+'\')"><span class="em '+(emc[e2.m]||'eget')+'">'+e2.m+'</span><span style="color:var(--tx);flex:1;font-size:12px">'+e2.p+'</span><span style="font-size:10px;color:var(--txd)">'+e2.d+'</span></div>').join('');}
 function fep(q){renderEps(EPS.filter(e=>e.p.toLowerCase().includes(q.toLowerCase())||e.d.toLowerCase().includes(q.toLowerCase())||e.m.toLowerCase().includes(q.toLowerCase())));}
 async function tep(m,p){
-  const prof=S.active??'test';
+  const prof=Object.keys(S.profiles)[0]??'test';
   if(m!=='GET'){alert(m+' '+BASE+p+'\n\ncurl -X '+m+' '+BASE+p.replace(/{profile_name}/g,prof)+' \\\n  -H "X-API-Key: <key>" \\\n  -H "Content-Type: application/json"');return;}
   const cl=p.replace(/{[^}]+}/g,prof);
   const d=await api(cl);alert('GET '+p+'\n\n'+JSON.stringify(d,null,2));
