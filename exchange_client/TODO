@@ -12,7 +12,12 @@ smarter TP/SL - Different per token. Maybe variable based on market
 # Add TP and SL from AI suggestion to override defaults
 #reduce db reads
 # Get AI to remove the indicators/symbols tab from main page but merge he indicator changes into profiles tab where it has a form to fill out
-
+# web page changes
+ - Api explorer. Is it dynamic? 
+ - Is positions tab working?
+  - Market tab - clean up
+  - When switching to propfiles tab can i keep the tab menu?
+  - When switching between profiles/index.html is there a smoother way to keep the session?
 No need
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish
@@ -101,3 +106,5 @@ Improvement: The "Mean Reversion" Check
 #For range trading maybe check BB slope or width, etc
 #Attack vector - Added user_id as an atribute in CreateProfile (profiles.html) to then link the profile to a user. Could insert different user id here
 #Ability to add multiple profiles on same acct. Does it cause issues? How to only display balances 1 per acct if multiple profiles using same acct
+#web page
+# - Audit log - Filter by profile
