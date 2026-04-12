@@ -144,6 +144,17 @@ input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px;cursor:point
 .mbtn.dng:hover{background:var(--red);color:#fff}
 .form-err{color:var(--red);font-size:11px;margin-top:8px}
 
+/* Indicator param form tabs */
+.imodp-ptab{padding:5px 14px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none}
+.imodp-ptab:hover{color:var(--tx)}
+.imodp-ptab.on{color:var(--acc);border-bottom-color:var(--acc)}
+/* Indicator param form rows */
+.imodp-param-row{display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:center;padding:3px 0}
+.imodp-param-key{font-size:11px;color:var(--txd);letter-spacing:.06em}
+.imodp-param-val{background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:6px 10px;font-family:'Space Mono',monospace;font-size:11px;outline:none;width:100%;transition:border-color .2s}
+.imodp-param-val:focus{border-color:var(--acc)}
+.imodp-param-val[type=checkbox]{width:auto;accent-color:var(--acc)}
+
 /* Toast */
 #toast{position:fixed;bottom:20px;right:20px;padding:10px 18px;font-size:12px;z-index:9999;display:none;border:1px solid}
 #toast.ok{background:rgba(0,255,157,.08);border-color:rgba(0,255,157,.3);color:var(--grn)}
@@ -583,7 +594,7 @@ input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px;cursor:point
   </div>
 </div>
 
-<!-- ── Indicator modal (same as index.html) ───────────────────────────────── -->
+<!-- ── Indicator modal ───────────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="ind-modal-p" style="display:none" onclick="if(event.target===this)closeIndModalP()">
   <div class="modal-box">
     <div class="modal-header"><span class="modal-title" id="imodp-title">Add Indicator</span><button class="modal-close" onclick="closeIndModalP()">×</button></div>
@@ -596,7 +607,17 @@ input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px;cursor:point
         <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx);cursor:pointer"><input type="checkbox" id="imodp-hardstop"> Hard Stop</label>
         <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx);cursor:pointer"><input type="checkbox" id="imodp-enabled" checked> Enabled</label>
       </div>
-      <div class="form-row" style="margin-bottom:0"><label>Parameters (JSON)</label><textarea id="imodp-json" style="width:100%;min-height:140px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;font-family:'Space Mono',monospace;font-size:11px;resize:vertical;outline:none" placeholder='{"key": value}'></textarea></div>
+      <div class="form-row" style="margin-bottom:0">
+        <label>Parameters</label>
+        <div style="display:flex;border-bottom:1px solid var(--brd);margin-bottom:10px">
+          <div class="imodp-ptab on" id="imodp-tab-form" onclick="switchParamTabP('form')">Form</div>
+          <div class="imodp-ptab" id="imodp-tab-json" onclick="switchParamTabP('json')">JSON</div>
+        </div>
+        <div id="imodp-form-area"><div style="display:flex;flex-direction:column;gap:2px" id="imodp-rows"></div></div>
+        <div id="imodp-json-area" style="display:none">
+          <textarea id="imodp-json" style="width:100%;min-height:140px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;font-family:'Space Mono',monospace;font-size:11px;resize:vertical;outline:none" placeholder='{"key": value}'></textarea>
+        </div>
+      </div>
       <div class="form-err" id="imodp-err"></div>
     </div>
     <div class="modal-footer">
@@ -1200,31 +1221,29 @@ async function deleteSymP() {
   } catch (e) { showToast(e.message, true); }
 }
 
-// ── Indicators (profiles page version — JSON-only editor) ────────────────────
+// ── Indicators ────────────────────────────────────────────────────────────────
 
-const IND_TYPES = [
-  'ema_slope','bollinger_bands','adx_regime','rsi_overbought','rsi_threshold',
-  'rsi_range','rsi_reversal_momentum','ema_gap','price_vs_ema','price_below_vwap',
-  'price_extended_below_ema','price_vs_vwap','volume_spike','reversal_candle',
-  'bb_width_regime','bb_pct_b_momentum',
-];
-
-const IND_DEFAULTS = {
-  ema_slope:              '{"ema":20,"direction":"not_falling","min_slope_pct":0.01}',
-  rsi_threshold:          '{"period":14,"min_value":50,"use_momentum":false}',
-  rsi_overbought:         '{"min_value":68}',
-  rsi_reversal_momentum:  '{"lookback_candles":10,"oversold_threshold":45,"current_min":36,"min_jump":3,"require_sustained":false}',
-  bollinger_bands:        '{"band":"lower","mode":"pct_b","max_pct_b":0.25}',
-  price_vs_ema:           '{"ema":20,"min_gap_pct":-1.5,"max_gap_pct":2}',
-  price_below_vwap:       '{"min_gap_pct":-0.15,"max_gap_pct":-2}',
-  volume_spike:           '{"min_ratio":1,"max_ratio":8}',
-  adx_regime:             '{"max_adx":25}',
-  rsi_range:              '{"min":40,"max":65,"invert":false}',
-  reversal_candle:        '{"pattern":"hammer","max_drop_from_close_pct":0.5}',
-  bb_width_regime:        '{"required_direction":"not_expanding","lookback":4}',
-  bb_pct_b_momentum:      '{"required_direction":"not_rising","lookback":3}',
-  default:                '{}',
+const IND_SCHEMAS = {
+  ema_slope:              [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01}],
+  bollinger_bands:        [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:0.8},{k:'lookback_candles',t:'number',d:null}],
+  adx_regime:             [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
+  rsi_overbought:         [{k:'min_value',t:'number',d:65},{k:'lookback_candles',t:'number',d:null}],
+  rsi_threshold:          [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
+  rsi_range:              [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
+  rsi_reversal_momentum:  [{k:'lookback_candles',t:'number',d:10},{k:'oversold_threshold',t:'number',d:45},{k:'current_min',t:'number',d:36},{k:'min_jump',t:'number',d:3},{k:'require_sustained',t:'bool',d:false},{k:'sustained_rise_mode',t:'select',o:['net','strict'],d:'net'}],
+  ema_gap:                [{k:'min_gap_pct',t:'number',d:0.15},{k:'mode',t:'select',o:['min','max','abs'],d:'min'}],
+  price_vs_ema:           [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-1.5},{k:'max_gap_pct',t:'number',d:2}],
+  price_below_vwap:       [{k:'min_gap_pct',t:'number',d:-0.15},{k:'max_gap_pct',t:'number',d:-2}],
+  price_extended_below_ema:[{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-0.7},{k:'max_gap_pct',t:'number',d:-10}],
+  price_vs_vwap:          [],
+  volume_spike:           [{k:'min_ratio',t:'number',d:1},{k:'max_ratio',t:'number',d:8}],
+  reversal_candle:        [{k:'pattern',t:'select',o:['hammer','doji','bull_close','higher_low','engulfing'],d:'hammer'},{k:'min_body_pct',t:'number',d:null},{k:'max_body_pct',t:'number',d:null},{k:'min_close_pct',t:'number',d:null},{k:'require_bull',t:'bool',d:null},{k:'max_drop_from_close_pct',t:'number',d:0.5}],
+  bb_width_regime:        [{k:'required_direction',t:'select',o:['not_expanding','expanding','contracting'],d:'not_expanding'},{k:'lookback',t:'number',d:4}],
+  bb_pct_b_momentum:      [{k:'required_direction',t:'select',o:['not_rising','rising','falling'],d:'not_rising'},{k:'lookback',t:'number',d:3}],
 };
+const IND_TYPES = Object.keys(IND_SCHEMAS);
+
+let _paramTabP = 'form';
 
 async function loadIndicatorsP() {
   if (!_currentProfile) return;
@@ -1288,17 +1307,21 @@ function openAddIndicatorP() {
   document.getElementById('imodp-cat').value = _indCatP === 'all' ? 'trend' : _indCatP;
   document.getElementById('imodp-hardstop').checked = true;
   document.getElementById('imodp-enabled').checked = true;
-  // Populate type select
   const sel = document.getElementById('imodp-type');
   sel.innerHTML = IND_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
-  document.getElementById('imodp-json').value = IND_DEFAULTS[IND_TYPES[0]] ?? '{}';
   document.getElementById('imodp-err').textContent = '';
+  switchParamTabP('form');
+  buildParamFormP({});
+  document.getElementById('imodp-json').value = JSON.stringify(schemaDefaultsP(IND_TYPES[0]), null, 2);
   document.getElementById('ind-modal-p').style.display = 'flex';
 }
 
 function onIndTypePChange() {
   const t = document.getElementById('imodp-type').value;
-  document.getElementById('imodp-json').value = IND_DEFAULTS[t] ?? IND_DEFAULTS.default;
+  buildParamFormP({});
+  if (_paramTabP === 'json') {
+    document.getElementById('imodp-json').value = JSON.stringify(schemaDefaultsP(t), null, 2);
+  }
 }
 
 function openEditIndP(id) {
@@ -1312,24 +1335,101 @@ function openEditIndP(id) {
   document.getElementById('imodp-enabled').checked = ind.enabled;
   const sel = document.getElementById('imodp-type');
   sel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t === ind.indicator_type ? ' selected' : ''}>${t}</option>`).join('');
-  // Remove hard_stop from display params
   const cleanParams = Object.fromEntries(Object.entries(ind.params ?? {}).filter(([k]) => k !== 'hard_stop'));
   document.getElementById('imodp-json').value = JSON.stringify(cleanParams, null, 2);
   document.getElementById('imodp-err').textContent = '';
+  switchParamTabP('form');
+  buildParamFormP(cleanParams);
   document.getElementById('ind-modal-p').style.display = 'flex';
 }
 
 function closeIndModalP() { document.getElementById('ind-modal-p').style.display = 'none'; }
 
-async function saveIndP() {
-  const prof = _currentProfile?.name;
-  let params;
-  try {
-    params = JSON.parse(document.getElementById('imodp-json').value || '{}');
-  } catch (e) {
-    document.getElementById('imodp-err').textContent = 'Invalid JSON: ' + e.message;
+function schemaDefaultsP(type) {
+  const schema = IND_SCHEMAS[type] ?? [];
+  const out = {};
+  schema.forEach(p => { if (p.d !== null) out[p.k] = p.d; });
+  return out;
+}
+
+function buildParamFormP(existing) {
+  const type = document.getElementById('imodp-type').value;
+  const schema = IND_SCHEMAS[type] ?? [];
+  const rows = document.getElementById('imodp-rows');
+  if (!schema.length) {
+    rows.innerHTML = '<div style="color:var(--txd);font-size:11px;padding:4px 0">No parameters for this indicator type.</div>';
     return;
   }
+  rows.innerHTML = schema.map(p => {
+    const val = existing[p.k] !== undefined ? existing[p.k] : (p.d !== null ? p.d : '');
+    let input;
+    if (p.t === 'bool') {
+      input = `<input type="checkbox" class="imodp-param-val" id="ipp-${p.k}" ${val ? 'checked' : ''}>`;
+    } else if (p.t === 'select') {
+      const opts = (p.o ?? []).map(o => `<option${o === val ? ' selected' : ''}>${o}</option>`).join('');
+      input = `<select class="imodp-param-val" id="ipp-${p.k}">${opts}</select>`;
+    } else {
+      const placeholder = p.d !== null ? String(p.d) : 'optional';
+      input = `<input type="number" step="any" class="imodp-param-val" id="ipp-${p.k}" value="${val !== '' && val !== null ? val : ''}" placeholder="${placeholder}">`;
+    }
+    return `<div class="imodp-param-row"><div class="imodp-param-key">${p.k}</div>${input}</div>`;
+  }).join('');
+}
+
+function switchParamTabP(tab) {
+  _paramTabP = tab;
+  document.getElementById('imodp-tab-form').classList.toggle('on', tab === 'form');
+  document.getElementById('imodp-tab-json').classList.toggle('on', tab === 'json');
+  document.getElementById('imodp-form-area').style.display = tab === 'form' ? '' : 'none';
+  document.getElementById('imodp-json-area').style.display = tab === 'json' ? '' : 'none';
+  if (tab === 'json') {
+    document.getElementById('imodp-json').value = JSON.stringify(readParamFormP(), null, 2);
+  } else {
+    try {
+      const parsed = JSON.parse(document.getElementById('imodp-json').value || '{}');
+      buildParamFormP(parsed);
+      document.getElementById('imodp-err').textContent = '';
+    } catch {}
+  }
+}
+
+function readParamFormP() {
+  const type = document.getElementById('imodp-type').value;
+  const schema = IND_SCHEMAS[type] ?? [];
+  const out = {};
+  schema.forEach(p => {
+    const el = document.getElementById('ipp-' + p.k);
+    if (!el) return;
+    if (p.t === 'bool') {
+      out[p.k] = el.checked;
+    } else if (p.t === 'select') {
+      out[p.k] = el.value;
+    } else {
+      const v = el.value.trim();
+      if (v !== '') out[p.k] = parseFloat(v);
+    }
+  });
+  return out;
+}
+
+function readParamsP() {
+  if (_paramTabP === 'json') {
+    try {
+      const parsed = JSON.parse(document.getElementById('imodp-json').value || '{}');
+      document.getElementById('imodp-err').textContent = '';
+      return { ok: true, params: parsed };
+    } catch (e) {
+      document.getElementById('imodp-err').textContent = 'Invalid JSON: ' + e.message;
+      return { ok: false };
+    }
+  }
+  return { ok: true, params: readParamFormP() };
+}
+
+async function saveIndP() {
+  const prof = _currentProfile?.name;
+  const { ok, params } = readParamsP();
+  if (!ok) return;
   const body = {
     category:       document.getElementById('imodp-cat').value,
     indicator_type: document.getElementById('imodp-type').value,
@@ -1350,6 +1450,8 @@ async function saveIndP() {
     document.getElementById('imodp-err').textContent = e.message;
   }
 }
+
+
 
 async function quickToggleP(id) {
   const prof = _currentProfile?.name;
