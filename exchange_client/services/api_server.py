@@ -1069,15 +1069,17 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert, background_tasks: B
     This endpoint receives periodic updates (e.g., every 5min) with
     trend indicator values (EMA, RSI, VWAP) for multiple symbols
     """
-    apiserver_logger.info(f"Received trend update: {alert}")
+    safe_alert = {k: v for k, v in alert.model_dump().items() if k != "secret"}
+    apiserver_logger.debug(f"Received trend update: {safe_alert}")
     
     try:
         # Validate secret
         if alert.secret != WEBHOOK_SECRET:
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
         
+        unique_symbols = list(dict.fromkeys(t.symbol for t in alert.trends))
         apiserver_logger.info(
-            f"Received trend update for {len(alert.trends)} symbol(s)"
+            f"Received trend update for {len(alert.trends)} symbol(s): {unique_symbols}"
         )
 
         # Add the work to the background queue
