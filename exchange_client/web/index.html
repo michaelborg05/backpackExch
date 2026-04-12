@@ -855,8 +855,10 @@ async function loadPT(tid){
     const pnl=parseFloat(p.unrealised_pnl??0),pct=parseFloat(p.pnl_pct??0);
     const sd=(p.side??'long').toLowerCase(),bw=Math.min(Math.abs(pct)*2,100);
     const profLabel=S.profiles[p.profile_name]?.display_name??p.profile_name;
-    return '<tr>'
-      +'<td class="tm td2" style="font-size:10px;letter-spacing:.06em">'+profLabel+'</td>'
+    const rowClr=pnl>=0?'rgba(0,212,100,0.05)':'rgba(255,80,80,0.05)';
+    const accentClr=pnl>=0?'var(--grn)':'var(--red)';
+    return '<tr style="background:'+rowClr+'">'
+      +'<td class="tm td2" style="font-size:10px;letter-spacing:.06em;border-left:3px solid '+accentClr+'">'+profLabel+'</td>'
       +'<td class="ts tm">'+p.symbol+'</td>'
       +'<td><span class="bs '+(sd==='long'?'bl2':'bsh')+'">'+sd.toUpperCase()+'</span></td>'
       +'<td class="tm">'+fnum(p.quantity??0)+'</td>'
@@ -889,14 +891,21 @@ async function loadBal(){
 }
 
 async function loadMkt(){
-  const tk=await api('/monitoring/tickers');
-  const syms=tk?.tickers??[];
   const c=document.getElementById('mrows');
-  if(syms.length){
-    const rows=await Promise.all(syms.slice(0,12).map(sym=>api('/price/'+sym).then(d=>({sym,price:d?.price??null}))));
-    c.innerHTML=rows.map(r=>{
-      const mc=(Math.random()-.45)*4,sp=mkSp(mc>=0);
-      return '<div class="mr"><div class="msy">'+r.sym+'</div><div class="mpr">$'+(r.price?fpr(r.price):'—')+'</div><div class="mch '+(mc>=0?'tg':'tr2')+'">'+(mc>=0?'+':'')+mc.toFixed(2)+'%</div><svg style="width:80px;height:26px;flex-shrink:0" viewBox="0 0 80 26" preserveAspectRatio="none">'+spP(sp,mc>=0)+'</svg></div>';
+  const mkt=await api('/market/prices');
+  const rows=mkt?.tickers??[];
+  if(rows.length){
+    c.innerHTML=rows.slice(0,12).map(r=>{
+      const mc=r.change_percent??null,pos=mc===null||mc>=0;
+      const chStr=mc===null?'—':(mc>=0?'+':'')+mc.toFixed(2)+'%';
+      const lo=r.low,hi=r.high,pr=r.price;
+      let rangeSvg='';
+      if(lo&&hi&&pr&&hi>lo){
+        const pct=Math.max(0,Math.min(1,(pr-lo)/(hi-lo)));
+        const x=Math.round(pct*72)+4;
+        rangeSvg='<svg style="width:90px;height:26px;flex-shrink:0" viewBox="0 0 90 26" title="24h Low: $'+fpr(lo)+' \u2013 High: $'+fpr(hi)+'"><line x1="4" y1="13" x2="86" y2="13" stroke="var(--txd)" stroke-width="2" stroke-linecap="round" opacity="0.3"/><line x1="4" y1="13" x2="'+x+'" y2="13" stroke="'+(pos?'var(--grn)':'var(--red)')+'" stroke-width="2" stroke-linecap="round"/><circle cx="'+x+'" cy="13" r="3.5" fill="'+(pos?'var(--grn)':'var(--red)')+'" /><title>24h Low: $'+fpr(lo)+' \u2013 High: $'+fpr(hi)+'</title></svg>';
+      }
+      return '<div class="mr"><div class="msy">'+r.symbol+'</div><div class="mpr">$'+(pr?fpr(pr):'—')+'</div><div class="mch '+(pos?'tg':'tr2')+'">'+chStr+'</div>'+rangeSvg+'</div>';
     }).join('');
   }else{c.innerHTML='<div style="color:var(--txd);text-align:center;padding:24px">No tickers \u2014 add via /monitoring/add-ticker</div>';}
   const mon=await api('/monitoring/status');

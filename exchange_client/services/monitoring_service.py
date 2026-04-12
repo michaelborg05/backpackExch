@@ -9,7 +9,7 @@ from utils.config import Config
 from utils.constants import MessagePriority, OrderStatus
 from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 from api_builders.account_builder import get_balances
-from api_builders.market_builder import get_price, get_market_info
+from api_builders.market_builder import get_price, get_market_info, check_ticker
 from api_builders.factory import get_adapter
 from api_builders.atr_calculator import get_atr_calculator
 from api_builders.dust_conversion import get_dust_converter
@@ -200,12 +200,21 @@ class MonitoringService:
     
     def _monitor_prices(self):
         """Monitor prices for all tickers"""
+        from utils.endpoints import APIEndpoints
         for ticker in self.tickers:
             try:
-                price = get_price(ticker)
-                if price:
-                    # Update price cache
-                    self.price_cache.update_price(ticker, price)
+                url = APIEndpoints.backpack_ticker(ticker, "1d")
+                tk = check_ticker(url)
+                if tk and tk.last_price:
+                    print(tk.simple_summary())
+                    self.price_cache.update_ticker(
+                        ticker,
+                        str(tk.last_price),
+                        change_percent=tk.price_change_percent,
+                        high=tk.high,
+                        low=tk.low,
+                        volume=tk.volume,
+                    )
             except Exception as e:
                 self.logger.error(f"Error getting price for {ticker}: {e}")
     

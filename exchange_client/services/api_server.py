@@ -242,6 +242,14 @@ def price_endpoint(symbol: str):
     except Exception as e:
         return {"error": str(e)}, 500
 
+@app.get("/market/prices", dependencies=[Depends(require_read_permission)])
+def market_prices_endpoint():
+    """Return cached price + 24h ticker data for all monitored symbols."""
+    from cache.price_cache import get_price_cache
+    cache = get_price_cache()
+    tickers = cache.get_all_tickers()
+    return {"tickers": list(tickers.values())}
+
 @app.get("/balances", dependencies=[Depends(require_read_permission)])
 def balance_endpoint():
     """
