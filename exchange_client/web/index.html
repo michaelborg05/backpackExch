@@ -5,243 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BorgBot — Trading Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
-<style>
-:root{--bg:#080b10;--bg2:#0d1117;--bg3:#111820;--brd:#1e2a38;--bb:#2a3f55;--acc:#00d4ff;--acc2:#00ff9d;--warn:#ffcc00;--red:#ff3c5a;--grn:#00ff9d;--tx:#c8d8e8;--txd:#5a7a96;--txb:#e8f4ff}
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);color:var(--tx);font-family:'Space Mono',monospace;font-size:13px;min-height:100vh;overflow-x:hidden}
-body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
-#ls{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:var(--bg)}
-.lb{position:relative;z-index:1;width:100%;max-width:400px;padding:0 20px;animation:lin .5s ease forwards;opacity:0}
-@keyframes lin{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-.ll{font-family:'Syne',sans-serif;font-weight:800;font-size:30px;letter-spacing:.2em;color:var(--acc);text-shadow:0 0 30px rgba(0,212,255,.4);text-align:center;margin-bottom:4px}
-.ll span{color:var(--txd)}
-.lsub{text-align:center;font-size:10px;letter-spacing:.2em;color:var(--txd);text-transform:uppercase;margin-bottom:36px}
-.lc{background:var(--bg2);border:1px solid var(--brd);padding:28px;position:relative}
-.lc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent)}
-.lf{margin-bottom:18px}
-.llab{display:block;font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--txd);margin-bottom:7px}
-.lin{width:100%;background:var(--bg3);border:1px solid var(--brd);color:var(--txb);padding:11px 13px;font-family:'Space Mono',monospace;font-size:13px;outline:none;transition:border-color .2s,box-shadow .2s}
-.lin:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,212,255,.08)}
-.lin::placeholder{color:var(--txd)}
-.lerr{background:rgba(255,60,90,.08);border:1px solid rgba(255,60,90,.25);color:var(--red);padding:9px 13px;font-size:12px;margin-bottom:14px;display:none}
-.lerr.on{display:block}
-.lbtn{width:100%;background:transparent;border:1px solid var(--acc);color:var(--acc);padding:12px;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
-.lbtn::before{content:'';position:absolute;inset:0;background:var(--acc);transform:translateX(-100%);transition:transform .2s;z-index:0}
-.lbtn:hover::before{transform:translateX(0)}
-.lbtn:hover{color:var(--bg)}
-.lbtn span{position:relative;z-index:1}
-.lbtn:disabled{opacity:.5;cursor:not-allowed}
-.lbtn:disabled::before{display:none}
-.lfoo{text-align:center;margin-top:18px;font-size:10px;color:var(--txd)}
-#app{display:none;min-height:100vh;position:relative;z-index:1}
-#app.on{display:block;animation:ain .4s ease}
-@keyframes ain{from{opacity:0}to{opacity:1}}
-header{position:sticky;top:0;z-index:100;background:rgba(8,11,16,.97);backdrop-filter:blur(12px);border-bottom:1px solid var(--brd);padding:0 24px;height:56px;display:flex;align-items:center;gap:18px}
-.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:18px;letter-spacing:.15em;color:var(--acc);text-shadow:0 0 20px rgba(0,212,255,.5);flex-shrink:0}
-.logo span{color:var(--txd)}
-.sbar{display:flex;align-items:center;gap:16px;flex:1}
-.sp2{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--grn);box-shadow:0 0 8px var(--grn);animation:bl 2s infinite}
-.dot.w{background:var(--warn);box-shadow:0 0 8px var(--warn)}
-.dot.d{background:var(--red);box-shadow:none;animation:none}
-@keyframes bl{0%,100%{opacity:1}50%{opacity:.3}}
-.hr{display:flex;align-items:center;gap:10px;margin-left:auto}
-.clk{font-size:12px;color:var(--txd);letter-spacing:.1em}
-.psel{background:var(--bg3);border:1px solid var(--brd);color:var(--tx);padding:5px 10px;font-family:'Space Mono',monospace;font-size:11px;outline:none;cursor:pointer;max-width:160px}
-.psel:focus{border-color:var(--acc)}
-.bsm{background:transparent;border:1px solid var(--bb);color:var(--txd);padding:5px 12px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all .2s}
-.bsm:hover{color:var(--tx);border-color:var(--txd)}
-.bsm.a{color:var(--acc)}.bsm.a:hover{border-color:var(--acc);background:rgba(0,212,255,.06)}
-.bsm.dng:hover{color:var(--red);border-color:var(--red)}
-nav{display:flex;border-bottom:1px solid var(--brd);padding:0 24px;background:var(--bg2)}
-.nt{padding:12px 20px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;user-select:none}
-.nt:hover{color:var(--tx)}
-.nt.on{color:var(--acc);border-bottom-color:var(--acc)}
-main{padding:20px 24px;position:relative;z-index:1}
-.panel{display:none}
-.panel.on{display:block}
-.kr{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-.kc{background:var(--bg2);border:1px solid var(--brd);padding:16px 20px;position:relative;overflow:hidden;transition:border-color .2s}
-.kc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent);opacity:0;transition:opacity .2s}
-.kc:hover{border-color:var(--bb)}.kc:hover::before{opacity:1}
-.klab{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--txd);margin-bottom:10px}
-.kval{font-family:'Syne',sans-serif;font-weight:700;font-size:26px;color:var(--txb);line-height:1;margin-bottom:6px}
-.kval.g{color:var(--grn)}.kval.r{color:var(--red)}
-.ksub{font-size:11px;color:var(--txd)}
-.up{color:var(--grn)}.dn{color:var(--red)}
-.kico{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:28px;opacity:.06}
-.pg{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0;border-top:1px solid var(--brd)}
-.pc{padding:20px 24px;border-bottom:1px solid var(--brd);border-right:1px solid var(--brd);transition:background .2s;cursor:pointer}
-.pc:hover{background:rgba(0,212,255,.03)}
-.pct{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.pcn{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;letter-spacing:.1em;color:var(--txb)}
-.pcs{font-size:10px;padding:2px 8px;border:1px solid}
-.pcr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-.pci{display:flex;flex-direction:column;gap:4px}
-.pcil{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd)}
-.pciv{font-size:15px;font-weight:700;color:var(--txb)}
-.pciv.g{color:var(--grn)}.pciv.r{color:var(--red)}
-.pcsub{font-size:10px;color:var(--txd)}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
-.g3{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:20px}
-.card{background:var(--bg2);border:1px solid var(--brd)}
-.ch{padding:12px 16px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between}
-.ct{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--acc)}
-.cb{font-size:10px;padding:2px 8px;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--acc)}
-.cb.g{background:rgba(0,255,157,.08);border-color:rgba(0,255,157,.2);color:var(--grn)}
-.cb.r{background:rgba(255,60,90,.08);border-color:rgba(255,60,90,.2);color:var(--red)}
-.dt{width:100%;border-collapse:collapse}
-.dt th{padding:8px 16px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);text-align:left;border-bottom:1px solid var(--brd);background:rgba(255,255,255,.02)}
-.dt td{padding:11px 16px;border-bottom:1px solid rgba(30,42,56,.5);color:var(--tx);transition:background .15s}
-.dt tr:last-child td{border-bottom:none}
-.dt tr:hover td{background:rgba(0,212,255,.03)}
-.tm{font-family:'Space Mono',monospace}
-.ts{color:var(--txb);font-weight:700}
-.tg{color:var(--grn)}.tr2{color:var(--red)}.td2{color:var(--txd)}
-.bs{display:inline-block;padding:2px 6px;font-size:10px;font-weight:700}
-.bl2{background:rgba(0,255,157,.15);color:var(--grn)}
-.bsh{background:rgba(255,60,90,.15);color:var(--red)}
-.pw{display:flex;align-items:center;gap:8px}
-.pb{width:50px;height:3px;background:var(--brd);border-radius:2px;overflow:hidden}
-.pf{height:100%;border-radius:2px;transition:width .8s}
-.pf.p{background:var(--grn)}.pf.n{background:var(--red)}
-.mr{padding:12px 16px;border-bottom:1px solid rgba(30,42,56,.5);display:flex;align-items:center;gap:12px;transition:background .15s}
-.mr:last-child{border-bottom:none}
-.mr:hover{background:rgba(0,212,255,.02)}
-.msy{font-weight:700;color:var(--txb);width:90px;flex-shrink:0}
-.mpr{flex:1;font-family:'Space Mono',monospace}
-.mch{font-size:12px;font-weight:700;width:65px;text-align:right}
-.rg2{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--brd)}
-.ri{background:var(--bg2);padding:13px 15px}
-.rn{font-size:10px;letter-spacing:.12em;color:var(--txd);text-transform:uppercase;margin-bottom:5px}
-.rv{font-family:'Syne',sans-serif;font-size:14px;font-weight:700}
-.ai{padding:10px 16px;border-bottom:1px solid rgba(30,42,56,.5);display:flex;gap:10px}
-.ai:last-child{border-bottom:none}
-.ad{width:6px;height:6px;border-radius:50%;margin-top:4px;flex-shrink:0}
-.er{padding:8px 16px;border-bottom:1px solid rgba(30,42,56,.4);display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .15s}
-.er:hover{background:rgba(0,212,255,.03)}
-.er:last-child{border-bottom:none}
-.em{font-size:9px;font-weight:700;padding:2px 6px;min-width:40px;text-align:center}
-.eget{background:rgba(0,255,157,.12);color:var(--grn)}
-.epost{background:rgba(0,212,255,.12);color:var(--acc)}
-.eput{background:rgba(255,204,0,.12);color:var(--warn)}
-.edel{background:rgba(255,60,90,.12);color:var(--red)}
-.ab{height:4px;background:var(--brd);border-radius:2px;overflow:hidden;margin-top:6px}
-.af{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .8s}
-#toast{position:fixed;bottom:20px;right:20px;background:rgba(255,204,0,.1);border:1px solid rgba(255,204,0,.3);color:var(--warn);padding:10px 16px;font-size:12px;z-index:500;display:none}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--bb);border-radius:2px}
-.fi{animation:fii .4s ease forwards;opacity:0}
-@keyframes fii{to{opacity:1}}
-.s1{animation-delay:.05s}.s2{animation-delay:.1s}.s3{animation-delay:.15s}.s4{animation-delay:.2s}
-@media(max-width:1100px){.kr{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}}
-@media(max-width:768px){.g2{grid-template-columns:1fr}main{padding:12px}}
-
-/* ── AI Monitor panel ──────────────────────────────────────────────────── */
-.ai-verdict{margin-bottom:20px;background:rgba(0,255,157,.04);border:1px solid rgba(0,255,157,.15);border-left:3px solid var(--grn);padding:14px 18px}
-.ai-verdict-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--grn);margin-bottom:5px}
-.ai-verdict-text{color:#c8e6c9;font-size:12px;line-height:1.6;margin-bottom:4px}
-.ai-verdict-rec{color:var(--txd);font-size:11px}
-.ai-pair-tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
-.ai-pair-tab{background:transparent;border:1px solid var(--brd);color:var(--txd);padding:4px 14px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;transition:all .15s;border-radius:99px}
-.ai-pair-tab:hover{color:var(--tx);border-color:var(--txd)}
-.ai-pair-tab.on{background:rgba(0,255,157,.08);border-color:var(--grn);color:var(--grn)}
-.ai-subtabs{display:flex;border-bottom:1px solid var(--brd);margin-bottom:16px}
-.ai-subtab{padding:8px 18px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none}
-.ai-subtab:hover{color:var(--tx)}
-.ai-subtab.on{color:var(--acc);border-bottom-color:var(--acc)}
-.ai-stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
-.ai-stat-box{background:var(--bg3);border:1px solid var(--brd);padding:14px 18px;flex:1;min-width:130px}
-.ai-stat-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);margin-bottom:6px}
-.ai-stat-val{font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--txb);line-height:1;margin-bottom:3px}
-.ai-stat-sub{font-size:11px;color:var(--txd)}
-.ai-delta-pos{color:var(--grn)}.ai-delta-neg{color:var(--red)}.ai-delta-neu{color:var(--txd)}
-.ai-pair-grid{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
-.ai-pair-card{background:var(--bg2);border:1px solid var(--brd)}
-.ai-pair-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--brd)}
-.ai-pair-name{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;letter-spacing:.08em;color:var(--txb)}
-.ai-pair-badges{display:flex;gap:6px;align-items:center}
-.ai-badge{font-size:10px;padding:2px 8px;border:1px solid;letter-spacing:.06em;font-weight:700}
-.ai-badge-g{border-color:rgba(0,255,157,.35);color:var(--grn);background:rgba(0,255,157,.07)}
-.ai-badge-r{border-color:rgba(255,60,90,.35);color:var(--red);background:rgba(255,60,90,.07)}
-.ai-badge-b{border-color:rgba(0,212,255,.35);color:var(--acc);background:rgba(0,212,255,.07)}
-.ai-badge-y{border-color:rgba(255,204,0,.35);color:var(--warn);background:rgba(255,204,0,.07)}
-.ai-pair-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:0;border-bottom:1px solid var(--brd)}
-.ai-pair-stat{padding:12px 16px;border-right:1px solid var(--brd)}
-.ai-pair-stat:last-child{border-right:none}
-.ai-ps-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--txd);margin-bottom:4px}
-.ai-ps-val{font-size:15px;font-weight:700;color:var(--txb)}
-.ai-ps-rules{font-size:11px;color:var(--txd);margin-top:2px}
-.ai-conf-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}
-.ai-conf-bar{flex:1;background:var(--brd);border-radius:99px;height:5px;overflow:hidden}
-.ai-conf-fill{height:100%;border-radius:99px;transition:width .5s}
-.ai-conf-pct{font-size:10px;color:var(--txd);min-width:30px;font-family:'Space Mono',monospace}
-.ai-pair-extra{padding:10px 16px;display:flex;gap:16px;font-size:11px;color:var(--txd)}
-.ai-signal-row{display:grid;grid-template-columns:55px 95px 80px 80px 80px 95px 1fr;gap:8px;padding:10px 16px;border-bottom:1px solid rgba(30,42,56,.5);align-items:center;cursor:pointer;transition:background .12s}
-.ai-signal-row:hover{background:rgba(0,212,255,.025)}
-.ai-signal-row:last-child{border-bottom:none}
-.ai-signal-head{display:grid;grid-template-columns:55px 95px 80px 80px 80px 95px 1fr;gap:8px;padding:7px 16px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);border-bottom:1px solid var(--brd);background:rgba(255,255,255,.02)}
-.ai-reasoning-expand{padding:12px 16px;background:var(--bg3);border-top:1px solid rgba(30,42,56,.5);font-size:11px;color:var(--txd);line-height:1.7;display:none}
-.ai-reasoning-expand.on{display:block}
-.ai-checklist{display:flex;flex-direction:column;gap:10px;margin-top:4px}
-.ai-check-item{display:flex;align-items:center;gap:12px}
-.ai-check-box{width:18px;height:18px;border-radius:3px;border:1px solid var(--brd);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}
-.ai-check-box.pass{background:rgba(0,255,157,.08);border-color:rgba(0,255,157,.4);color:var(--grn)}
-.ai-check-box.fail{background:rgba(30,42,56,.5);border-color:var(--brd);color:transparent}
-.ai-check-lab{font-size:12px;color:var(--txd)}
-.ai-check-lab.pass{color:var(--tx)}
-.ai-empty{color:var(--txd);text-align:center;padding:40px;font-size:12px}
-
-/* ── AI Prompts panel ─────────────────────────────────────────── */
-.prompt-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-.prompt-scope-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace}
-.scope-global{background:rgba(0,255,157,.1);color:var(--grn);border:1px solid rgba(0,255,157,.25)}
-.scope-strategy{background:rgba(0,160,255,.1);color:#6cc;border:1px solid rgba(0,160,255,.25)}
-.scope-profile{background:rgba(255,200,0,.1);color:#fc8;border:1px solid rgba(255,200,0,.25)}
-.prompt-table td{vertical-align:middle}
-.prompt-default-star{color:var(--grn);font-size:14px;margin-right:4px}
-.prompt-actions{display:flex;gap:6px;white-space:nowrap}
-.prompt-preview{font-family:'Space Mono',monospace;font-size:10px;color:var(--txd);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-/* Modal overlay */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
-.modal-box{background:var(--bg2);border:1px solid var(--brd);border-radius:4px;width:100%;max-width:740px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
-.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--brd);flex-shrink:0}
-.modal-title{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--acc)}
-.modal-close{background:none;border:none;color:var(--txd);font-size:20px;cursor:pointer;line-height:1;padding:0 4px}
-.modal-close:hover{color:var(--tx)}
-.modal-body{overflow-y:auto;padding:20px;flex:1}
-.modal-footer{padding:14px 20px;border-top:1px solid var(--brd);display:flex;justify-content:flex-end;gap:10px;flex-shrink:0}
-.form-row{margin-bottom:14px}
-.form-row label{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd);margin-bottom:5px}
-.form-row input,.form-row select,.form-row textarea{width:100%;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:7px 10px;font-family:'Space Mono',monospace;font-size:11px;border-radius:2px;box-sizing:border-box}
-.form-row textarea{resize:vertical;min-height:260px;line-height:1.55}
-.form-row input:focus,.form-row select:focus,.form-row textarea:focus{outline:none;border-color:var(--acc)}
-.form-row select option{background:var(--bg2)}
-.form-check{display:flex;align-items:center;gap:8px}
-.form-check input[type=checkbox]{width:auto;accent-color:var(--acc)}
-.form-check label{font-size:11px;text-transform:none;letter-spacing:normal;margin-bottom:0;color:var(--tx)}
-
-/* ── Audit Log panel ──────────────────────────────────────────── */
-.audit-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-.audit-toolbar select,.audit-toolbar input{background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-family:'Space Mono',monospace;font-size:11px;border-radius:2px}
-.audit-type-pill{display:inline-block;padding:2px 8px;border-radius:3px;font-size:10px;font-family:'Space Mono',monospace;text-transform:uppercase}
-.audit-indicator{background:rgba(0,160,255,.12);color:#6cf}
-.audit-ai_prompt{background:rgba(0,255,157,.1);color:var(--grn)}
-.audit-profile{background:rgba(255,200,0,.1);color:#fc8}
-.audit-symbol_config{background:rgba(200,150,255,.12);color:#c9a}
-.audit-action-create{color:var(--grn)}
-.audit-action-update{color:#6cf}
-.audit-action-delete{color:var(--red)}
-.audit-action-toggle{color:#fc8}
-.audit-action-set_default{color:#c9a}
-.audit-diff-btn{font-size:10px;padding:2px 8px;cursor:pointer;background:transparent;border:1px solid var(--brd);color:var(--txd);font-family:'Space Mono',monospace}
-.audit-diff-btn:hover{border-color:var(--acc);color:var(--acc)}
-.audit-diff-row{display:none;background:var(--bg);padding:12px 16px;font-family:'Space Mono',monospace;font-size:10px;color:var(--txd);white-space:pre-wrap;word-break:break-all;border-top:1px solid var(--brd)}
-.audit-diff-row.open{display:table-row}
-.diff-key{color:var(--txd)}
-.diff-old{color:var(--red)}
-.diff-new{color:var(--grn)}
-</style>
+<link rel="stylesheet" href="/web/style.css">
+<script src="/web/common.js"></script>
 </head>
 <body>
 <div id="ls">
@@ -275,7 +40,7 @@ main{padding:20px 24px;position:relative;z-index:1}
   </header>
   <nav>
     <div class="nt on" onclick="st('overview',this)">Overview</div>
-    <div class="nt" onclick="window.location.href='/web/profiles.html'">Profiles</div>
+    <div class="nt" onclick="st('profiles',this)">Profiles</div>
     <div class="nt" onclick="st('positions',this)">Positions</div>
     <div class="nt" onclick="st('balances',this)">Balances</div>
     <div class="nt" onclick="st('market',this)">Market</div>
@@ -284,7 +49,7 @@ main{padding:20px 24px;position:relative;z-index:1}
     <div class="nt" onclick="st('prompts',this)">AI Prompts</div>
     <div class="nt" onclick="st('auditlog',this)">Audit Log</div>
   </nav>
-  <main>
+  <main id="main-panels">
     <div class="panel on" id="p-overview">
       <!-- Total across ALL profiles -->
       <div class="kr">
@@ -553,14 +318,296 @@ main{padding:20px 24px;position:relative;z-index:1}
       </div>
     </div>
 
-  </main>
-</div>
+  <!-- ── Profiles Panel ────────────────────────────────────────────────────── -->
+  <div class="panel" id="p-profiles">
+    <div class="layout">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="sidebar-head">
+          <span class="sidebar-label">Profiles</span>
+          <button class="btn-new" onclick="openCreateModal()">+ New</button>
+        </div>
+        <div class="profile-list" id="profile-list">
+          <div style="padding:16px;color:var(--txd);font-size:11px">Loading...</div>
+        </div>
+      </div>
 
-<div id="toast">&#9888; Session expiring &mdash; <a href="#" onclick="sref()" style="color:var(--warn)">refresh</a></div>
+      <!-- Main area -->
+      <div class="prof-main" id="prof-main-area">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">⚙</div>
+          <div class="empty-text">Select a profile to edit</div>
+        </div>
+
+        <!-- Profile detail (hidden until profile selected) -->
+        <div id="profile-detail" style="display:none;flex-direction:column;flex:1">
+          <div class="profile-header">
+            <div class="ph-name" id="ph-name">—</div>
+            <div class="ph-badges" id="ph-badges"></div>
+            <div style="flex:1"></div>
+            <div style="font-size:10px;color:var(--txd);margin-right:8px">API Key:</div>
+            <div class="key-hint" id="key-hint">—</div>
+            <div class="ph-actions">
+              <button class="btn-cred" onclick="openCredsModal()">🔑 Change Credentials</button>
+              <button class="btn-danger" onclick="deactivateProfile()">Deactivate</button>
+            </div>
+          </div>
+
+          <div class="subtabs">
+            <div class="stab on" onclick="showTab('settings',this)">Settings</div>
+            <div class="stab" onclick="showTab('cb',this)">Circuit Breaker</div>
+            <div class="stab" onclick="showTab('symbols',this)">Symbols</div>
+            <div class="stab" onclick="showTab('indicators',this)">Indicators</div>
+          </div>
+
+          <!-- ── SETTINGS TAB ────────────────────────────────────────────── -->
+          <div class="tab-panel on" id="tab-settings">
+            <div class="form-section">
+              <div class="section-title">Identity</div>
+              <div class="form-grid">
+                <div class="field"><label>Display Name</label><input id="f-display_name" type="text" placeholder="e.g. Trend 15m (MB)"></div>
+                <div class="field"><label>Internal Name <span style="color:var(--txd)">(read-only)</span></label><input id="f-name-ro" type="text" disabled style="opacity:.5"></div>
+              </div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Strategy</div>
+              <div class="form-grid">
+                <div class="field"><label>Trading Type</label><select id="f-trading_type"><option value="rules_live">Rules Live</option><option value="shadow">Shadow (AI paper)</option><option value="ai_live">AI Live</option></select></div>
+                <div class="field"><label>Strategy Type</label><select id="f-strategy_type"><option value="trend_following">Trend Following</option><option value="mean_reversion">Mean Reversion</option><option value="range_trading">Range Trading</option></select></div>
+              </div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Risk Management</div>
+              <div class="form-grid">
+                <div class="field"><label>Take Profit %</label><input id="f-take_profit_pct" type="number" step="0.1" placeholder="e.g. 2.5"><div class="field-hint">% gain to trigger TP</div></div>
+                <div class="field"><label>Stop Loss %</label><input id="f-stop_loss_pct" type="number" step="0.1" placeholder="e.g. 1.5"><div class="field-hint">% loss to trigger SL</div></div>
+                <div class="field"><label>Trailing Stop %</label><input id="f-trailing_stop_pct" type="number" step="0.1" placeholder="e.g. 1.0"></div>
+                <div class="field"><label>Arm Trailing At %</label><input id="f-arm_trailing_stop_pct" type="number" step="0.1" placeholder="e.g. 1.0"><div class="field-hint">Profit % to arm trailing stop</div></div>
+              </div>
+              <div class="toggle-row" style="margin-top:8px">
+                <input type="checkbox" id="f-use_trailing_stop">
+                <div><div class="toggle-label">Use Trailing Stop</div><div class="toggle-sub">Activates trailing SL after arm threshold is hit</div></div>
+              </div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Position Sizing</div>
+              <div class="form-grid">
+                <div class="field"><label>Default Order Size (USDC)</label><input id="f-default_order_size_usdc" type="number" step="1" placeholder="100"></div>
+                <div class="field"><label>Max Position Size %</label><input id="f-max_position_size_pct" type="number" step="1" placeholder="40"><div class="field-hint">Max % of portfolio per position</div></div>
+                <div class="field"><label>Max Open Positions</label><input id="f-max_open_positions" type="number" step="1" placeholder="5"></div>
+                <div class="field"><label>Max Portfolio Exposure %</label><input id="f-max_portfolio_exposure_pct" type="number" step="1" placeholder="80"></div>
+              </div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Signal Generation</div>
+              <div class="form-grid">
+                <div class="field"><label>Signal Timeframe (min)</label><input id="f-signal_timeframe" type="text" placeholder="15"></div>
+                <div class="field"><label>Trend Timeframe (min)</label><input id="f-trend_timeframe" type="text" placeholder="60"></div>
+                <div class="field"><label>Entry Timeframe (min)</label><input id="f-entry_timeframe" type="text" placeholder="15"></div>
+                <div class="field"><label>Cooldown (seconds)</label><input id="f-signal_cooldown_seconds" type="number" step="60" placeholder="900"></div>
+                <div class="field"><label>Min Confidence %</label><input id="f-min_signal_confidence" type="number" step="0.5" placeholder="72"><div class="field-hint">0–100; signals below this are skipped</div></div>
+                <div class="field"><label>Min Volume Ratio</label><input id="f-min_volume_ratio" type="number" step="0.1" placeholder="1.0"><div class="field-hint">1.0 = average volume</div></div>
+              </div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Filter Toggles</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 24px">
+                <div class="toggle-row"><input type="checkbox" id="f-use_market_regime_filter"><div><div class="toggle-label">Market Regime Filter</div><div class="toggle-sub">Block trades in choppy/high-risk conditions</div></div></div>
+                <div class="toggle-row"><input type="checkbox" id="f-use_trend_filter"><div><div class="toggle-label">Trend Filter (HTF)</div><div class="toggle-sub">Require bullish 60m trend before entry</div></div></div>
+                <div class="toggle-row"><input type="checkbox" id="f-use_entry_filter"><div><div class="toggle-label">Entry Filter (LTF)</div><div class="toggle-sub">Require entry indicators on signal TF</div></div></div>
+                <div class="toggle-row"><input type="checkbox" id="f-use_atr_filter"><div><div class="toggle-label">ATR Filter</div><div class="toggle-sub">Only trade when volatility meets threshold</div></div></div>
+              </div>
+              <div class="form-grid" style="margin-top:12px;max-width:500px">
+                <div class="field"><label>Min Trend Indicators Required</label><input id="f-min_indicators_required" type="number" step="1" min="1" placeholder="2"></div>
+                <div class="field"><label>Min Entry Indicators Required</label><input id="f-min_entry_indicators_required" type="number" step="1" min="1" placeholder="2"></div>
+              </div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Position Exit Logic</div>
+              <div class="toggle-row">
+                <input type="checkbox" id="f-use_trend_invalidation_exit">
+                <div><div class="toggle-label">Trend Invalidation Exit</div><div class="toggle-sub">Close position when trend indicators turn bearish</div></div>
+              </div>
+              <div class="form-grid" style="margin-top:12px;max-width:600px">
+                <div class="field"><label>Invalidation Indicators</label><select id="f-trend_invalidation_indicators"><option value="entry">Entry indicators</option><option value="trend">Trend indicators</option><option value="mean_reversion">Mean reversion</option></select></div>
+                <div class="field"><label>Min Position Age (min)</label><input id="f-min_position_age_for_trend_check" type="number" step="15" placeholder="120"><div class="field-hint">Don't check until position is this old</div></div>
+                <div class="field"><label>Max Position Hours</label><input id="f-max_position_hours" type="number" step="1" placeholder="18"><div class="field-hint">Force-exit if stuck (leave blank to disable)</div></div>
+              </div>
+            </div>
+          </div><!-- /tab-settings -->
+
+          <!-- ── CIRCUIT BREAKER TAB ────────────────────────────────────── -->
+          <div class="tab-panel" id="tab-cb">
+            <div id="cb-active-banner" style="display:none" class="active-breaker-banner">
+              <div class="ab-label">⚡ Circuit Breaker Active</div>
+              <div class="ab-text" id="cb-active-text">—</div>
+            </div>
+            <div class="form-section">
+              <div class="section-title">Daily Limits</div>
+              <div class="cb-grid">
+                <div class="field"><label>Max Daily Profit %</label><input id="f-cb-max_daily_profit_pct" type="number" step="0.5" placeholder="5.0"><div class="field-hint">Lock trading after this gain</div></div>
+                <div class="field"><label>Max Daily Loss %</label><input id="f-cb-max_daily_loss_pct" type="number" step="0.5" placeholder="3.0"><div class="field-hint">Lock trading after this loss</div></div>
+                <div class="field"><label>Profit Lock Hours</label><input id="f-cb-profit_lock_hours" type="number" step="1" placeholder="6"></div>
+                <div class="field"><label>Loss Lock Hours</label><input id="f-cb-loss_lock_hours" type="number" step="1" placeholder="12"></div>
+              </div>
+              <div class="toggle-row" style="margin-top:12px">
+                <input type="checkbox" id="f-cb-is_active">
+                <div><div class="toggle-label">Circuit Breaker Enabled</div><div class="toggle-sub">Uncheck to disable all daily limits for this profile</div></div>
+              </div>
+            </div>
+            <div id="cb-daily-summary" style="margin-top:16px"></div>
+          </div>
+
+          <!-- ── SYMBOLS TAB ────────────────────────────────────────────── -->
+          <div class="tab-panel" id="tab-symbols">
+            <div class="ind-toolbar-inline">
+              <span style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--txd)" id="sym-p-label">—</span>
+              <span style="flex:1"></span>
+              <span id="sym-count-label" style="font-size:10px;color:var(--txd)"></span>
+              <button class="btn-new" onclick="openAddSymbol()">+ Add Symbol</button>
+            </div>
+            <table class="dt">
+              <thead><tr><th>Symbol</th><th>Order Size (USDC)</th><th>Max Position %</th><th>Enabled</th><th>Updated</th><th></th></tr></thead>
+              <tbody id="sym-tbody"><tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody>
+            </table>
+          </div>
+
+          <!-- ── INDICATORS TAB ─────────────────────────────────────────── -->
+          <div class="tab-panel" id="tab-indicators">
+            <div class="ind-toolbar-inline">
+              <div style="display:flex;gap:0;border:1px solid var(--brd)">
+                <div class="stab on" style="border-bottom:none;padding:5px 14px;font-size:10px" onclick="setIndCatP('all',this)">All</div>
+                <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('trend',this)">Trend</div>
+                <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('entry',this)">Entry</div>
+              </div>
+              <span style="flex:1"></span>
+              <span id="ind-count-p" style="font-size:10px;color:var(--txd)"></span>
+              <button class="btn-new" onclick="openAddIndicatorP()">+ Add</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:4px" id="ind-grid-p">
+              <div style="color:var(--txd);font-size:11px;grid-column:1/-1;padding:16px 0">Select a profile to load indicators</div>
+            </div>
+          </div>
+
+          <!-- Save bar -->
+          <div class="save-bar" id="save-bar">
+            <button class="btn-save" onclick="saveCurrentTab()"><span id="save-btn-text">Save Changes</span></button>
+            <div class="save-status" id="save-status"></div>
+          </div>
+        </div><!-- /profile-detail -->
+      </div><!-- /prof-main-area -->
+    </div><!-- /layout -->
+
+    <!-- ── Create Profile Modal ──────────────────────────────────────────── -->
+    <div class="modal-overlay" id="create-modal" style="display:none" onclick="if(event.target===this)closeCreateModal()">
+      <div class="modal-box" style="max-width:560px">
+        <div class="modal-header"><span class="modal-title">Create New Profile</span><button class="modal-close" onclick="closeCreateModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row">
+            <label>Exchange Account <span style="color:var(--red)">*</span></label>
+            <select id="cm-account"><option value="">Loading accounts...</option></select>
+            <div id="cm-account-hint" style="margin-top:6px;font-size:10px;color:var(--txd);display:none">
+              🔑 API key: <span id="cm-account-key-hint" style="color:var(--txb)">—</span>
+              &nbsp;·&nbsp; credentials will be copied from this account
+            </div>
+          </div>
+          <div class="form-row"><label>Internal Name <span style="color:var(--red)">*</span> <span style="color:var(--txd)">(unique, no spaces)</span></label><input type="text" id="cm-name" placeholder="e.g. mean_rev_large_dip"></div>
+          <div class="form-row"><label>Display Name <span style="color:var(--red)">*</span></label><input type="text" id="cm-display" placeholder="e.g. Mean Rev — Large Dip"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-row" style="margin-bottom:0"><label>Strategy Type</label><select id="cm-strategy"><option value="trend_following">Trend Following</option><option value="mean_reversion">Mean Reversion</option><option value="range_trading">Range Trading</option></select></div>
+            <div class="form-row" style="margin-bottom:0"><label>Trading Type</label><select id="cm-trading"><option value="rules_live">Rules Live</option><option value="shadow">Shadow</option><option value="ai_live">AI Live</option></select></div>
+          </div>
+          <div class="form-err" id="cm-err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="mbtn sec" onclick="closeCreateModal()">Cancel</button>
+          <button class="mbtn" onclick="createProfile()">Create Profile</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Change Credentials Modal ─────────────────────────────────────── -->
+    <div class="modal-overlay" id="creds-modal" style="display:none" onclick="if(event.target===this)closeCredsModal()">
+      <div class="modal-box" style="max-width:500px">
+        <div class="modal-header"><span class="modal-title">Change Credentials — <span id="creds-modal-profile">—</span></span><button class="modal-close" onclick="closeCredsModal()">×</button></div>
+        <div class="modal-body">
+          <div style="background:rgba(255,204,0,.06);border:1px solid rgba(255,204,0,.2);padding:10px 14px;margin-bottom:16px;font-size:11px;color:var(--warn)">⚠️ New credentials will be encrypted and stored immediately. The profile will be reloaded.</div>
+          <div class="form-row"><label>New API Key <span style="color:var(--red)">*</span></label><input type="text" id="cr-apikey" placeholder="Exchange API key"></div>
+          <div class="form-row"><label>New Secret <span style="color:var(--red)">*</span></label><input type="password" id="cr-secret" placeholder="Exchange secret"></div>
+          <div class="form-err" id="cr-err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="mbtn sec" onclick="closeCredsModal()">Cancel</button>
+          <button class="mbtn" onclick="saveCredentials()">Update Credentials</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Symbol Modal ──────────────────────────────────────────────────── -->
+    <div class="modal-overlay" id="sym-modal-p" style="display:none" onclick="if(event.target===this)closeSymModalP()">
+      <div class="modal-box" style="max-width:420px">
+        <div class="modal-header"><span class="modal-title" id="sym-modal-title-p">Add Symbol Config</span><button class="modal-close" onclick="closeSymModalP()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row"><label>Symbol</label><input type="text" id="smp-symbol" placeholder="e.g. SOL_USDC" style="text-transform:uppercase"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-row" style="margin-bottom:0"><label>Order Size (USDC)</label><input type="number" step="0.01" id="smp-size" placeholder="150"></div>
+            <div class="form-row" style="margin-bottom:0"><label>Max Position %</label><input type="number" step="0.1" id="smp-maxpos" placeholder="40"></div>
+          </div>
+          <div class="toggle-row" style="margin-top:12px"><input type="checkbox" id="smp-enabled" checked><div class="toggle-label">Enabled</div></div>
+          <div class="form-err" id="smp-err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="mbtn sec" onclick="closeSymModalP()">Cancel</button>
+          <button class="mbtn dng" id="smp-del-btn" style="display:none" onclick="deleteSymP()">Delete</button>
+          <button class="mbtn" onclick="saveSymP()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Indicator Modal ───────────────────────────────────────────────── -->
+    <div class="modal-overlay" id="ind-modal-p" style="display:none" onclick="if(event.target===this)closeIndModalP()">
+      <div class="modal-box">
+        <div class="modal-header"><span class="modal-title" id="imodp-title">Add Indicator</span><button class="modal-close" onclick="closeIndModalP()">×</button></div>
+        <div class="modal-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <div class="form-row" style="margin-bottom:0"><label>Category</label><select id="imodp-cat"><option value="trend">Trend</option><option value="entry">Entry</option></select></div>
+            <div class="form-row" style="margin-bottom:0"><label>Type</label><select id="imodp-type" onchange="onIndTypePChange()"></select></div>
+          </div>
+          <div style="display:flex;gap:20px;margin-bottom:14px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx);cursor:pointer"><input type="checkbox" id="imodp-hardstop"> Hard Stop</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx);cursor:pointer"><input type="checkbox" id="imodp-enabled" checked> Enabled</label>
+          </div>
+          <div class="form-row" style="margin-bottom:0">
+            <label>Parameters</label>
+            <div style="display:flex;border-bottom:1px solid var(--brd);margin-bottom:10px">
+              <div class="imodp-ptab on" id="imodp-tab-form" onclick="switchParamTabP('form')">Form</div>
+              <div class="imodp-ptab" id="imodp-tab-json" onclick="switchParamTabP('json')">JSON</div>
+            </div>
+            <div id="imodp-form-area"><div style="display:flex;flex-direction:column;gap:2px" id="imodp-rows"></div></div>
+            <div id="imodp-json-area" style="display:none">
+              <textarea id="imodp-json" style="width:100%;min-height:140px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;font-family:'Space Mono',monospace;font-size:11px;resize:vertical;outline:none" placeholder='{"key": value}'></textarea>
+            </div>
+          </div>
+          <div class="form-err" id="imodp-err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="mbtn sec" onclick="closeIndModalP()">Cancel</button>
+          <button class="mbtn dng" id="imodp-del-btn" style="display:none" onclick="deleteIndP()">Delete</button>
+          <button class="mbtn" onclick="saveIndP()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div><!-- /p-profiles -->
+
+  </main>
+
+</div><!-- /app -->
+
+<div id="toast"></div>
 
 <script>
 'use strict';
-const BASE=window.location.origin;
+// BASE is defined in common.js
 let S={u:null,role:null,profiles:{},active:null,internalKey:null};
 let _rt=null,_ar=null;
 setInterval(()=>{document.getElementById('clk').textContent=new Date().toUTCString().split(' ')[4]+' UTC';},1000);
@@ -799,29 +846,22 @@ async function loadOv(){
 
 async function loadPT(tid){
   const tb=document.getElementById(tid);if(!tb)return;
-  const profileNames=Object.keys(S.profiles??{});
-  if(!profileNames.length){tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--txd);padding:24px">No profiles available</td></tr>';return;}
   tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--txd);padding:16px">Loading positions...</td></tr>';
-  const results=await Promise.all(profileNames.map(prof=>api('/portfolio/'+prof).then(d=>({prof,d})).catch(()=>({prof,d:null}))));
-  const allPs=[];
-  results.forEach(({prof,d})=>{
-    const ps=d?.positions??d?.open_positions??[];
-    ps.forEach(p=>allPs.push({...p,_prof:prof}));
-  });
+  const allPs=await api('/positions')??[];
   const b2=document.getElementById('pcb2');
   if(b2){b2.textContent=allPs.length+' LIVE';b2.className='cb '+(allPs.length>0?'g':'');}
   if(!allPs.length){tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--txd);padding:24px">No open positions</td></tr>';return;}
   tb.innerHTML=allPs.map(p=>{
-    const pnl=parseFloat(p.unrealised_pnl??p.pnl??0),pct=parseFloat(p.pnl_pct??0);
+    const pnl=parseFloat(p.unrealised_pnl??0),pct=parseFloat(p.pnl_pct??0);
     const sd=(p.side??'long').toLowerCase(),bw=Math.min(Math.abs(pct)*2,100);
-    const profLabel=S.profiles[p._prof]?.display_name??p._prof;
+    const profLabel=S.profiles[p.profile_name]?.display_name??p.profile_name;
     return '<tr>'
       +'<td class="tm td2" style="font-size:10px;letter-spacing:.06em">'+profLabel+'</td>'
       +'<td class="ts tm">'+p.symbol+'</td>'
       +'<td><span class="bs '+(sd==='long'?'bl2':'bsh')+'">'+sd.toUpperCase()+'</span></td>'
       +'<td class="tm">'+fnum(p.quantity??0)+'</td>'
       +'<td class="tm td2">'+fpr(p.entry_price??0)+'</td>'
-      +'<td class="tm">'+fpr(p.mark_price??p.current_price??0)+'</td>'
+      +'<td class="tm">'+fpr(p.mark_price??0)+'</td>'
       +'<td class="tm '+(pnl>=0?'tg':'tr2')+'">'+(pnl>=0?'+':'')+fusd(pnl)+'</td>'
       +'<td class="tm '+(pct>=0?'tg':'tr2')+'">'+(pct>=0?'+':'')+pct.toFixed(2)+'%</td>'
       +'<td class="tm td2">'+(p.tp_price?fpr(p.tp_price):'—')+'</td>'
@@ -864,47 +904,24 @@ async function loadMkt(){
   if(mon&&atb){const atrs=mon.atr_data??mon.atr??[];atb.innerHTML=Array.isArray(atrs)&&atrs.length?atrs.map(a=>'<tr><td class="ts">'+a.symbol+'</td><td class="tm">'+fpr(a.atr??0)+'</td><td class="tm">'+((a.atr_pct??0).toFixed(2))+'%</td><td class="tm '+((a.trend??'').toUpperCase()==='BULL'?'tg':'tr2')+'">'+a.trend+'</td></tr>').join(''):'<tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">No ATR data</td></tr>';}
 }
 
-const EPS=[
-  {m:'GET',p:'/health',d:'Public health check'},
-  {m:'POST',p:'/auth/login',d:'Dashboard login'},
-  {m:'POST',p:'/auth/refresh',d:'Refresh access token'},
-  {m:'POST',p:'/auth/logout',d:'Logout'},
-  {m:'GET',p:'/auth/status',d:'Check session'},
-  {m:'GET',p:'/auth/me',d:'Session + profile API keys'},
-  {m:'GET',p:'/auth/users',d:'List users (admin)'},
-  {m:'POST',p:'/auth/users',d:'Create user (admin)'},
-  {m:'PUT',p:'/auth/users/{id}/profiles',d:'Update user profiles (admin)'},
-  {m:'PUT',p:'/auth/users/{id}/password',d:'Change password'},
-  {m:'DELETE',p:'/auth/users/{id}',d:'Deactivate user (admin)'},
-  {m:'GET',p:'/monitoring/status',d:'Monitoring status + regime data'},
-  {m:'GET',p:'/monitoring/tickers',d:'Monitored tickers'},
-  {m:'POST',p:'/monitoring/add-ticker',d:'Add ticker'},
-  {m:'POST',p:'/monitoring/remove-ticker',d:'Remove ticker'},
-  {m:'PUT',p:'/monitoring/tickers',d:'Replace all tickers'},
-  {m:'GET',p:'/balances',d:'Live account balances'},
-  {m:'GET',p:'/balances/cached',d:'Cached balances'},
-  {m:'GET',p:'/portfolio/{profile_name}',d:'Portfolio + open positions for profile'},
-  {m:'GET',p:'/portfolio/{profile_name}/total',d:'Total portfolio value'},
-  {m:'GET',p:'/price/{symbol}',d:'Live price for symbol'},
-  {m:'GET',p:'/market/{symbol}',d:'Market info for symbol'},
-  {m:'GET',p:'/markets',d:'All market info'},
-  {m:'POST',p:'/order',d:'Place a trade order'},
-  {m:'POST',p:'/webhook/tradingview',d:'TradingView alert'},
-  {m:'POST',p:'/webhook/tradingview/trend',d:'TradingView trend update'},
-  {m:'GET',p:'/circuit-breaker/daily-summary/{profile_name}',d:'Daily P&L summary'},
-  {m:'GET',p:'/signals/status/{profile_name}',d:'Signal generator status'},
-  {m:'GET',p:'/signals/check/{profile_name}/{symbol}',d:'Check signal for symbol'},
-  {m:'GET',p:'/indicators/{profile_name}',d:'List indicators for profile'},
-  {m:'POST',p:'/indicators/{profile_name}',d:'Add indicator to profile'},
-  {m:'PUT',p:'/indicators/{profile_name}/{indicator_id}',d:'Full replace of indicator'},
-  {m:'PATCH',p:'/indicators/{profile_name}/{indicator_id}/toggle',d:'Toggle enabled/disabled'},
-  {m:'DELETE',p:'/indicators/{profile_name}/{indicator_id}',d:'Delete indicator'},
-  {m:'GET',p:'/config/symbols/{profile_name}',d:'All symbol configs'},
-  {m:'POST',p:'/config/symbol/{profile_name}/{symbol}',d:'Set symbol config'},
-  {m:'DELETE',p:'/config/symbol/{profile_name}/{symbol}',d:'Delete symbol config'},
-  {m:'POST',p:'/config/symbol/{profile_name}/{symbol}/test',d:'Test position sizing'},
-];
-const emc={GET:'eget',POST:'epost',PUT:'eput',DELETE:'edel'};
+let EPS=[];
+const emc={GET:'eget',POST:'epost',PUT:'eput',DELETE:'edel',PATCH:'eput'};
+async function loadEps(){
+  if(EPS.length)return EPS;
+  try{
+    const spec=await fetch('/openapi.json').then(r=>r.json());
+    const eps=[];
+    for(const[path,methods] of Object.entries(spec.paths||{})){
+      for(const[method,op] of Object.entries(methods)){
+        if(['get','post','put','patch','delete'].includes(method)){
+          eps.push({m:method.toUpperCase(),p:path,d:op.summary||op.description||''});
+        }
+      }
+    }
+    EPS=eps;
+  }catch(e){console.warn('openapi.json fetch failed',e);}
+  return EPS;
+}
 function renderEps(list){const e=document.getElementById('eplist');if(!e)return;e.innerHTML=list.map(e2=>'<div class="er" onclick="tep(\''+e2.m+'\',\''+e2.p+'\')"><span class="em '+(emc[e2.m]||'eget')+'">'+e2.m+'</span><span style="color:var(--tx);flex:1;font-size:12px">'+e2.p+'</span><span style="font-size:10px;color:var(--txd)">'+e2.d+'</span></div>').join('');}
 function fep(q){renderEps(EPS.filter(e=>e.p.toLowerCase().includes(q.toLowerCase())||e.d.toLowerCase().includes(q.toLowerCase())||e.m.toLowerCase().includes(q.toLowerCase())));}
 async function tep(m,p){
@@ -920,7 +937,7 @@ function st(name,el){
   document.getElementById('p-'+name).classList.add('on');el.classList.add('on');
   loadPanel(name);
 }
-function loadPanel(n){({overview:loadOv,positions:()=>loadPT('pfull'),balances:loadBal,market:loadMkt,ai:loadAI,api:()=>{checkHealth();renderEps(EPS);}}[n]||loadOv)();}
+function loadPanel(n){({overview:loadOv,profiles:loadProfiles,positions:()=>loadPT('pfull'),balances:loadBal,market:loadMkt,ai:loadAI,api:async()=>{checkHealth();await loadEps();renderEps(EPS);}}[n]||loadOv)();}
 function startAR(){
   if(_ar)clearInterval(_ar);
   setInterval(checkHealth,30000);
@@ -1181,14 +1198,10 @@ chkExist();
 // AI PROMPTS
 // ══════════════════════════════════════════════════════════════════
 
-let _allProfiles = [];
-
 async function _ensureProfiles() {
   if (_allProfiles.length) return;
   try {
-    //const r = await fetch('/profiles', {headers: authHeaders()});
-    const _allProfiles= await api('/profiles');
-    //if (r.ok) _allProfiles = await r.json();
+    _allProfiles = await api('/profiles') ?? [];
   } catch(e) {}
 }
 
@@ -1505,6 +1518,747 @@ function buildAuditDiff(before, after) {
   return html || '(no changes detected)';
 }
 
+
+// ── Profiles panel ───────────────────────────────────────────────────────────
+
+let _currentProfile = null;
+let _allProfiles = [];
+let _symDataP = [];
+let _symEditId = null;
+let _indDataP = [];
+let _indCatP = 'all';
+let _indEditId = null;
+let _currentTab = 'settings';
+let _exchangeAccounts = [];
+let _paramTabP = 'form';
+
+async function loadProfiles() {
+  try {
+    _allProfiles = await api('/profiles') ?? [];
+    renderSidebar();
+  } catch (e) {
+    document.getElementById('profile-list').innerHTML =
+      `<div style="padding:16px;color:var(--red);font-size:11px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderSidebar() {
+  const el = document.getElementById('profile-list');
+  if (!_allProfiles.length) {
+    el.innerHTML = '<div style="padding:16px;color:var(--txd);font-size:11px">No profiles yet — create one</div>';
+    return;
+  }
+  el.innerHTML = _allProfiles.map(p => {
+    const tradingBadge = tradingTypeBadge(p.trading_type);
+    const stratBadge = `<span class="pi-badge pb-off">${(p.strategy_type || '').replace('_', ' ')}</span>`;
+    const activeBadge = !p.is_active ? '<span class="pi-badge pb-off">inactive</span>' : '';
+    return `<div class="profile-item${_currentProfile?.name === p.name ? ' active' : ''}" onclick="selectProfile('${p.name}')">
+      <div class="pi-name">${p.display_name}</div>
+      <div class="pi-badges">${tradingBadge}${stratBadge}${activeBadge}</div>
+    </div>`;
+  }).join('');
+}
+
+function tradingTypeBadge(t) {
+  if (t === 'rules_live') return '<span class="pi-badge pb-live">Live</span>';
+  if (t === 'shadow')     return '<span class="pi-badge pb-shadow">Shadow</span>';
+  if (t === 'ai_live')    return '<span class="pi-badge pb-ai">AI Live</span>';
+  return `<span class="pi-badge pb-off">${t || '—'}</span>`;
+}
+
+async function selectProfile(name) {
+  try {
+    _currentProfile = await api('/profiles/' + name);
+    renderSidebar();
+    showProfileDetail();
+  } catch (e) {
+    showToast('Failed to load profile: ' + e.message, true);
+  }
+}
+
+function showProfileDetail() {
+  const p = _currentProfile;
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('profile-detail').style.display = 'flex';
+  document.getElementById('ph-name').textContent = p.display_name;
+  document.getElementById('key-hint').textContent = p.key_hint ?? '—';
+  document.getElementById('creds-modal-profile').textContent = p.name;
+  document.getElementById('sym-p-label').textContent = p.name;
+  document.getElementById('ph-badges').innerHTML =
+    tradingTypeBadge(p.trading_type) +
+    `<span class="pi-badge pb-off" style="margin-left:4px">${(p.strategy_type || '').replace('_', ' ')}</span>` +
+    (!p.is_active ? '<span class="pi-badge pb-off" style="margin-left:4px">inactive</span>' : '');
+  fillSettings(p);
+  fillCB(p.circuit_breaker);
+  loadCBSummary(p.name);
+  loadSymbolsP();
+  loadIndicatorsP();
+  updateSaveBar();
+  showTab('settings', document.querySelector('#p-profiles .stab'));
+}
+
+function fillSettings(p) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val ?? '';
+  };
+  set('f-name-ro', p.name);
+  set('f-display_name', p.display_name);
+  set('f-trading_type', p.trading_type);
+  set('f-strategy_type', p.strategy_type);
+  set('f-take_profit_pct', p.take_profit_pct);
+  set('f-stop_loss_pct', p.stop_loss_pct);
+  set('f-trailing_stop_pct', p.trailing_stop_pct);
+  set('f-arm_trailing_stop_pct', p.arm_trailing_stop_pct);
+  set('f-use_trailing_stop', p.use_trailing_stop);
+  set('f-default_order_size_usdc', p.default_order_size_usdc);
+  set('f-max_position_size_pct', p.max_position_size_pct);
+  set('f-max_open_positions', p.max_open_positions);
+  set('f-max_portfolio_exposure_pct', p.max_portfolio_exposure_pct);
+  set('f-signal_timeframe', p.signal_timeframe);
+  set('f-trend_timeframe', p.trend_timeframe);
+  set('f-entry_timeframe', p.entry_timeframe);
+  set('f-signal_cooldown_seconds', p.signal_cooldown_seconds);
+  set('f-min_signal_confidence', p.min_signal_confidence);
+  set('f-min_volume_ratio', p.min_volume_ratio);
+  set('f-use_market_regime_filter', p.use_market_regime_filter);
+  set('f-use_trend_filter', p.use_trend_filter);
+  set('f-use_entry_filter', p.use_entry_filter);
+  set('f-use_atr_filter', p.use_atr_filter);
+  set('f-min_indicators_required', p.min_indicators_required);
+  set('f-min_entry_indicators_required', p.min_entry_indicators_required);
+  set('f-use_trend_invalidation_exit', p.use_trend_invalidation_exit);
+  set('f-trend_invalidation_indicators', p.trend_invalidation_indicators);
+  set('f-min_position_age_for_trend_check', p.min_position_age_for_trend_check);
+  set('f-max_position_hours', p.max_position_hours);
+}
+
+function fillCB(cb) {
+  if (!cb) return;
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val ?? '';
+  };
+  set('f-cb-max_daily_profit_pct', cb.max_daily_profit_pct);
+  set('f-cb-max_daily_loss_pct', cb.max_daily_loss_pct);
+  set('f-cb-profit_lock_hours', cb.profit_lock_hours);
+  set('f-cb-loss_lock_hours', cb.loss_lock_hours);
+  set('f-cb-is_active', cb.is_active !== false);
+}
+
+async function loadCBSummary(profileName) {
+  const banner = document.getElementById('cb-active-banner');
+  const sumEl = document.getElementById('cb-daily-summary');
+  try {
+    const s = await api('/circuit-breaker/daily-summary/' + profileName);
+    if (s?.circuit_breaker_active) {
+      banner.style.display = 'block';
+      document.getElementById('cb-active-text').textContent =
+        `${s.daily_pnl_pct ?? '—'}  ·  ${s.hours_remaining}h remaining`;
+    } else {
+      banner.style.display = 'none';
+    }
+    sumEl.innerHTML = s ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-width:700px">
+        ${cbStat('Day P&L', s.daily_pnl_pct, s.daily_pnl)}
+        ${cbStat('CB P&L', s.cb_pnl_pct)}
+        ${cbStat('Start Balance', s.daily_start_balance)}
+        ${cbStat('Current', s.current_balance)}
+        ${cbStat('Reset In', s.hours_until_reset + 'h')}
+      </div>` : '';
+  } catch { banner.style.display = 'none'; }
+}
+
+function cbStat(label, val, sub) {
+  return `<div style="background:var(--bg3);border:1px solid var(--brd);padding:12px 14px">
+    <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);margin-bottom:4px">${label}</div>
+    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txb)">${val ?? '—'}</div>
+    ${sub ? `<div style="font-size:10px;color:var(--txd);margin-top:2px">${sub}</div>` : ''}
+  </div>`;
+}
+
+function showTab(name, el) {
+  _currentTab = name;
+  document.querySelectorAll('#p-profiles .tab-panel').forEach(p => p.classList.remove('on'));
+  document.querySelectorAll('#p-profiles .stab').forEach(t => t.classList.remove('on'));
+  const panel = document.getElementById('tab-' + name);
+  if (panel) panel.classList.add('on');
+  if (el) el.classList.add('on');
+  updateSaveBar();
+}
+
+function updateSaveBar() {
+  const bar = document.getElementById('save-bar');
+  bar.style.display = (_currentTab === 'settings' || _currentTab === 'cb') ? 'flex' : 'none';
+  document.getElementById('save-status').textContent = '';
+}
+
+async function saveCurrentTab() {
+  if (!_currentProfile) return;
+  if (_currentTab === 'settings') await saveSettings();
+  else if (_currentTab === 'cb') await saveCB();
+}
+
+function getNum(id) {
+  const v = document.getElementById(id)?.value?.trim();
+  return v === '' || v == null ? null : parseFloat(v);
+}
+function getInt(id) {
+  const v = document.getElementById(id)?.value?.trim();
+  return v === '' || v == null ? null : parseInt(v);
+}
+function getStr(id) {
+  const v = document.getElementById(id)?.value?.trim();
+  return v === '' ? null : v;
+}
+function getBool(id) { return document.getElementById(id)?.checked ?? null; }
+
+async function saveSettings() {
+  const btn = document.getElementById('save-btn-text');
+  const status = document.getElementById('save-status');
+  btn.textContent = 'Saving...';
+  status.textContent = '';
+  const body = {
+    display_name:                   getStr('f-display_name'),
+    trading_type:                   getStr('f-trading_type'),
+    strategy_type:                  getStr('f-strategy_type'),
+    take_profit_pct:                getNum('f-take_profit_pct'),
+    stop_loss_pct:                  getNum('f-stop_loss_pct'),
+    trailing_stop_pct:              getNum('f-trailing_stop_pct'),
+    arm_trailing_stop_pct:          getNum('f-arm_trailing_stop_pct'),
+    use_trailing_stop:              getBool('f-use_trailing_stop'),
+    default_order_size_usdc:        getNum('f-default_order_size_usdc'),
+    max_position_size_pct:          getNum('f-max_position_size_pct'),
+    max_open_positions:             getInt('f-max_open_positions'),
+    max_portfolio_exposure_pct:     getNum('f-max_portfolio_exposure_pct'),
+    signal_timeframe:               getStr('f-signal_timeframe'),
+    trend_timeframe:                getStr('f-trend_timeframe'),
+    entry_timeframe:                getStr('f-entry_timeframe'),
+    signal_cooldown_seconds:        getInt('f-signal_cooldown_seconds'),
+    min_signal_confidence:          getNum('f-min_signal_confidence'),
+    min_volume_ratio:               getNum('f-min_volume_ratio'),
+    use_market_regime_filter:       getBool('f-use_market_regime_filter'),
+    use_trend_filter:               getBool('f-use_trend_filter'),
+    use_entry_filter:               getBool('f-use_entry_filter'),
+    use_atr_filter:                 getBool('f-use_atr_filter'),
+    min_indicators_required:        getInt('f-min_indicators_required'),
+    min_entry_indicators_required:  getInt('f-min_entry_indicators_required'),
+    use_trend_invalidation_exit:    getBool('f-use_trend_invalidation_exit'),
+    trend_invalidation_indicators:  getStr('f-trend_invalidation_indicators'),
+    min_position_age_for_trend_check: getInt('f-min_position_age_for_trend_check'),
+    max_position_hours:             getInt('f-max_position_hours'),
+  };
+  Object.keys(body).forEach(k => body[k] === null && delete body[k]);
+  try {
+    await api('/profiles/' + _currentProfile.name, { method: 'PUT', body: JSON.stringify(body) });
+    status.textContent = '✓ Saved';
+    status.className = 'save-status ok';
+    showToast('Settings saved');
+    _currentProfile = await api('/profiles/' + _currentProfile.name);
+    const idx = _allProfiles.findIndex(p => p.name === _currentProfile.name);
+    if (idx >= 0) _allProfiles[idx] = _currentProfile;
+    renderSidebar();
+    document.getElementById('ph-name').textContent = _currentProfile.display_name;
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'save-status err';
+  } finally {
+    btn.textContent = 'Save Changes';
+  }
+}
+
+async function saveCB() {
+  const btn = document.getElementById('save-btn-text');
+  const status = document.getElementById('save-status');
+  btn.textContent = 'Saving...';
+  const body = {
+    max_daily_profit_pct: getNum('f-cb-max_daily_profit_pct'),
+    max_daily_loss_pct:   getNum('f-cb-max_daily_loss_pct'),
+    profit_lock_hours:    getInt('f-cb-profit_lock_hours'),
+    loss_lock_hours:      getInt('f-cb-loss_lock_hours'),
+    is_active:            getBool('f-cb-is_active'),
+  };
+  Object.keys(body).forEach(k => body[k] === null && delete body[k]);
+  try {
+    await api('/profiles/' + _currentProfile.name + '/circuit-breaker',
+              { method: 'PUT', body: JSON.stringify(body) });
+    status.textContent = '✓ Saved';
+    status.className = 'save-status ok';
+    showToast('Circuit breaker config saved');
+    loadCBSummary(_currentProfile.name);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'save-status err';
+  } finally {
+    btn.textContent = 'Save Changes';
+  }
+}
+
+async function loadExchangeAccounts() {
+  try {
+    _exchangeAccounts = await api('/exchange-accounts') ?? [];
+  } catch (e) {
+    _exchangeAccounts = [];
+  }
+}
+
+function renderAccountDropdown() {
+  const sel = document.getElementById('cm-account');
+  if (!_exchangeAccounts.length) {
+    sel.innerHTML = '<option value="">No exchange accounts found — create one first</option>';
+    return;
+  }
+  sel.innerHTML =
+    '<option value="">— Select exchange account —</option>' +
+    _exchangeAccounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+}
+
+function onAccountChange() {
+  const sel = document.getElementById('cm-account');
+  const hint = document.getElementById('cm-account-hint');
+  const keyHint = document.getElementById('cm-account-key-hint');
+  const account = _exchangeAccounts.find(a => a.id === parseInt(sel.value));
+  if (account) {
+    keyHint.textContent = account.key_hint ?? '(encrypted)';
+    hint.style.display = 'block';
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+async function openCreateModal() {
+  await loadExchangeAccounts();
+  renderAccountDropdown();
+  const sel = document.getElementById('cm-account');
+  sel.onchange = onAccountChange;
+  document.getElementById('cm-name').value = '';
+  document.getElementById('cm-display').value = '';
+  document.getElementById('cm-strategy').value = 'trend_following';
+  document.getElementById('cm-trading').value = 'rules_live';
+  document.getElementById('cm-err').textContent = '';
+  document.getElementById('cm-account-hint').style.display = 'none';
+  document.getElementById('create-modal').style.display = 'flex';
+}
+
+function closeCreateModal() {
+  document.getElementById('create-modal').style.display = 'none';
+  document.getElementById('cm-err').textContent = '';
+}
+
+async function createProfile() {
+  const accountId = parseInt(document.getElementById('cm-account').value);
+  const name      = document.getElementById('cm-name').value.trim();
+  const display   = document.getElementById('cm-display').value.trim();
+  const err       = document.getElementById('cm-err');
+  if (!accountId) { err.textContent = 'Please select an exchange account'; return; }
+  if (!name)      { err.textContent = 'Internal name is required'; return; }
+  if (!display)   { err.textContent = 'Display name is required'; return; }
+  if (/\s/.test(name)) { err.textContent = 'Internal name cannot contain spaces'; return; }
+  try {
+    const result = await api('/profiles', {
+      method: 'POST',
+      body: JSON.stringify({
+        account_id:    accountId,
+        name,
+        display_name:  display,
+        strategy_type: document.getElementById('cm-strategy').value,
+        trading_type:  document.getElementById('cm-trading').value,
+      })
+    });
+    closeCreateModal();
+    showToast(`Profile "${result.name}" created`);
+    await loadProfiles();
+    selectProfile(name);
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+function openCredsModal() { document.getElementById('creds-modal').style.display = 'flex'; }
+function closeCredsModal() {
+  document.getElementById('creds-modal').style.display = 'none';
+  document.getElementById('cr-err').textContent = '';
+  document.getElementById('cr-apikey').value = '';
+  document.getElementById('cr-secret').value = '';
+}
+
+async function saveCredentials() {
+  const apiKey = document.getElementById('cr-apikey').value.trim();
+  const secret = document.getElementById('cr-secret').value.trim();
+  const err = document.getElementById('cr-err');
+  if (!apiKey || !secret) { err.textContent = 'Both fields required'; return; }
+  try {
+    await api('/profiles/' + _currentProfile.name + '/credentials', {
+      method: 'PUT',
+      body: JSON.stringify({ raw_api_key: apiKey, raw_secret: secret }),
+    });
+    closeCredsModal();
+    showToast('Credentials updated');
+    _currentProfile = await api('/profiles/' + _currentProfile.name);
+    document.getElementById('key-hint').textContent = _currentProfile.key_hint ?? '—';
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+async function deactivateProfile() {
+  if (!_currentProfile) return;
+  if (!confirm(`Deactivate profile "${_currentProfile.display_name}"?\n\nThis will stop all signal generation. You can re-activate via the DB if needed.`)) return;
+  try {
+    await api('/profiles/' + _currentProfile.name, { method: 'DELETE' });
+    showToast('Profile deactivated');
+    _currentProfile = null;
+    document.getElementById('profile-detail').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'flex';
+    await loadProfiles();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+async function loadSymbolsP() {
+  if (!_currentProfile) return;
+  const data = await api('/config/symbols/' + _currentProfile.name).catch(() => null);
+  _symDataP = data ?? { configs: [] };
+  renderSymTableP();
+}
+
+function renderSymTableP() {
+  const tbody = document.getElementById('sym-tbody');
+  const configs = _symDataP.configs ?? [];
+  document.getElementById('sym-count-label').textContent = configs.length + ' symbol(s)';
+  if (!configs.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">No symbol configs</td></tr>';
+    return;
+  }
+  tbody.innerHTML = configs.map(s => {
+    const en = !!s.enabled;
+    return `<tr>
+      <td style="color:var(--txb);font-weight:700">${s.symbol}</td>
+      <td>$${parseFloat(s.order_size_usdc || 0).toFixed(2)}</td>
+      <td>${s.max_position_size_pct != null ? parseFloat(s.max_position_size_pct).toFixed(1) + '%' : '—'}</td>
+      <td><span class="bs ${en ? 'bl2' : 'bsh'}">${en ? 'ACTIVE' : 'OFF'}</span></td>
+      <td style="color:var(--txd);font-size:11px">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
+      <td style="text-align:right"><button class="btn-new" style="font-size:10px" onclick='openEditSymP(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddSymbol() {
+  _symEditId = null;
+  document.getElementById('sym-modal-title-p').textContent = 'Add Symbol Config';
+  document.getElementById('smp-symbol').value = '';
+  document.getElementById('smp-symbol').disabled = false;
+  document.getElementById('smp-size').value = '';
+  document.getElementById('smp-maxpos').value = '';
+  document.getElementById('smp-enabled').checked = true;
+  document.getElementById('smp-del-btn').style.display = 'none';
+  document.getElementById('smp-err').textContent = '';
+  document.getElementById('sym-modal-p').style.display = 'flex';
+}
+
+function openEditSymP(sym) {
+  _symEditId = sym.symbol;
+  document.getElementById('sym-modal-title-p').textContent = 'Edit Symbol Config';
+  document.getElementById('smp-symbol').value = sym.symbol;
+  document.getElementById('smp-symbol').disabled = true;
+  document.getElementById('smp-size').value = sym.order_size_usdc != null ? parseFloat(sym.order_size_usdc) : '';
+  document.getElementById('smp-maxpos').value = sym.max_position_size_pct != null ? parseFloat(sym.max_position_size_pct) : '';
+  document.getElementById('smp-enabled').checked = !!sym.enabled;
+  document.getElementById('smp-del-btn').style.display = '';
+  document.getElementById('smp-err').textContent = '';
+  document.getElementById('sym-modal-p').style.display = 'flex';
+}
+
+function closeSymModalP() { document.getElementById('sym-modal-p').style.display = 'none'; }
+
+async function saveSymP() {
+  const prof = _currentProfile?.name;
+  const symbol = _symEditId ?? document.getElementById('smp-symbol').value.trim().toUpperCase();
+  if (!symbol) { document.getElementById('smp-err').textContent = 'Symbol required'; return; }
+  const sz = document.getElementById('smp-size').value.trim();
+  if (!sz) { document.getElementById('smp-err').textContent = 'Order size required'; return; }
+  try {
+    await api('/config/symbol/' + prof + '/' + symbol, {
+      method: 'POST',
+      body: JSON.stringify({
+        order_size_usdc: parseFloat(sz),
+        max_position_size_pct: document.getElementById('smp-maxpos').value.trim()
+          ? parseFloat(document.getElementById('smp-maxpos').value.trim()) : null,
+        enabled: document.getElementById('smp-enabled').checked,
+      })
+    });
+    closeSymModalP();
+    loadSymbolsP();
+    showToast('Symbol config saved');
+  } catch (e) {
+    document.getElementById('smp-err').textContent = e.message;
+  }
+}
+
+async function deleteSymP() {
+  if (!_symEditId || !_currentProfile) return;
+  if (!confirm('Delete config for ' + _symEditId + '?')) return;
+  closeSymModalP();
+  try {
+    await api('/config/symbol/' + _currentProfile.name + '/' + _symEditId, { method: 'DELETE' });
+    loadSymbolsP();
+    showToast('Symbol config deleted');
+  } catch (e) { showToast(e.message, true); }
+}
+
+const IND_SCHEMAS = {
+  ema_slope:              [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01}],
+  bollinger_bands:        [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:0.8},{k:'lookback_candles',t:'number',d:null}],
+  adx_regime:             [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
+  rsi_overbought:         [{k:'min_value',t:'number',d:65},{k:'lookback_candles',t:'number',d:null}],
+  rsi_threshold:          [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
+  rsi_range:              [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
+  rsi_reversal_momentum:  [{k:'lookback_candles',t:'number',d:10},{k:'oversold_threshold',t:'number',d:45},{k:'current_min',t:'number',d:36},{k:'min_jump',t:'number',d:3},{k:'require_sustained',t:'bool',d:false},{k:'sustained_rise_mode',t:'select',o:['net','strict'],d:'net'}],
+  ema_gap:                [{k:'min_gap_pct',t:'number',d:0.15},{k:'mode',t:'select',o:['min','max','abs'],d:'min'}],
+  price_vs_ema:           [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-1.5},{k:'max_gap_pct',t:'number',d:2}],
+  price_below_vwap:       [{k:'min_gap_pct',t:'number',d:-0.15},{k:'max_gap_pct',t:'number',d:-2}],
+  price_extended_below_ema:[{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-0.7},{k:'max_gap_pct',t:'number',d:-10}],
+  price_vs_vwap:          [],
+  volume_spike:           [{k:'min_ratio',t:'number',d:1},{k:'max_ratio',t:'number',d:8}],
+  reversal_candle:        [{k:'pattern',t:'select',o:['hammer','doji','bull_close','higher_low','engulfing'],d:'hammer'},{k:'min_body_pct',t:'number',d:null},{k:'max_body_pct',t:'number',d:null},{k:'min_close_pct',t:'number',d:null},{k:'require_bull',t:'bool',d:null},{k:'max_drop_from_close_pct',t:'number',d:0.5}],
+  bb_width_regime:        [{k:'required_direction',t:'select',o:['not_expanding','expanding','contracting'],d:'not_expanding'},{k:'lookback',t:'number',d:4}],
+  bb_pct_b_momentum:      [{k:'required_direction',t:'select',o:['not_rising','rising','falling'],d:'not_rising'},{k:'lookback',t:'number',d:3}],
+};
+const IND_TYPES = Object.keys(IND_SCHEMAS);
+
+async function loadIndicatorsP() {
+  if (!_currentProfile) return;
+  _indDataP = await api('/indicators/' + _currentProfile.name).catch(() => []) ?? [];
+  renderIndGridP();
+}
+
+function setIndCatP(cat, el) {
+  _indCatP = cat;
+  document.querySelectorAll('#tab-indicators .stab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  renderIndGridP();
+}
+
+function renderIndGridP() {
+  const grid = document.getElementById('ind-grid-p');
+  const filtered = _indCatP === 'all' ? _indDataP : _indDataP.filter(i => i.category === _indCatP);
+  document.getElementById('ind-count-p').textContent = filtered.length + ' indicator(s)';
+  if (!filtered.length) {
+    grid.innerHTML = `<div style="color:var(--txd);font-size:11px;padding:8px 0;grid-column:1/-1">No indicators — click + Add to create one</div>`;
+    return;
+  }
+  const groups = _indCatP === 'all'
+    ? ['trend','entry'].filter(c => filtered.some(i => i.category === c))
+    : [_indCatP];
+  grid.innerHTML = groups.map(cat => {
+    const items = filtered.filter(i => i.category === cat);
+    const header = _indCatP === 'all'
+      ? `<div style="grid-column:1/-1;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--acc);padding:4px 0;margin-top:8px">${cat}</div>`
+      : '';
+    return header + items.map(renderIndCardP).join('');
+  }).join('');
+}
+
+function renderIndCardP(ind) {
+  const params = Object.entries(ind.params ?? {})
+    .filter(([k, v]) => v !== null && v !== undefined && k !== 'hard_stop')
+    .map(([k, v]) => `<div style="background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.12);padding:3px 8px;font-size:10px;display:inline-block;margin:2px"><span style="color:var(--txd);margin-right:4px">${k}</span><b style="color:var(--txb)">${v}</b></div>`)
+    .join('');
+  const hardBadge = ind.is_hard_stop
+    ? '<span style="font-size:9px;padding:1px 6px;border:1px solid rgba(255,60,90,.4);color:var(--red);background:rgba(255,60,90,.07)">Hard Stop</span>'
+    : '<span style="font-size:9px;padding:1px 6px;border:1px solid rgba(255,204,0,.35);color:var(--warn);background:rgba(255,204,0,.06)">Soft</span>';
+  return `<div style="background:var(--bg3);border:1px solid var(--brd);${!ind.enabled ? 'opacity:.45' : ''}">
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--brd)">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:var(--txb);flex:1">${ind.indicator_type}</div>
+      ${hardBadge}
+    </div>
+    <div style="padding:8px 12px;min-height:28px">${params || '<span style="color:var(--txd);font-size:10px">No params</span>'}</div>
+    <div style="display:flex;border-top:1px solid var(--brd)">
+      <button style="flex:1;background:transparent;border:none;border-right:1px solid var(--brd);color:var(--txd);padding:6px 0;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s;text-transform:uppercase" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--txd)'" onclick="openEditIndP(${ind.id})">✎ Edit</button>
+      <button style="flex:1;background:transparent;border:none;border-right:1px solid var(--brd);color:var(--txd);padding:6px 0;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s;text-transform:uppercase" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--txd)'" onclick="quickToggleP(${ind.id})">${ind.enabled ? 'Disable' : 'Enable'}</button>
+      <button style="flex:1;background:transparent;border:none;color:var(--txd);padding:6px 0;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s;text-transform:uppercase" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--txd)'" onclick="deleteIndPById(${ind.id})">✗ Del</button>
+    </div>
+  </div>`;
+}
+
+function openAddIndicatorP() {
+  _indEditId = null;
+  document.getElementById('imodp-title').textContent = 'Add Indicator';
+  document.getElementById('imodp-del-btn').style.display = 'none';
+  document.getElementById('imodp-cat').value = _indCatP === 'all' ? 'trend' : _indCatP;
+  document.getElementById('imodp-hardstop').checked = true;
+  document.getElementById('imodp-enabled').checked = true;
+  const sel = document.getElementById('imodp-type');
+  sel.innerHTML = IND_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
+  document.getElementById('imodp-err').textContent = '';
+  switchParamTabP('form');
+  buildParamFormP({});
+  document.getElementById('imodp-json').value = JSON.stringify(schemaDefaultsP(IND_TYPES[0]), null, 2);
+  document.getElementById('ind-modal-p').style.display = 'flex';
+}
+
+function onIndTypePChange() {
+  const t = document.getElementById('imodp-type').value;
+  buildParamFormP({});
+  if (_paramTabP === 'json') {
+    document.getElementById('imodp-json').value = JSON.stringify(schemaDefaultsP(t), null, 2);
+  }
+}
+
+function openEditIndP(id) {
+  const ind = _indDataP.find(i => i.id === id);
+  if (!ind) return;
+  _indEditId = id;
+  document.getElementById('imodp-title').textContent = 'Edit Indicator';
+  document.getElementById('imodp-del-btn').style.display = 'block';
+  document.getElementById('imodp-cat').value = ind.category;
+  document.getElementById('imodp-hardstop').checked = ind.is_hard_stop;
+  document.getElementById('imodp-enabled').checked = ind.enabled;
+  const sel = document.getElementById('imodp-type');
+  sel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t === ind.indicator_type ? ' selected' : ''}>${t}</option>`).join('');
+  const cleanParams = Object.fromEntries(Object.entries(ind.params ?? {}).filter(([k]) => k !== 'hard_stop'));
+  document.getElementById('imodp-json').value = JSON.stringify(cleanParams, null, 2);
+  document.getElementById('imodp-err').textContent = '';
+  switchParamTabP('form');
+  buildParamFormP(cleanParams);
+  document.getElementById('ind-modal-p').style.display = 'flex';
+}
+
+function closeIndModalP() { document.getElementById('ind-modal-p').style.display = 'none'; }
+
+function schemaDefaultsP(type) {
+  const schema = IND_SCHEMAS[type] ?? [];
+  const out = {};
+  schema.forEach(p => { if (p.d !== null) out[p.k] = p.d; });
+  return out;
+}
+
+function buildParamFormP(existing) {
+  const type = document.getElementById('imodp-type').value;
+  const schema = IND_SCHEMAS[type] ?? [];
+  const rows = document.getElementById('imodp-rows');
+  if (!schema.length) {
+    rows.innerHTML = '<div style="color:var(--txd);font-size:11px;padding:4px 0">No parameters for this indicator type.</div>';
+    return;
+  }
+  rows.innerHTML = schema.map(p => {
+    const val = existing[p.k] !== undefined ? existing[p.k] : (p.d !== null ? p.d : '');
+    let input;
+    if (p.t === 'bool') {
+      input = `<input type="checkbox" class="imodp-param-val" id="ipp-${p.k}" ${val ? 'checked' : ''}>`;
+    } else if (p.t === 'select') {
+      const opts = (p.o ?? []).map(o => `<option${o === val ? ' selected' : ''}>${o}</option>`).join('');
+      input = `<select class="imodp-param-val" id="ipp-${p.k}">${opts}</select>`;
+    } else {
+      const placeholder = p.d !== null ? String(p.d) : 'optional';
+      input = `<input type="number" step="any" class="imodp-param-val" id="ipp-${p.k}" value="${val !== '' && val !== null ? val : ''}" placeholder="${placeholder}">`;
+    }
+    return `<div class="imodp-param-row"><div class="imodp-param-key">${p.k}</div>${input}</div>`;
+  }).join('');
+}
+
+function switchParamTabP(tab) {
+  _paramTabP = tab;
+  document.getElementById('imodp-tab-form').classList.toggle('on', tab === 'form');
+  document.getElementById('imodp-tab-json').classList.toggle('on', tab === 'json');
+  document.getElementById('imodp-form-area').style.display = tab === 'form' ? '' : 'none';
+  document.getElementById('imodp-json-area').style.display = tab === 'json' ? '' : 'none';
+  if (tab === 'json') {
+    document.getElementById('imodp-json').value = JSON.stringify(readParamFormP(), null, 2);
+  } else {
+    try {
+      const parsed = JSON.parse(document.getElementById('imodp-json').value || '{}');
+      buildParamFormP(parsed);
+      document.getElementById('imodp-err').textContent = '';
+    } catch {}
+  }
+}
+
+function readParamFormP() {
+  const type = document.getElementById('imodp-type').value;
+  const schema = IND_SCHEMAS[type] ?? [];
+  const out = {};
+  schema.forEach(p => {
+    const el = document.getElementById('ipp-' + p.k);
+    if (!el) return;
+    if (p.t === 'bool') out[p.k] = el.checked;
+    else if (p.t === 'select') out[p.k] = el.value;
+    else { const v = el.value.trim(); if (v !== '') out[p.k] = parseFloat(v); }
+  });
+  return out;
+}
+
+function readParamsP() {
+  if (_paramTabP === 'json') {
+    try {
+      const parsed = JSON.parse(document.getElementById('imodp-json').value || '{}');
+      document.getElementById('imodp-err').textContent = '';
+      return { ok: true, params: parsed };
+    } catch (e) {
+      document.getElementById('imodp-err').textContent = 'Invalid JSON: ' + e.message;
+      return { ok: false };
+    }
+  }
+  return { ok: true, params: readParamFormP() };
+}
+
+async function saveIndP() {
+  const prof = _currentProfile?.name;
+  const { ok, params } = readParamsP();
+  if (!ok) return;
+  const body = {
+    category:       document.getElementById('imodp-cat').value,
+    indicator_type: document.getElementById('imodp-type').value,
+    params,
+    is_hard_stop:   document.getElementById('imodp-hardstop').checked,
+    enabled:        document.getElementById('imodp-enabled').checked,
+  };
+  try {
+    if (_indEditId == null) {
+      await api('/indicators/' + prof, { method: 'POST', body: JSON.stringify(body) });
+    } else {
+      await api('/indicators/' + prof + '/' + _indEditId, { method: 'PUT', body: JSON.stringify(body) });
+    }
+    closeIndModalP();
+    loadIndicatorsP();
+    showToast('Indicator saved');
+  } catch (e) {
+    document.getElementById('imodp-err').textContent = e.message;
+  }
+}
+
+async function quickToggleP(id) {
+  const prof = _currentProfile?.name;
+  const result = await api('/indicators/' + prof + '/' + id + '/toggle', { method: 'PATCH' }).catch(e => { showToast(e.message, true); return null; });
+  if (result) {
+    const idx = _indDataP.findIndex(i => i.id === id);
+    if (idx >= 0) _indDataP[idx] = result;
+    renderIndGridP();
+  }
+}
+
+async function deleteIndPById(id) {
+  if (!confirm('Delete this indicator? Cannot be undone.')) return;
+  const prof = _currentProfile?.name;
+  try {
+    await fetch(BASE + '/indicators/' + prof + '/' + id, {
+      method: 'DELETE', credentials: 'include',
+      headers: { 'X-API-Key': akey() ?? '' },
+    });
+    _indDataP = _indDataP.filter(i => i.id !== id);
+    renderIndGridP();
+    showToast('Indicator deleted');
+  } catch (e) { showToast(e.message, true); }
+}
+
+function deleteIndP() {
+  if (_indEditId != null) { closeIndModalP(); deleteIndPById(_indEditId); }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 function escHtml(s) {
