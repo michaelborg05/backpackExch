@@ -148,15 +148,10 @@ class PortfolioCache:
 
         if limit_summary:
             status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
-            result = f"\n<b>({display_name if display_name else profile_name}) \nTotal: ${portfolio.get('total_value')}</b> ({limit_summary['daily_pnl_pct']}) {status}\n"
+            result = f"({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')} ({limit_summary['daily_pnl_pct']}) {status}"
         else:
-            result = f"\n<b>({display_name if display_name else profile_name}) \nTotal: ${portfolio.get('total_value')}</b> \n"
+            result = f"({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')} "
 
-        for asset in portfolio.get("assets", []):
-            result += (
-                f" - {asset.get('asset')}: "
-                f"{asset.get('total')} → ${asset.get('total_value')}\n"
-            )
 
         return result
     def _is_zero_balance(self, asset_data: dict) -> bool:
