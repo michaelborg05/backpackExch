@@ -34,6 +34,7 @@ class TradingProfileDB(Base):
 
     trading_type =  Column(String, server_default="rules_live")
     strategy_type = Column(String, default=StrategyType.TREND_FOLLOWING.value)
+    market_type = Column(String, default="SPOT", server_default=text("'SPOT'"))  # "SPOT" | "PERP"
     
     # Timing & Signal Generation
     signal_timeframe = Column(String, default="15")
@@ -98,15 +99,17 @@ class Trade(Base):
     order_id = Column(String, index=True)
     symbol = Column(String, nullable=False)
     side = Column(String, nullable=False)
+    direction = Column(String, nullable=True)  # "LONG" | "SHORT"
     quantity = Column(Numeric(20, 8), nullable=False)
     price = Column(Numeric(20, 8), nullable=False)
     exchange = Column(String, default="backpack")
-    reason = Column(String, default=TradeReason.MANUAL, server_default=text("'MANUAL'")) 
+    reason = Column(String, default=TradeReason.MANUAL, server_default=text("'MANUAL'"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     reason_summary = Column(JSON, nullable=True)
 
     __table_args__ = (
         CheckConstraint("side IN ('BID', 'ASK')", name="valid_side"),
+        CheckConstraint("direction IN ('LONG', 'SHORT') OR direction IS NULL", name="valid_trade_direction"),
     )
 
 
@@ -117,12 +120,14 @@ class Position(Base):
     profile_name = Column(String, index=True)
     symbol = Column(String, nullable=False)
     
+    direction = Column(String, nullable=True, server_default=text("'LONG'"))  # "LONG" | "SHORT"
+
     quantity = Column(Numeric(20, 8), nullable=False, server_default=text("0"))  # Original quantity
     remaining_quantity = Column(Numeric(20, 8), nullable=False, server_default=text("0"))  # Amount still open
-    
-    buy_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
-    sell_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
-    
+
+    entry_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
+    exit_trade_id = Column(Integer, ForeignKey('trades.id'), nullable=True)
+
     entry_price = Column(Numeric(20, 8), nullable=False, server_default=text("0"))
     exit_price = Column(Numeric(20, 8), nullable=True)
 
@@ -152,11 +157,12 @@ class Position(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     closed_at = Column(DateTime(timezone=True))
 
-    buy_trade = relationship("Trade", foreign_keys=[buy_trade_id])
-    sell_trade = relationship("Trade", foreign_keys=[sell_trade_id])
+    entry_trade = relationship("Trade", foreign_keys=[entry_trade_id])
+    exit_trade = relationship("Trade", foreign_keys=[exit_trade_id])
 
     __table_args__ = (
         CheckConstraint("status IN ('OPEN', 'CLOSED')", name="valid_status"),
+        CheckConstraint("direction IN ('LONG', 'SHORT') OR direction IS NULL", name="valid_position_direction"),
         Index('ix_positions_profile_symbol_status', 'profile_name', 'symbol', 'status'),
         Index('ix_positions_opened_at', 'created_at'),
     )

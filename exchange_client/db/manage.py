@@ -87,7 +87,7 @@ def load_dummy_data():
             position = Position(
                     profile_name="1hr_MB", 
                     symbol="HYPE_USDC",
-                    buy_trade_id=trade.id,  # Use database Trade ID
+                    entry_trade_id=trade.id,  # Use database Trade ID
                     tp_price=26.02,
                     sl_price=23.02,
                     trailing_sl_price=23.60,

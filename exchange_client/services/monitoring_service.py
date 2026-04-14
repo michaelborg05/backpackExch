@@ -575,7 +575,6 @@ class MonitoringService:
                 f"[{profile.name}] Reason: {reason}"
             )
 
-            # Execute sell order with "MAX" to ensure we sell everything
             result = adapter.order_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -593,7 +592,7 @@ class MonitoringService:
                 )
                 
                 # Calculate profit/loss
-                entry_price = float(position.buy_trade.price)
+                entry_price = float(position.entry_trade.price)
                 exit_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
                 quantity_sold = float(result.executed_quantity)
                 profit = (exit_price - entry_price) * quantity_sold

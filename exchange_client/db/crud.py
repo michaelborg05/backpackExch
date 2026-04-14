@@ -96,7 +96,7 @@ def open_position(
     position = Position(
         profile_name=trade.profile_name,
         symbol=trade.symbol,
-        buy_trade_id=trade.id,  # Use database Trade ID
+        entry_trade_id=trade.id,  # Use database Trade ID
         quantity=Decimal(trade.quantity),  # ⭐ Track quantity
         remaining_quantity=Decimal(trade.quantity),  # ⭐ Initially equals quantity
         entry_price=Decimal(trade.price),
@@ -189,7 +189,7 @@ def close_position(
     if not position:
         raise ValueError(f"Position {position_id} not found")
     
-    position.sell_trade_id = sell_trade.id
+    position.exit_trade_id = sell_trade.id
     position.status = "CLOSED"
     position.close_reason = reason
     position.closed_at = datetime.now(timezone.utc)
@@ -325,7 +325,7 @@ def close_positions_fifo(
         
         if position.remaining_quantity <= Decimal('0.00000001'):  # Fully closed
             position.status = 'CLOSED'
-            position.sell_trade_id = sell_trade.id
+            position.exit_trade_id = sell_trade.id
             position.exit_price = exit_price
             position.profit = profit
             position.closed_at = datetime.now(timezone.utc)
