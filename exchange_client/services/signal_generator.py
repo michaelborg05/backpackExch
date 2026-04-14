@@ -71,7 +71,10 @@ class SignalGenerator:
 
         # AI_AGENT: lazy-load handler (only instantiated if strategy_type matches)
         self._ai_handler: Optional[AISignalHandler] = None
-        
+
+        # Profile trade direction: "LONG" or "SHORT"
+        self.direction: str = getattr(profile, 'direction', 'LONG') or 'LONG'
+
         # Thresholds
         self.min_volume_ratio = getattr(profile, 'min_volume_ratio', 1.5)
         self.min_confidence = getattr(profile, 'min_signal_confidence', 70.0)
@@ -133,8 +136,11 @@ class SignalGenerator:
             return None
 
         # 1. BALANCE CHECK
+        # For SHORT profiles the entry is an ASK (SELL); validate_balance_for_trade
+        # handles PERP market_type by always checking USDC regardless of sale_action.
+        balance_action = "SELL" if self.direction == "SHORT" else "BUY"
         is_valid, balance_error = self._adapter.validate_balance_for_trade(
-            sale_action="BUY",
+            sale_action=balance_action,
             symbol=symbol
         )
         
@@ -191,6 +197,9 @@ class SignalGenerator:
                     f"{symbol}: Re-entry OK - {reentry_reason}"
                 )
                        
+        # Determine direction for this signal
+        signal_direction = TradeSide.SHORT if self.direction == "SHORT" else TradeSide.LONG
+
         # Initialize scoring
         reasons = []
         indicators = {}
@@ -199,7 +208,7 @@ class SignalGenerator:
             symbol=symbol,
             signal_timeframe=self.trading_timeframe,
             strategy_type=self.strategy_type.value,
-            order_type=TradeSide.BUY,
+            order_type=signal_direction,
             score=0.0,
             score_components=0,
             market_context=MarketContext(),
@@ -448,7 +457,7 @@ class SignalGenerator:
         # Create signal
         signal = TradingSignal(
             symbol=symbol,
-            action=TradeSide.BUY,
+            action=signal_direction,
             strength=strength,
             source=trade_source,
             confidence=confidence_pct,
@@ -463,7 +472,7 @@ class SignalGenerator:
         )
 
         self.logger.info(
-            f"🎯 SIGNAL GENERATED [{self.strategy_type}]: {symbol} | "
+            f"🎯 SIGNAL GENERATED [{self.strategy_type}] {signal_direction.value}: {symbol} | "
             f"Strength: {strength.value} | "
             f"Confidence: {confidence_pct:.1f}% | "
             f"Size scalar: {position_size_scalar:.2f}x"
@@ -503,6 +512,8 @@ class SignalGenerator:
         Shadow mode (default): rules decision controls live execution.
         AI_LIVE mode: AI decision controls live execution.
         """
+
+        signal_direction = TradeSide.SHORT if self.direction == "SHORT" else TradeSide.LONG
 
         # Build gate context from what we already have in cache
         trend_60m = self.trend_cache.get(symbol, self.trend_timeframe)
@@ -756,7 +767,7 @@ class SignalGenerator:
 
         signal = TradingSignal(
             symbol=symbol,
-            action=TradeSide.BUY,
+            action=signal_direction,
             strength=strength,
             source=trade_source,
             confidence=confidence_pct,

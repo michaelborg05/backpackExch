@@ -439,7 +439,8 @@ class TradingService:
 
 
     def get_open_orders(self, symbol: Optional[str] = None):
-        query_params = {"marketType": "SPOT"}
+        market_type = getattr(self.profile, 'market_type', 'SPOT') or 'SPOT'
+        query_params = {"marketType": market_type}
 
         if symbol:
             query_params["symbol"] = symbol
@@ -735,21 +736,28 @@ class TradingService:
             if order_response is None:
                 return None
             
-            # If order was successful, save to DB
-            saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary)
+            # Determine direction: no position_id = opening trade; position_id = closing trade
+            side_upper = order_response.side.upper()
+            is_opening = position_id is None
+            is_long_entry = side_upper == "BID" and is_opening
+            is_short_entry = side_upper == "ASK" and is_opening
+            direction = "LONG" if (side_upper == "BID") else "SHORT"
+
+            # If order was successful, save to DB (with direction)
+            saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary, direction=direction if is_opening else None)
             self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
             if validation_summary:
                 add_validation_result(db, saved_trade, validation_summary=validation_summary)
 
-            # Open position if this is a BUY order
-            if order_response.side.upper() == "BID":
+            # Open LONG position on BID entry
+            if is_long_entry:
                 # Calculate position prices based on profile settings
                 tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
                     entry_price=saved_trade.price,
                     side=saved_trade.side,
-                    profile=self.profile  # You'll need to store the profile object
+                    profile=self.profile
                 )
-                
+
                 # Open the position
                 position = open_position(
                     db=db,
@@ -758,10 +766,11 @@ class TradingService:
                     sl_price=sl_price,
                     trailing_sl_price=trailing_sl_price,
                     highest_price=saved_trade.price,
-                    lowest_price=saved_trade.price
+                    lowest_price=saved_trade.price,
+                    direction="LONG",
                 )
                 self.logger.info(
-                    f"Position opened: ID {position.id}, "
+                    f"LONG position opened: ID {position.id}, "
                     f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
                 )
                 #give 0.5 second delay to let exchange balances update after buy
@@ -787,7 +796,33 @@ class TradingService:
                        f"Price: {tp_order.price}, Quantity: {tp_order.quantity}"
                    )
 
-            else:
+            # Open SHORT position on ASK entry (PERP profiles only)
+            elif is_short_entry:
+                tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
+                    entry_price=saved_trade.price,
+                    side=saved_trade.side,  # "ASK" → short branch in calculator
+                    profile=self.profile
+                )
+
+                position = open_position(
+                    db=db,
+                    trade=saved_trade,
+                    tp_price=tp_price,
+                    sl_price=sl_price,
+                    trailing_sl_price=trailing_sl_price,
+                    highest_price=saved_trade.price,
+                    lowest_price=saved_trade.price,
+                    direction="SHORT",
+                )
+                self.logger.info(
+                    f"SHORT position opened: ID {position.id}, "
+                    f"TP: {tp_price}, SL: {sl_price}, Trailing: {trailing_sl_price}"
+                )
+                import time
+                time.sleep(0.5)
+                self._refresh_balance_cache_after_trade(order_response)
+
+            else:  # Closing trade (ASK closes LONG, BID closes SHORT)
                 from db.crud import close_positions_fifo
                 if position_id:
                     try:
@@ -799,23 +834,25 @@ class TradingService:
                             reason=source
                         )
 
+                        # Direction-aware P/L
+                        pos_is_long = (closed_position.direction or "LONG") != "SHORT"
+                        entry_price = closed_position.entry_price
+                        exit_price = saved_trade.price
+                        quantity = saved_trade.quantity
+                        if pos_is_long:
+                            profit = (exit_price - entry_price) * quantity
+                            profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                        else:
+                            profit = (entry_price - exit_price) * quantity
+                            profit_pct = ((entry_price - exit_price) / entry_price) * 100
+
                         closed_positions = [{
                             'position_id': closed_position.id,
                             'status': 'FULLY_CLOSED',
                             'closed_quantity': closed_position.quantity,
                             'profit': closed_position.profit,
-                            'profit_pct': (
-                                (closed_position.exit_price - closed_position.entry_price)
-                                / closed_position.entry_price
-                            ) * 100
-                        }]                                
-                        
-                        # Calculate P/L for logging
-                        entry_price = closed_position.entry_price
-                        exit_price = saved_trade.price
-                        quantity = saved_trade.quantity
-                        profit = (exit_price - entry_price) * quantity
-                        profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                            'profit_pct': profit_pct,
+                        }]
                         
                         self.logger.info(
                             f"Closed position {position_id}: {closed_position.symbol}, "
@@ -1012,11 +1049,14 @@ class TradingService:
         """
         
         # Parse symbol to get base asset
-        #If sell, get first token, if buy get 2nd token
+        # For PERP markets, collateral is always USDC regardless of direction
+        is_perp = getattr(self.profile, 'market_type', 'SPOT') == 'PERP'
         try:
-            if sale_action.upper() == "SELL":
+            if sale_action.upper() == "SELL" and not is_perp:
+                # SPOT sell: check base asset balance (e.g. SOL in SOL_USDC)
                 base_asset = symbol.split('_')[0]
             else:
+                # SPOT buy or any PERP trade: check quote (USDC) balance
                 base_asset = symbol.split('_')[1]
         except Exception:
             return True, None  # Let trading_builder handle invalid symbols

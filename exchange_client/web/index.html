@@ -374,6 +374,8 @@
               <div class="form-grid">
                 <div class="field"><label>Trading Type</label><select id="f-trading_type"><option value="rules_live">Rules Live</option><option value="shadow">Shadow (AI paper)</option><option value="ai_live">AI Live</option></select></div>
                 <div class="field"><label>Strategy Type</label><select id="f-strategy_type"><option value="trend_following">Trend Following</option><option value="mean_reversion">Mean Reversion</option><option value="range_trading">Range Trading</option></select></div>
+                <div class="field"><label>Market Type</label><select id="f-market_type"><option value="SPOT">Spot</option><option value="PERP">Perpetual (PERP)</option></select></div>
+                <div class="field"><label>Direction</label><select id="f-direction"><option value="LONG">Long</option><option value="SHORT">Short</option></select></div>
               </div>
             </div>
             <div class="form-section">
@@ -516,6 +518,8 @@
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div class="form-row" style="margin-bottom:0"><label>Strategy Type</label><select id="cm-strategy"><option value="trend_following">Trend Following</option><option value="mean_reversion">Mean Reversion</option><option value="range_trading">Range Trading</option></select></div>
             <div class="form-row" style="margin-bottom:0"><label>Trading Type</label><select id="cm-trading"><option value="rules_live">Rules Live</option><option value="shadow">Shadow</option><option value="ai_live">AI Live</option></select></div>
+            <div class="form-row" style="margin-bottom:0"><label>Market Type</label><select id="cm-market_type"><option value="SPOT">Spot</option><option value="PERP">Perpetual (PERP)</option></select></div>
+            <div class="form-row" style="margin-bottom:0"><label>Direction</label><select id="cm-direction"><option value="LONG">Long</option><option value="SHORT">Short</option></select></div>
           </div>
           <div class="form-err" id="cm-err"></div>
         </div>
@@ -1560,10 +1564,12 @@ function renderSidebar() {
   el.innerHTML = _allProfiles.map(p => {
     const tradingBadge = tradingTypeBadge(p.trading_type);
     const stratBadge = `<span class="pi-badge pb-off">${(p.strategy_type || '').replace('_', ' ')}</span>`;
+    const dirBadge = p.direction === 'SHORT' ? '<span class="pi-badge pb-off" style="color:#f87171">SHORT</span>' : '';
+    const mktBadge = p.market_type && p.market_type !== 'SPOT' ? `<span class="pi-badge pb-shadow">${p.market_type}</span>` : '';
     const activeBadge = !p.is_active ? '<span class="pi-badge pb-off">inactive</span>' : '';
     return `<div class="profile-item${_currentProfile?.name === p.name ? ' active' : ''}" onclick="selectProfile('${p.name}')">
       <div class="pi-name">${p.display_name}</div>
-      <div class="pi-badges">${tradingBadge}${stratBadge}${activeBadge}</div>
+      <div class="pi-badges">${tradingBadge}${stratBadge}${dirBadge}${mktBadge}${activeBadge}</div>
     </div>`;
   }).join('');
 }
@@ -1596,6 +1602,8 @@ function showProfileDetail() {
   document.getElementById('ph-badges').innerHTML =
     tradingTypeBadge(p.trading_type) +
     `<span class="pi-badge pb-off" style="margin-left:4px">${(p.strategy_type || '').replace('_', ' ')}</span>` +
+    (p.market_type && p.market_type !== 'SPOT' ? `<span class="pi-badge pb-shadow" style="margin-left:4px">${p.market_type}</span>` : '') +
+    (p.direction === 'SHORT' ? '<span class="pi-badge pb-off" style="margin-left:4px;color:#f87171">SHORT</span>' : '') +
     (!p.is_active ? '<span class="pi-badge pb-off" style="margin-left:4px">inactive</span>' : '');
   fillSettings(p);
   fillCB(p.circuit_breaker);
@@ -1617,6 +1625,8 @@ function fillSettings(p) {
   set('f-display_name', p.display_name);
   set('f-trading_type', p.trading_type);
   set('f-strategy_type', p.strategy_type);
+  set('f-market_type', p.market_type);
+  set('f-direction', p.direction);
   set('f-take_profit_pct', p.take_profit_pct);
   set('f-stop_loss_pct', p.stop_loss_pct);
   set('f-trailing_stop_pct', p.trailing_stop_pct);
@@ -1735,6 +1745,8 @@ async function saveSettings() {
     display_name:                   getStr('f-display_name'),
     trading_type:                   getStr('f-trading_type'),
     strategy_type:                  getStr('f-strategy_type'),
+    market_type:                    getStr('f-market_type'),
+    direction:                      getStr('f-direction'),
     take_profit_pct:                getNum('f-take_profit_pct'),
     stop_loss_pct:                  getNum('f-stop_loss_pct'),
     trailing_stop_pct:              getNum('f-trailing_stop_pct'),
@@ -1876,6 +1888,8 @@ async function createProfile() {
         display_name:  display,
         strategy_type: document.getElementById('cm-strategy').value,
         trading_type:  document.getElementById('cm-trading').value,
+        market_type:   document.getElementById('cm-market_type').value,
+        direction:     document.getElementById('cm-direction').value,
       })
     });
     closeCreateModal();

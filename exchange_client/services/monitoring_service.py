@@ -1093,13 +1093,16 @@ class MonitoringService:
         """Execute a trading signal"""
         adapter = get_adapter(profile)
 
-        if signal.action != "BUY":
-            self.logger.debug(f"[{profile.name}] Ignoring non-BUY signal")
+        is_long_signal = signal.action in ("BUY", "LONG")
+        is_short_signal = signal.action in ("SELL", "SHORT")
+
+        if not is_long_signal and not is_short_signal:
+            self.logger.debug(f"[{profile.name}] Ignoring unrecognised signal action: {signal.action}")
             return
         
         self.logger.info(
             f"[{profile.name}] 🎯 EXECUTING SIGNAL: {signal.symbol} "
-            f"({signal.strength.name}, {signal.confidence:.1f}%)"
+            f"({signal.strength.name}, {signal.confidence:.1f}%) {signal.action.value}"
         )
         
         try:
@@ -1142,15 +1145,20 @@ class MonitoringService:
                     )
                     return
 
-            # Execute market buy
-            result = adapter.order_buy(
+            # Execute market order (direction-aware)
+            order_kwargs = dict(
                 symbol=signal.symbol,
                 quantity=str(quantity),
                 source=f"SIGNAL_{signal.strength.name}",
                 profile_name=profile.name,
                 reason_summary=signal.reasons,
-                validation_summary=signal.validation_details
+                validation_summary=signal.validation_details,
             )
+            if is_long_signal:
+                result = adapter.order_buy(**order_kwargs)
+            else:
+                # SHORT: open via order_sell with no position_id (entry, not close)
+                result = adapter.order_sell(**order_kwargs)
             
             if result:
 

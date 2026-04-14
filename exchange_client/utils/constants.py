@@ -10,6 +10,8 @@ class HttpMethod(str, Enum):
 class TradeSide(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
+    LONG = "LONG"    # Alias for BUY — used as signal direction
+    SHORT = "SHORT"  # Alias for SELL — used as signal direction
 
 class Side(str, Enum):
     BID = "Bid"

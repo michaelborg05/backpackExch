@@ -15,8 +15,6 @@ class TradingProfileDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)
     display_name = Column(String, unique=True, nullable=False, index=True)
-    api_key = Column(String, nullable=True)   # deprecated — credentials now live on ExchangeAccount
-    secret = Column(String, nullable=True)    # deprecated — credentials now live on ExchangeAccount
     
     # Position management
     take_profit_pct = Column(Numeric, nullable=True)
@@ -35,6 +33,7 @@ class TradingProfileDB(Base):
     trading_type =  Column(String, server_default="rules_live")
     strategy_type = Column(String, default=StrategyType.TREND_FOLLOWING.value)
     market_type = Column(String, default="SPOT", server_default=text("'SPOT'"))  # "SPOT" | "PERP"
+    direction = Column(String, default="LONG", server_default=text("'LONG'"))    # "LONG" | "SHORT"
     
     # Timing & Signal Generation
     signal_timeframe = Column(String, default="15")

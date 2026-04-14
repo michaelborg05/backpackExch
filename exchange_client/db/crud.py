@@ -9,9 +9,9 @@ from models.trade import OrderResponse, OrderHistoryResponse
 from models.trading_profile import TradingProfile
 from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig, TradeValidationResults
 
-def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None) -> Trade:
+def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None, direction: str = None) -> Trade:
     """Save a trade to the database"""
-    
+
     if order.price is None or order.price == "0":
         # Calculate average price from executed values
         unit_price = Decimal(order.executed_quote_quantity) / Decimal(order.executed_quantity)
@@ -23,6 +23,7 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
         order_id=str(order.id),
         symbol=order.symbol,
         side=order.side.upper(),
+        direction=direction,
         quantity=Decimal(str(order.executed_quantity)),
         price=Decimal(str(unit_price)),
         exchange="backpack",
@@ -84,18 +85,20 @@ def save_order(db: Session, order: OrderResponse, profile_name: str, position_id
     return order
 
 def open_position(
-    db: Session, 
+    db: Session,
     trade: Trade,  # Changed: accept Trade object, not OrderResponse
     tp_price: Optional[Decimal] = None,
     sl_price: Optional[Decimal] = None,
     trailing_sl_price: Optional[Decimal] = None,
-    highest_price: Optional[Decimal] = None,       
-    lowest_price: Optional[Decimal] = None
+    highest_price: Optional[Decimal] = None,
+    lowest_price: Optional[Decimal] = None,
+    direction: str = "LONG",
 ) -> Position:
     """Open a new position"""
     position = Position(
         profile_name=trade.profile_name,
         symbol=trade.symbol,
+        direction=direction,
         entry_trade_id=trade.id,  # Use database Trade ID
         quantity=Decimal(trade.quantity),  # ⭐ Track quantity
         remaining_quantity=Decimal(trade.quantity),  # ⭐ Initially equals quantity
