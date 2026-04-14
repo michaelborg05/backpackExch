@@ -354,47 +354,63 @@ class MonitoringService:
 
                     price = float(price)
                     entry_price = float(position.entry_price)
+                    is_long = (position.direction or "LONG") != "SHORT"
 
-                    # Calculate current profit percentage
-                    profit_pct = ((price - entry_price) / entry_price) * 100
+                    # Calculate current profit percentage (direction-aware)
+                    if is_long:
+                        profit_pct = ((price - entry_price) / entry_price) * 100
+                    else:
+                        profit_pct = ((entry_price - price) / entry_price) * 100
 
-                    # TAKE PROFIT
-                    if position.tp_price and price >= float(position.tp_price):
-                        self.logger.info(f"TP hit for {symbol} @ {price} [{profile.name}]")
-                        #self._send_telegram(f"🎯 TP hit for {symbol} @ {price} [{profile.name}]")
-                        self._execute_close(db, position, profile, reason="TAKE_PROFIT")
-                        continue
+                    # TAKE PROFIT (direction-aware)
+                    if position.tp_price:
+                        tp = float(position.tp_price)
+                        tp_hit = (is_long and price >= tp) or (not is_long and price <= tp)
+                        if tp_hit:
+                            self.logger.info(f"TP hit for {symbol} @ {price} [{profile.name}]")
+                            #self._send_telegram(f"🎯 TP hit for {symbol} @ {price} [{profile.name}]")
+                            self._execute_close(db, position, profile, reason="TAKE_PROFIT")
+                            continue
 
-                    # STOP LOSS
-                    if position.sl_price and price <= float(position.sl_price):
-                        self.logger.info(f"SL hit for {symbol} @ {price} [{profile.name}]")
-                        #self._send_telegram(f"🛑 SL hit for {symbol} @ {price} [{profile.name}]")
-                        self._execute_close(db, position, profile, reason="STOP_LOSS")
-                        continue
+                    # STOP LOSS (direction-aware)
+                    if position.sl_price:
+                        sl = float(position.sl_price)
+                        sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
+                        if sl_hit:
+                            self.logger.info(f"SL hit for {symbol} @ {price} [{profile.name}]")
+                            #self._send_telegram(f"🛑 SL hit for {symbol} @ {price} [{profile.name}]")
+                            self._execute_close(db, position, profile, reason="STOP_LOSS")
+                            continue
 
                     # TRAILING STOP LOGIC with ARM THRESHOLD
                     if profile.use_trailing_stop:
                         # Get the arm threshold (default to 50% of TP if not specified)
                         arm_threshold_pct = float(getattr(
-                            profile, 
-                            'arm_trailing_stop_pct', 
+                            profile,
+                            'arm_trailing_stop_pct',
                             float(profile.take_profit_pct) * 0.5
                         ))
-                        
+
                         # Check if trailing stop should be armed
                         # Once armed, it stays armed for the life of the position
                         if not position.trailing_stop_armed and profit_pct >= arm_threshold_pct:
                             # ARM the trailing stop for the first time
                             position.trailing_stop_armed = True
                             if position.trailing_sl_price is None:
-                                # Set initial Trailing stop loss price to arm threshold
+                                # Set initial trailing stop loss price at arm threshold (direction-aware)
                                 trailing_pct = float(profile.trailing_stop_pct)
-                                position.trailing_sl_price = max(
-                                    float(price) * (1 - trailing_pct / 100),
-                                    float(position.entry_price) * 1.0005  # +0.05%
-                                )
+                                if is_long:
+                                    position.trailing_sl_price = max(
+                                        float(price) * (1 - trailing_pct / 100),
+                                        float(position.entry_price) * 1.0005  # +0.05%
+                                    )
+                                else:
+                                    position.trailing_sl_price = min(
+                                        float(price) * (1 + trailing_pct / 100),
+                                        float(position.entry_price) * 0.9995  # -0.05%
+                                    )
                             db.commit()
-                            
+
                             self.logger.info(
                                 f"🎣 Trailing stop ARMED for {symbol} at {profit_pct:.2f}% profit "
                                 f"(threshold: {arm_threshold_pct:.2f}%) [{profile.name}]"
@@ -403,40 +419,59 @@ class MonitoringService:
                             #    f"🎣 Trailing stop ARMED for {symbol} at {profit_pct:.2f}% profit [{profile.name}]",
                             #    MessagePriority.NORMAL
                             #)
-                        
+
                         # Only process trailing stop logic if it's been armed
                         if position.trailing_stop_armed:
-                            highest = float(position.highest_price or 0)
+                            trailing_pct = float(profile.trailing_stop_pct)
 
-                            # Update highest price and trailing stop if new high
-                            if price > highest:
-                                new_high = price
-                                trailing_pct = float(profile.trailing_stop_pct)
-                                new_trailing_sl = max(float(price) * (1 - trailing_pct / 100), float(position.entry_price) * 1.0005)  # +0.05%
-
-                                update_position_trailing_stop(
-                                    db,
-                                    position.id,
-                                    highest_price=new_high,
-                                    trailing_sl_price=new_trailing_sl,
-                                )
-
-                                self.logger.debug(
-                                    f"Updated trailing SL for {symbol}: {new_trailing_sl:.4f} "
-                                    f"(profit: {profit_pct:.2f}%) [{profile.name}]"
-                                )
-                            
-                            # Check if trailing stop was hit
-                            elif price <= float(position.trailing_sl_price):
-                                self.logger.info(
-                                    f"Trailing SL hit for {symbol} @ {price} "
-                                    f"(profit: {profit_pct:.2f}%) [{profile.name}]"
-                                )
-                                #self._send_telegram(
-                                #    f"📉 Trailing SL hit for {symbol} @ {price} "
-                                #    f"(profit: {profit_pct:+.2f}%) [{profile.name}]"
-                                #)
-                                self._execute_close(db, position, profile, reason="TRAILING_STOP")
+                            if is_long:
+                                # Long: trail up — watermark is highest_price
+                                watermark = float(position.highest_price or 0)
+                                if price > watermark:
+                                    new_watermark = price
+                                    new_trailing_sl = max(
+                                        float(price) * (1 - trailing_pct / 100),
+                                        float(position.entry_price) * 1.0005  # +0.05%
+                                    )
+                                    update_position_trailing_stop(
+                                        db, position.id,
+                                        highest_price=new_watermark,
+                                        trailing_sl_price=new_trailing_sl,
+                                    )
+                                    self.logger.debug(
+                                        f"Updated trailing SL for {symbol}: {new_trailing_sl:.4f} "
+                                        f"(profit: {profit_pct:.2f}%) [{profile.name}]"
+                                    )
+                                elif price <= float(position.trailing_sl_price):
+                                    self.logger.info(
+                                        f"Trailing SL hit for {symbol} @ {price} "
+                                        f"(profit: {profit_pct:.2f}%) [{profile.name}]"
+                                    )
+                                    self._execute_close(db, position, profile, reason="TRAILING_STOP")
+                            else:
+                                # Short: trail down — watermark is lowest_price
+                                watermark = float(position.lowest_price or float('inf'))
+                                if price < watermark:
+                                    new_watermark = price
+                                    new_trailing_sl = min(
+                                        float(price) * (1 + trailing_pct / 100),
+                                        float(position.entry_price) * 0.9995  # -0.05%
+                                    )
+                                    update_position_trailing_stop(
+                                        db, position.id,
+                                        highest_price=new_watermark,  # reusing column for lowest watermark
+                                        trailing_sl_price=new_trailing_sl,
+                                    )
+                                    self.logger.debug(
+                                        f"Updated trailing SL for {symbol}: {new_trailing_sl:.4f} "
+                                        f"(profit: {profit_pct:.2f}%) [{profile.name}]"
+                                    )
+                                elif price >= float(position.trailing_sl_price):
+                                    self.logger.info(
+                                        f"Trailing SL hit for {symbol} @ {price} "
+                                        f"(profit: {profit_pct:.2f}%) [{profile.name}]"
+                                    )
+                                    self._execute_close(db, position, profile, reason="TRAILING_STOP")
                         else:
                             # Trailing stop not armed yet - log if price is close
                             remaining_to_arm = arm_threshold_pct - profit_pct
@@ -591,12 +626,17 @@ class MonitoringService:
                     f"[{profile.name}] Quantity: {result.executed_quantity}"
                 )
                 
-                # Calculate profit/loss
+                # Calculate profit/loss (direction-aware)
                 entry_price = float(position.entry_trade.price)
                 exit_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
                 quantity_sold = float(result.executed_quantity)
-                profit = (exit_price - entry_price) * quantity_sold
-                profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                is_long = (position.direction or "LONG") != "SHORT"
+                if is_long:
+                    profit = (exit_price - entry_price) * quantity_sold
+                    profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                else:
+                    profit = (entry_price - exit_price) * quantity_sold
+                    profit_pct = ((entry_price - exit_price) / entry_price) * 100
 
                 # ← NEW: resolve the AI signal outcome if this position was
                 # opened from an AI_AGENT signal
