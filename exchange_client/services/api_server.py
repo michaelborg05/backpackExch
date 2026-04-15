@@ -2770,7 +2770,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "min_signal_confidence", "min_volume_ratio",
         "trend_timeframe", "entry_timeframe",
         "use_market_regime_filter", "use_trend_filter",
-        "use_entry_filter", "use_atr_filter",
+        "use_entry_filter", "use_atr_filter", "enable_signal_generation",
         "min_indicators_required", "min_entry_indicators_required",
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
         "min_position_age_for_trend_check", "max_position_hours",
@@ -3034,6 +3034,7 @@ def _serialize_profile(p, cb=None) -> dict:
         "use_trend_filter":            bool(p.use_trend_filter),
         "use_entry_filter":            bool(p.use_entry_filter),
         "use_atr_filter":              bool(p.use_atr_filter),
+        "enable_signal_generation":    bool(p.enable_signal_generation) if p.enable_signal_generation is not None else False,
 
         # Indicator thresholds
         "min_indicators_required":     p.min_indicators_required,

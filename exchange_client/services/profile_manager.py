@@ -335,7 +335,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             # ATR filter
             "use_atr_filter": bool(row.use_atr_filter),
             # Signal generation
-            "enable_signal_generation": True,   # all DB profiles are active
+            "enable_signal_generation": bool(row.enable_signal_generation),
             "signal_timeframe": row.signal_timeframe or "15m",
             "signal_cooldown_seconds": row.signal_cooldown_seconds or 900,
             "min_signal_confidence": row.min_signal_confidence or 75,

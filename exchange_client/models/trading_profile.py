@@ -209,6 +209,7 @@ class ProfileUpdateRequest(BaseModel):
     use_trend_filter: Optional[bool] = None
     use_entry_filter: Optional[bool] = None
     use_atr_filter: Optional[bool] = None
+    enable_signal_generation: Optional[bool] = None
 
     min_indicators_required: Optional[int] = None
     min_entry_indicators_required: Optional[int] = None

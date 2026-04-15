@@ -46,6 +46,7 @@ class TradingProfileDB(Base):
     use_trend_filter = Column(Boolean, default=True)
     use_entry_filter = Column(Boolean, default=True)
     use_atr_filter = Column(Boolean, default=False)
+    enable_signal_generation = Column(Boolean, default=False, server_default=text("false"))
     
     # Logic Settings
     trend_timeframe = Column(String, default="60")

@@ -414,6 +414,7 @@
             <div class="form-section">
               <div class="section-title">Filter Toggles</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 24px">
+                <div class="toggle-row"><input type="checkbox" id="f-enable_signal_generation"><div><div class="toggle-label">Signal Generation</div><div class="toggle-sub">Enable automated signal scanning for this profile</div></div></div>
                 <div class="toggle-row"><input type="checkbox" id="f-use_market_regime_filter"><div><div class="toggle-label">Market Regime Filter</div><div class="toggle-sub">Block trades in choppy/high-risk conditions</div></div></div>
                 <div class="toggle-row"><input type="checkbox" id="f-use_trend_filter"><div><div class="toggle-label">Trend Filter (HTF)</div><div class="toggle-sub">Require bullish 60m trend before entry</div></div></div>
                 <div class="toggle-row"><input type="checkbox" id="f-use_entry_filter"><div><div class="toggle-label">Entry Filter (LTF)</div><div class="toggle-sub">Require entry indicators on signal TF</div></div></div>
@@ -1642,6 +1643,7 @@ function fillSettings(p) {
   set('f-signal_cooldown_seconds', p.signal_cooldown_seconds);
   set('f-min_signal_confidence', p.min_signal_confidence);
   set('f-min_volume_ratio', p.min_volume_ratio);
+  set('f-enable_signal_generation', p.enable_signal_generation);
   set('f-use_market_regime_filter', p.use_market_regime_filter);
   set('f-use_trend_filter', p.use_trend_filter);
   set('f-use_entry_filter', p.use_entry_filter);
@@ -1762,6 +1764,7 @@ async function saveSettings() {
     signal_cooldown_seconds:        getInt('f-signal_cooldown_seconds'),
     min_signal_confidence:          getNum('f-min_signal_confidence'),
     min_volume_ratio:               getNum('f-min_volume_ratio'),
+    enable_signal_generation:       getBool('f-enable_signal_generation'),
     use_market_regime_filter:       getBool('f-use_market_regime_filter'),
     use_trend_filter:               getBool('f-use_trend_filter'),
     use_entry_filter:               getBool('f-use_entry_filter'),
