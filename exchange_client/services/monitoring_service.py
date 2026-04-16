@@ -932,38 +932,37 @@ class MonitoringService:
             
     def _convert_dust(self):
         """
-        Convert dust to USDC for all profiles
+        Convert dust to USDC for all active Backpack exchange accounts
         Runs periodically (default: every 6 hours)
         """
         try:
             self.logger.info("🧹 Starting periodic dust conversion...")
-            
-            # Convert dust for all profiles
-            results = self.dust_converter.convert_dust_all_profiles()
-            
+
+            results = self.dust_converter.convert_dust_all_accounts()
+
             # Count successes and log summary
             successful = sum(1 for r in results.values() if r is not None)
             total = len(results)
-            
+
             if successful > 0:
                 self.logger.info(
-                    f"✅ Dust conversion complete: {successful}/{total} profiles"
+                    f"✅ Dust conversion complete: {successful}/{total} accounts"
                 )
-                
+
                 # Send Telegram notification with summary
                 self._send_telegram(
                     f"🧹 Dust conversion complete\n"
-                    f"Converted dust for {successful}/{total} profiles",
+                    f"Converted dust for {successful}/{total} accounts",
                     MessagePriority.NORMAL
                 )
             else:
-                self.logger.info("No dust to convert for any profile")
-            
+                self.logger.info("No dust to convert for any account")
+
             # Refresh balances after conversion to update cache
             if successful > 0:
                 self.logger.debug("Refreshing balances after dust conversion...")
                 self._monitor_balances()
-            
+
         except Exception as e:
             self.logger.error(f"Error converting dust: {e}", exc_info=True)
             self._send_telegram(
