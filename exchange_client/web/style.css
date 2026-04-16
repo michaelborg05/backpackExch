@@ -297,6 +297,7 @@ main{padding:20px 24px;position:relative;z-index:1;flex:1;display:flex;flex-dire
 .pi-badges{display:flex;gap:5px;flex-wrap:wrap}
 .pi-badge{font-size:9px;padding:1px 6px;border:1px solid;letter-spacing:.06em;text-transform:uppercase}
 .pb-live{border-color:rgba(0,255,157,.3);color:var(--grn);background:rgba(0,255,157,.06)}
+.pb-paused{border-color:rgba(255,204,0,.3);color:#e6b800;background:rgba(255,204,0,.06)}
 .pb-shadow{border-color:rgba(255,204,0,.3);color:var(--warn);background:rgba(255,204,0,.06)}
 .pb-ai{border-color:rgba(0,212,255,.3);color:var(--acc);background:rgba(0,212,255,.06)}
 .pb-off{border-color:rgba(90,122,150,.3);color:var(--txd);background:transparent}
