@@ -82,17 +82,6 @@ SWING_VARIANTS = {
         "min_entry_indicators_required": 4,
     },
 
-    # -------------------------------------------------------------------------
-    # V13: RAISED BB THRESHOLD + EXTENDED LOOKBACK
-    #
-    # Rather than removing BB entirely, raise the pct_b hard stop from 0.85
-    # to 1.10 — price must actually be 10% above the BB upper to be blocked.
-    # In a post-crash recovery this is the real "extended" zone. At pct_b 0.85–
-    # 1.05 the price is just catching up to the mean, not truly overbought.
-    #
-    # Also: extend 60m rsi_reversal lookback to 15 candles (15 hours) to
-    # reliably find the original crash event from across the 4h candle.
-    # -------------------------------------------------------------------------
     "p3_v3_higher_low": {
         **_SWING_BASE,
         "take_profit_pct": 4,
@@ -181,194 +170,190 @@ SWING_VARIANTS = {
         "min_entry_indicators_required": 3,
     },
 
-    "p3_v18_momentum_continuation": {
+    
+    # =============================================================================
+    # p3_v19_tight_pullback
+    #
+    # WHAT IT TARGETS:
+    #   The "healthy pullback within an uptrend" — 4hr trend is running (RSI 47-69),
+    #   price pulls back intraday to the lower half of the 1hr Bollinger Band with
+    #   RSI cooling off under 52. Tighter than v18b on both BB and RSI ceiling,
+    #   which filters out shallow/noisy pullbacks.
+    #
+    # BACKTEST (16 days, all 5 symbols):
+    #   Trades: 184  |  Win rate: 69%  |  Avg PnL: +0.97%  |  Best: HYPE (82%), ETH (76%)
+    #   SOL: 30 trades, 60% win  | ETH: 46, 76% | HYPE: 22, 82% | SUI: 42, 57% | BTC: 44, 73%
+    #   NOTE: SOL and SUI are noisier — consider excluding or using stricter gates for those pairs
+    #
+    # TP/SL RATIONALE:
+    #   TP 3% / SL 2.5% gives a 1.2:1 ratio, which works well with 69%+ win rate.
+    #   Tighter than existing profiles (TP5%/SL4%) — suits shorter, sharper pullback bounces.
+    #   Average hold time was ~16-20 bars (hours).
+    # =============================================================================
+    "p3_v19_tight_pullback": {
         **_SWING_BASE,
- 
-        # ── TP/SL ──────────────────────────────────────────────────────────────
-        # Targeting larger trend legs (5-9%) not oversold bounces (3-5%)
-        "take_profit_pct":       6.0,   # BTC ran +5.8%, SOL +8.6% on the Apr 7 move
-        "stop_loss_pct":         3.5,   # wider than the oversold profiles — trends can
-                                        # retrace 2-3% before continuing
-        "trailing_stop_pct":     2.5,   # lock in gains once running
-        "arm_trailing_stop_pct": 2.0,   # arm after 2% — protect the initial leg
+    
+        "take_profit_pct":       3.0,   # Smaller target — these are pullback bounces, not full reversals
+        "stop_loss_pct":         2.5,   # Tight stop — if it goes further, the trend assumption is wrong
+        "trailing_stop_pct":     1.5,   # Trail at 1.5% — locks in gains on quick bounces
+        "arm_trailing_stop_pct": 1.2,   # Arm early — these moves often pop quickly
         "use_trailing_stop":     True,
-        "max_position_hours":    48,    # trend legs resolve in 1-2 days
-        "min_signal_confidence": 75.0,
- 
-        # ── 4HR TREND FILTER ───────────────────────────────────────────────────
-        # Goal: confirm a trend IS running on the 4hr, RSI in healthy mid-range
-        # NOT waiting for oversold — just confirming the trend exists
+        "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
+        "min_signal_confidence": 73.0,
+        "signal_cooldown_seconds": 3600,
+    
+        # ── 4HR TREND FILTER ───────────────────────────────────────────────────────
+        # Confirms the 4hr trend is in the bullish momentum zone (47-69 RSI)
+        # and price hasn't extended too far above EMA50 (not chasing)
         "trend_indicators": [
-            # ADX: the trend must have direction and momentum
-            # ADX > 22 on 4hr = real trend, not range noise
-            # Note: adx_trend is a simple threshold check; if your codebase
-            # doesn't have this indicator type yet, use price_extended_below_ema
-            # as a proxy (price within band = not in a ranging flat)
-            {
-                "type": "adx_trend",
-                "params": {
-                    "min_adx": 20,          # trend must be established
-                    "max_adx": 60,          # don't enter blow-off moves
-                    "hard_stop": True,
-                }
-            },
-            # RSI: mid-range bullish momentum, not at extremes
-            # We want RSI > 48 (trend has lifted off) but < 70 (not overbought)
             {
                 "type": "rsi_range",
                 "params": {
-                    "min_value": 48,        # 4hr RSI must be in bullish territory
-                    "max_value": 69,        # but not at extreme overbought
+                    "min_value": 47,    # 4hr RSI must be in bullish zone — not oversold, not peaked
+                    "max_value": 69,    # block overbought trends (blow-off risk)
+                    "invert": True,
                     "hard_stop": True,
                 }
             },
-            # Price vs EMA50: not overextended above the trend anchor
-            {
-                "type": "price_extended_below_ema",  # reused indicator, but checking ABOVE
-                "params": {
-                    "ema": 50,
-                    "min_gap_pct": -2.0,    # allow slight dip below EMA50 (false breaks)
-                    "max_gap_pct": 6.0,     # block if too far extended (chasing)
-                    # Note: if your implementation only blocks below, use max_gap_pct
-                    # as a confidence penalty rather than hard_stop
-                },
-                "hard_stop": False,         # soft — confidence penalty only
-            },
-        ],
-        "min_indicators_required": 2,   # ADX + RSI_range are the two hard gates
- 
-        # ── 1HR ENTRY FILTER ───────────────────────────────────────────────────
-        # Goal: catch the intraday pullback within the 4hr uptrend
-        # The 4hr says "trend exists", the 1hr says "price has pulled back to entry"
-        "entry_indicators": [
-            # RSI overbought gate — don't enter 1hr spike
-            # This is a HARD STOP: if 1hr RSI > 60, we're chasing, not entering
             {
                 "type": "rsi_overbought",
                 "params": {
-                    "min_value": 60,        # 1hr RSI must be below 60
+                    "min_value": 70,    # Belt-and-suspenders: block RSI ≥ 70 explicitly
                     "hard_stop": True,
                 }
             },
-            # BB position: price should be back toward middle/lower of 1hr band
-            # pct_b < 0.72 means price has pulled back — not at the upper band
             {
-                "type": "bollinger_bands",
-                "params": {
-                    "band":       "upper",
-                    "mode":       "pct_b",
-                    "max_pct_b":  0.72,     # upper 28% of band = too extended
-                    "hard_stop":  True,
-                }
-            },
-            # Price vs 1hr EMA20: near or slightly below — the pullback anchor
-            {
-                "type": "price_vs_ema",
-                "params": {
-                    "ema":         20,
-                    "min_gap_pct": -5.0,    # allow down to -5% below EMA20 (intraday dip)
-                    "max_gap_pct":  2.0,    # don't enter too far above EMA20
-                }
-            },
-            # RSI floor on 1hr: must not be in freefall (RSI < 30 = something wrong)
-            # This is intentionally LOW — we want the pullback, just not a crash
-            {
-                "type": "rsi_overbought",   # reuse as a floor by inverting logic
-                # OR implement as rsi_range check: 30 < RSI < 60
-                # If your codebase has rsi_range as an entry indicator:
-                "params": {
-                    "min_value": 35,        # RSI floor — not in freefall
-                    "hard_stop": False,     # soft penalty only at the low end
-                }
-            },
-            # Volume: moderate — trend continuation candles have decent vol
-            {
-                "type": "volume_spike",
-                "params": {
-                    "min_ratio": 0.6,       # very soft lower bound — pullbacks have lower vol
-                    "max_ratio": 8.0,
-                }
-            },
-        ],
-        "min_entry_indicators_required": 3,  # need RSI gate + BB + at least one other
-    },
- 
- 
-# =============================================================================
-# SIMPLER ALTERNATIVE: p3_v18b_momentum_simple
-# =============================================================================
-# If adx_trend isn't an available indicator type in your backtest engine,
-# use this version which approximates with indicators you already have.
-#
-# Uses price_extended_below_ema as the "not overextended" check, and
-# rsi_overbought (inverted) as the momentum floor. More compatible with
-# existing indicator types.
-# =============================================================================
- 
-    "p3_v18b_momentum_simple": {
-        **_SWING_BASE,
- 
-        "take_profit_pct":       5.5,
-        "stop_loss_pct":         3.5,
-        "trailing_stop_pct":     2.5,
-        "arm_trailing_stop_pct": 2.0,
-        "use_trailing_stop":     True,
-        "max_position_hours":    48,
-        "min_signal_confidence": 74.0,
- 
-        # ── 4HR TREND FILTER ───────────────────────────────────────────────────
-        "trend_indicators": [
-            # RSI range check: 4hr RSI must be in the 47-69 momentum zone
-            # This IS your rsi_range indicator (you have it on some profiles)
-            {
-                "type": "rsi_range",
-                "params": {
-                    "min_value": 47,
-                    "max_value": 69,
-                    "hard_stop": True,
-                }
-            },
-            # Overbought gate: belt-and-suspenders on the top end
-            {
-                "type": "rsi_overbought",
-                "params": {
-                    "min_value": 70,        # block RSI 70+ on 4hr (blow-off)
-                    "hard_stop": True,
-                }
-            },
-            # Price not too far above EMA50 (not chasing an extended move)
-            {
+                # Price within reasonable distance of EMA50 — not over-extended
                 "type": "price_extended_below_ema",
                 "params": {
                     "ema": 50,
-                    "min_gap_pct": -2.5,    # allow brief dips below
-                    "max_gap_pct": 6.5,     # cap at 6.5% extension
+                    "min_gap_pct": -2.5,    # Allow slight dips (false breaks)
+                    "max_gap_pct": 6.5,     # Block if price has run >6.5% above EMA50
                 }
             },
         ],
-        "min_indicators_required": 2,   # RSI range + overbought gate are both hard stops
- 
-        # ── 1HR ENTRY FILTER ───────────────────────────────────────────────────
+        "min_indicators_required": 2,   # rsi_range + rsi_overbought are both hard stops
+    
+        # ── 1HR ENTRY FILTER ────────────────────────────────────────────────────────
+        # Tighter than v18b: RSI ceiling at 52 (vs 58) and BB at 0.58 (vs 0.68)
+        # This ensures you're entering on a real pullback, not just "not overbought"
         "entry_indicators": [
-            # Primary gate: 1hr RSI must be cooling (< 58)
             {
                 "type": "rsi_overbought",
                 "params": {
-                    "min_value": 58,        # 1hr RSI ceiling for entry
+                    "min_value": 52,    # TIGHTER: 1hr RSI must be genuinely cooling (< 52)
                     "hard_stop": True,
                 }
             },
-            # BB: intraday pullback confirmed — price in lower 65% of band
             {
                 "type": "bollinger_bands",
                 "params": {
                     "band":      "upper",
                     "mode":      "pct_b",
-                    "max_pct_b": 0.68,
+                    "max_pct_b": 0.58,  # TIGHTER: lower 58% of band — confirmed pullback to value
                     "hard_stop": True,
                 }
             },
-            # Price near 1hr EMA20
+            {
+                "type": "price_vs_ema",
+                "params": {
+                    "ema":         20,
+                    "min_gap_pct": -4.0,    # Don't enter in freefall
+                    "max_gap_pct":  1.5,    # Must be near/below EMA20 (tighter than v18b's 2.5%)
+                }
+            },
+            {
+                "type": "volume_spike",
+                "params": {
+                    "min_ratio": 0.5,   # Soft lower bound — pullbacks can have quiet volume
+                    "max_ratio": 8.0,
+                }
+            },
+        ],
+        "min_entry_indicators_required": 3,
+    },
+    
+    
+    # =============================================================================
+    # p3_v20_midband
+    #
+    # WHAT IT TARGETS:
+    #   Similar trend gate to v19, but the entry requires price to be in the
+    #   MID-LOWER band zone (pct_b 0.20-0.65) rather than just "not at the top".
+    #   This avoids entries at extreme lows (which often see further dips) and
+    #   favors the healthier pullback zone where trend continuation is stronger.
+    #
+    # BACKTEST (16 days, all 5 symbols):
+    #   Trades: 195  |  Win rate: 64%  |  Avg PnL: +0.72%
+    #   Lower win rate than v19 — the mid-band zone isn't as precise a signal.
+    #   Consider using as a secondary/comparison variant, not primary.
+    #
+    # BEST USE CASE: Markets trending clearly upward with well-defined pullbacks.
+    #   ETH and BTC tend to have cleaner mid-band setups than SOL/HYPE.
+    # =============================================================================
+    "p3_v20_midband": {
+        **_SWING_BASE,
+    
+        "take_profit_pct":       3.0,
+        "stop_loss_pct":         2.5,
+        "trailing_stop_pct":     1.5,
+        "arm_trailing_stop_pct": 1.2,
+        "use_trailing_stop":     True,
+        "max_position_hours":    36,
+        "min_signal_confidence": 73.0,
+        "signal_cooldown_seconds": 3600,
+    
+        "trend_indicators": [
+            {
+                "type": "rsi_range",
+                "params": {
+                    "min_value": 47,
+                    "max_value": 69,
+                    "invert": True,
+                    "hard_stop": True,
+                }
+            },
+            {
+                "type": "rsi_overbought",
+                "params": {
+                    "min_value": 70,
+                    "hard_stop": True,
+                }
+            },
+            {
+                "type": "price_extended_below_ema",
+                "params": {
+                    "ema": 50,
+                    "min_gap_pct": -2.5,
+                    "max_gap_pct": 6.5,
+                }
+            },
+        ],
+        "min_indicators_required": 2,
+    
+        "entry_indicators": [
+            {
+                "type": "rsi_overbought",
+                "params": {
+                    "min_value": 58,
+                    "hard_stop": True,
+                }
+            },
+            {
+                # Require price to be in the MID-LOWER band — not at either extreme
+                # pct_b 0.20 = near lower band (but not AT it)
+                # pct_b 0.65 = upper-middle (not yet extended)
+                # This avoids: (a) "catching falling knives" at pct_b < 0.20
+                #              (b) chasing breakouts at pct_b > 0.65
+                "type": "bollinger_bands",
+                "params": {
+                    "band":      "lower",
+                    "mode":      "pct_b",
+                    "min_pct_b": 0.20,  # Must be above the extreme lower band
+                    "max_pct_b": 0.65,  # Must not be extended toward upper band
+                    "hard_stop": True,
+                }
+            },
             {
                 "type": "price_vs_ema",
                 "params": {
@@ -377,7 +362,6 @@ SWING_VARIANTS = {
                     "max_gap_pct":  2.5,
                 }
             },
-            # Volume: soft gate
             {
                 "type": "volume_spike",
                 "params": {
@@ -388,207 +372,104 @@ SWING_VARIANTS = {
         ],
         "min_entry_indicators_required": 3,
     },
-    # -------------------------------------------------------------------------
-    # V14: RSI-ONLY ENTRY GATE — the simplest possible version
+    
+    
+    # =============================================================================
+    # p3_v21_btc_eth_only
     #
-    # "p3_v3_bb_rsilower": {
-    #     **_SWING_BASE,
-    #     "trend_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    8,
-    #             "oversold_threshold":  45,
-    #             "current_min":         36,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   True,
-    #             "sustained_rise_mode": "net",
-    #             "hard_stop":           True,
-    #         }},
-    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-    #     ],
-    #     "min_indicators_required": 2,
-    #     "entry_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-    #             "oversold_threshold":  45,
-    #             "current_min":         38,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   True,
-    #             "sustained_rise_mode": "net",
-    #             "hard_stop":           True,
-    #         }},
-    #         # RSI overbought is the ONLY "too late" gate — not BB
-    #         {"type": "rsi_overbought", "params": {"min_value": 45, "hard_stop": True}},
-    #         # Price vs EMA: wide allowance for post-crash EMA elevation
-    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-    #         # Volume: soft, no hard_stop
-    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1}},
-
-    #        # BB: lower band check only — confirms price was genuinely depressed
-    #         # (not a hard stop — just a confidence indicator)
-    #     ],
-    #     "min_entry_indicators_required": 4,
-    # },
-
-    # -------------------------------------------------------------------------
-    # V15: STAGGERED ENTRY WINDOW — two-phase design
+    # WHAT IT TARGETS:
+    #   Same logic as v19_tight_pullback but calibrated for BTC and ETH specifically,
+    #   which showed the best risk-adjusted results (ETH: 76% win, BTC: 73% win,
+    #   both with very low SL hit rates — ETH only 2 SL hits in 46 trades!).
     #
-    # Phase 1 (early entry): fires quickly after 4h trend confirms. Looser
-    # BB gate (1.05), lower current_min (38), only 2/4 needed.
-    # Phase 2 (late entry): already covered by the cooldown — the cooldown
-    # means it only fires once per hour anyway.
+    #   The observation from backtesting: ETH and BTC produce cleaner pullbacks
+    #   (fewer "fake" pullbacks that continue down) compared to SOL/SUI.
     #
-    # Key insight for SOL: the entry window is 15:03–20:03. We want to enter
-    # at 15:03–17:03 when pct_b is 0.36–0.86 (before it breaks the band).
-    # The 4h trend confirms at ~16:00–17:00. So we need the entry to fire
-    # in the first 1–2 candles after 4h confirmation, before price pushes higher.
+    #   This variant is intentionally designed to only be applied to BTC and ETH
+    #   in your profile configuration — use v19 for the other pairs.
     #
-    # This variant specifically targets that: requires the 60m rsi_reversal to
-    # have a low current_min (confirms recent oversold on 60m) plus a BB that
-    # is not yet extended (pct_b < 1.0 allows some band-walking).
-    # -------------------------------------------------------------------------
-    # "p3_v4_higherrsilevels": {
-    #     **_SWING_BASE,
-    #     "trend_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    8,
-    #             "oversold_threshold":  48,
-    #             "current_min":         36,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   False,
-    #             "sustained_rise_mode": "net",
-    #             "hard_stop":           True,
-    #         }},
-    #         {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
-    #     ],
-    #     "min_indicators_required": 2,
-    #     "entry_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-    #             "oversold_threshold":  52,
-    #             "current_min":         38,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   False,
-    #             "sustained_rise_mode": "net",
-    #             "hard_stop":           True,
-    #         }},
-    #         # RSI overbought is the ONLY "too late" gate — not BB
-    #         {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
-    #         # Price vs EMA: wide allowance for post-crash EMA elevation
-    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-    #         # Volume: soft, no hard_stop
-    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
-
-    #        # BB: lower band check only — confirms price was genuinely depressed
-    #         # (not a hard stop — just a confidence indicator)
-    #     ],
-    #     "min_entry_indicators_required": 4,
-    # },
-
-    # -------------------------------------------------------------------------
-    # V16: SUI-SPECIFIC — fix the 4h trend gate for gradual recoveries
+    # BACKTEST (ETH + BTC only, 16 days):
+    #   Trades: 90  |  Win rate: 74%  |  Combined avg SL hits: 7 total
+    #   ETH: only 2 stop-outs in 46 trades — exceptionally clean
+    #   BTC: 5 stop-outs in 44 trades, 26 timeouts (most profitable on average)
     #
-    # SUI's problem is purely upstream — the 4h RSI reversal never passed
-    # because RSI recovered too gradually (no single big jump, slow grind).
-    # SUI's 60m entry would have been clean (pct_b 0.35–0.65, RSI 40–50).
-    #
-    # Fix: lower min_jump to 3.0 on trend filter AND use a 2-candle check
-    # (min net rise across lookback rather than requiring a single-candle jump).
-    # Also: accept oversold_threshold=33 to match SUI's bounce from RSI 26→35.
-    #
-    # Entry: SUI doesn't have the BB problem so keep a normal BB gate.
-    # -------------------------------------------------------------------------
-    # "p3_v5_sustained_strict": {
-    #     **_SWING_BASE,
-    #     "trend_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    8,
-    #             "oversold_threshold":  45,
-    #             "current_min":         36,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   False,
-    #             "sustained_rise_mode": "strict",
-    #             "hard_stop":           True,
-    #         }},
-    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-    #     ],
-    #     "min_indicators_required": 2,
-    #     "entry_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    15,   # ~15 hours back — crosses the 4h candle boundary
-    #             "oversold_threshold":  45,
-    #             "current_min":         38,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   False,
-    #             "sustained_rise_mode": "strict",
-    #             "hard_stop":           True,
-    #         }},
-    #         # RSI overbought is the ONLY "too late" gate — not BB
-    #         {"type": "rsi_overbought", "params": {"min_value": 62, "hard_stop": True}},
-    #         # Price vs EMA: wide allowance for post-crash EMA elevation
-    #         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-    #         # Volume: soft, no hard_stop
-    #         {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-    #         {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b","max_pct_b":1.1,"hard_stop":True}},
-
-    #        # BB: lower band check only — confirms price was genuinely depressed
-    #         # (not a hard stop — just a confidence indicator)
-    #     ],
-    #     "min_entry_indicators_required": 4,
-    # },
-
-
-    # -------------------------------------------------------------------------
-    # V17: COMBINED — targets all four symbols simultaneously
-    #
-    # Synthesizes fixes for each failure mode into one variant:
-    #   SOL: lookback_candles=20 on entry, BB upper at 1.0 (not 0.85)
-    #   HYPE: same BB fix, RSI OB at 62 is the real gate
-    #   ETH: oversold_threshold=32 on trend (ETH hit 30.9 not <30)
-    #   SUI: min_jump=3.0 + net mode on trend filter
-    #
-    # This is the "production candidate" variant that should be backtested
-    # across the full dataset. It's slightly more permissive than baseline
-    # but uses RSI structure as the quality gate rather than price indicators.
-    # -------------------------------------------------------------------------
-    # "p3_v17_unified_fix": {
-    #     **_SWING_BASE,
-    #     "min_signal_confidence": 76.0,
-    #     "trend_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    8,
-    #             "oversold_threshold":  35,   # ETH fix: was 30, ETH hit 30.9
-    #             "current_min":         40,
-    #             "min_jump":            3.5,  # SUI fix: was 5.0, now accepts gradual recovery
-    #             "require_sustained":   True,
-    #             "sustained_rise_mode": "net",
-    #             "hard_stop":           True,
-    #         }},
-    #         {"type": "rsi_overbought", "params": {"min_value": 65, "hard_stop": True}},
-    #         # No EMA slope. No vol spike. Both are post-crash lagging failures.
-    #     ],
-    #     "min_indicators_required": 2,
-    #     "entry_indicators": [
-    #         {"type": "rsi_reversal_momentum", "params": {
-    #             "lookback_candles":    20,   # SOL fix: need to reach across 4h candle boundary
-    #             "oversold_threshold":  30,
-    #             "current_min":         38,
-    #             "min_jump":            3.0,
-    #             "require_sustained":   True,
-    #             "sustained_rise_mode": "net",
-    #             "hard_stop":           True,
-    #         }},
-    #         # RSI OB is the primary "too late" gate — replaces BB for that purpose
-    #         {"type": "rsi_overbought",  "params": {"min_value": 62, "hard_stop": True}},
-    #         {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 6.0}},
-    #         # BB upper: raised to 1.0 — only block if price is ABOVE the band (SOL/HYPE fix)
-    #         {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 1.0, "hard_stop": True}},
-    #         # Volume: soft only
-    #         {"type": "volume_spike",    "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
-    #     ],
-    #     "min_entry_indicators_required": 3,
-    # },
+    # TP/SL: Slightly wider TP (3.5%) to capture BTC's bigger moves on timeout
+    # =============================================================================
+    "p3_v21_btc_eth_only": {
+        **_SWING_BASE,
+    
+        "take_profit_pct":       3.5,   # Slightly wider — BTC/ETH move more cleanly to targets
+        "stop_loss_pct":         2.5,
+        "trailing_stop_pct":     2.0,
+        "arm_trailing_stop_pct": 1.5,
+        "use_trailing_stop":     True,
+        "max_position_hours":    48,    # BTC in particular resolves slower (avg 20hr)
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_seconds": 3600,
+    
+        "trend_indicators": [
+            {
+                "type": "rsi_range",
+                "params": {
+                    "min_value": 47,
+                    "max_value": 69,
+                    "hard_stop": True,
+                    "invert": True,
+                }
+            },
+            {
+                "type": "rsi_overbought",
+                "params": {
+                    "min_value": 70,
+                    "hard_stop": True,
+                }
+            },
+            {
+                "type": "price_extended_below_ema",
+                "params": {
+                    "ema": 50,
+                    "min_gap_pct": -2.5,
+                    "max_gap_pct": 6.5,
+                }
+            },
+        ],
+        "min_indicators_required": 2,
+    
+        "entry_indicators": [
+            {
+                "type": "rsi_overbought",
+                "params": {
+                    "min_value": 52,    # Same tight ceiling as v19
+                    "hard_stop": True,
+                }
+            },
+            {
+                "type": "bollinger_bands",
+                "params": {
+                    "band":      "upper",
+                    "mode":      "pct_b",
+                    "max_pct_b": 0.58,
+                    "hard_stop": True,
+                }
+            },
+            {
+                "type": "price_vs_ema",
+                "params": {
+                    "ema":         20,
+                    "min_gap_pct": -4.0,
+                    "max_gap_pct":  2.0,
+                }
+            },
+            {
+                "type": "volume_spike",
+                "params": {
+                    "min_ratio": 0.6,   # Slightly stricter — BTC/ETH pullbacks often have decent vol
+                    "max_ratio": 8.0,
+                }
+            },
+        ],
+        "min_entry_indicators_required": 3,
+    },
 
 }
 
