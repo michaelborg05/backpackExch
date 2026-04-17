@@ -706,10 +706,10 @@ class BulletAdapter(ExchangeAdapter):
         }
 
     def _get_aggressive_price(self, symbol: str, side: str) -> float:
-        """Return a price with 2% slippage for IOC market-equivalent orders.
+        """Return a price with 0.5% slippage for IOC market-equivalent orders.
 
-        BID (buy):  price = current * 1.02  (ensures fill at market or better)
-        ASK (sell): price = current * 0.98  (ensures fill at market or better)
+        BID (buy):  price = current * 1.005  (ensures fill at market or better)
+        ASK (sell): price = current * 0.995  (ensures fill at market or better)
         """
         from cache.price_cache import get_price_cache
         cache = get_price_cache()
@@ -720,7 +720,7 @@ class BulletAdapter(ExchangeAdapter):
                 f"[Bullet] No cached price for {base}, using 0 — order may fail"
             )
             return 0.0
-        return float(current) * (1.02 if side == "BID" else 0.98)
+        return float(current) * (1.005 if side == "BID" else 0.995)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
