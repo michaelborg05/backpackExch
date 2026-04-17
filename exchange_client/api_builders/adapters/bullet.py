@@ -233,30 +233,63 @@ class BulletAdapter(ExchangeAdapter):
 
     def order_buy(self, symbol: str, quantity: str, price: str = "0",
                   source: str = "MANUAL", **kwargs) -> Optional[Any]:
-        """Place a market buy on Bullet.
+        """Place a market-equivalent BUY on Bullet (IOC bid at +2% slippage).
 
-        Full implementation requires build_bullet_transaction() to be complete.
-        See utils/auth.py for the implementation guide.
+        Attaches on-chain TP/SL from the profile if take_profit_pct / stop_loss_pct
+        are configured, so the exchange enforces them without relying on monitoring.
         """
-        self.logger.warning(
-            f"[Bullet] order_buy({symbol}) called but Bullet tx signing is not yet "
-            "implemented. See utils/auth.py::build_bullet_transaction()."
+        bullet_symbol = _to_bullet_symbol(symbol)
+        tick_size, step_size, _ = self._get_market_filters(bullet_symbol)
+        entry_price = self._get_aggressive_price(symbol, side="BID")
+        rounded_price = self._round_price(entry_price, tick_size)
+        rounded_qty   = self._round_quantity(float(quantity), step_size)
+        tpsl = self._build_tpsl(float(rounded_price), side="BID", tick_size=tick_size)
+
+        from types import SimpleNamespace
+        order_ns = SimpleNamespace(
+            symbol=bullet_symbol,
+            side="Bid",
+            orderType="IOC",
+            quantity=rounded_qty,
+            price=rounded_price,
+            reduce_only=False,
+            pending_tpsl_pair=tpsl,
         )
-        return None
+        return self._submit_market_order(
+            order_ns=order_ns,
+            source=source,
+            position_id=None,
+            reason_summary=kwargs.get("reason_summary"),
+            validation_summary=kwargs.get("validation_summary"),
+        )
 
     def order_sell(self, symbol: str, quantity: str, price: str = "0",
                    source: str = "MANUAL", position_id: str = None,
                    reason_summary=None, validation_summary: str = None,
                    **kwargs) -> Optional[Any]:
-        """Place a market sell/close on Bullet.
+        """Place a market-equivalent SELL/CLOSE on Bullet (IOC ask at -2% slippage)."""
+        bullet_symbol = _to_bullet_symbol(symbol)
+        tick_size, step_size, _ = self._get_market_filters(bullet_symbol)
+        entry_price = self._get_aggressive_price(symbol, side="ASK")
+        rounded_price = self._round_price(entry_price, tick_size)
+        rounded_qty   = self._round_quantity(float(quantity), step_size)
 
-        Full implementation requires build_bullet_transaction() to be complete.
-        """
-        self.logger.warning(
-            f"[Bullet] order_sell({symbol}) called but Bullet tx signing is not yet "
-            "implemented. See utils/auth.py::build_bullet_transaction()."
+        from types import SimpleNamespace
+        order_ns = SimpleNamespace(
+            symbol=bullet_symbol,
+            side="Ask",
+            orderType="IOC",
+            quantity=rounded_qty,
+            price=rounded_price,
+            reduce_only=position_id is not None,
         )
-        return None
+        return self._submit_market_order(
+            order_ns=order_ns,
+            source=source,
+            position_id=position_id,
+            reason_summary=reason_summary,
+            validation_summary=validation_summary,
+        )
 
     def validate_balance_for_trade(self, sale_action: str, symbol: str) -> tuple:
         """Check account balance before placing an order on Bullet.
@@ -283,11 +316,23 @@ class BulletAdapter(ExchangeAdapter):
     async def process_tradingview_alert(self, alert: Any, profile_name: str,
                                         source: str = "WEBHOOK",
                                         reason_summary=None) -> Optional[Any]:
-        """TradingView webhook not yet supported for Bullet (tx signing pending)."""
-        self.logger.warning(
-            "[Bullet] process_tradingview_alert called but Bullet tx signing is not yet implemented."
-        )
-        return None
+        """Handle a TradingView webhook alert for a Bullet profile."""
+        action = getattr(alert, "action", None) or (alert.get("action") if isinstance(alert, dict) else None)
+        symbol = getattr(alert, "symbol", None) or (alert.get("symbol") if isinstance(alert, dict) else None)
+        quantity = str(getattr(alert, "quantity", None) or (alert.get("quantity") if isinstance(alert, dict) else "0"))
+
+        if not action or not symbol:
+            self.logger.warning(f"[Bullet] process_tradingview_alert: missing action/symbol in alert")
+            return None
+
+        action_upper = action.upper()
+        if action_upper in ("BUY", "LONG"):
+            return self.order_buy(symbol=symbol, quantity=quantity, source=source, reason_summary=reason_summary)
+        elif action_upper in ("SELL", "SHORT", "CLOSE"):
+            return self.order_sell(symbol=symbol, quantity=quantity, source=source, reason_summary=reason_summary)
+        else:
+            self.logger.warning(f"[Bullet] process_tradingview_alert: unknown action {action!r}")
+            return None
 
     def process_limit_order(self, order: Any, position_id: Any = None) -> Optional[Any]:
         """Check status of a pending limit order on Bullet.
@@ -320,16 +365,14 @@ class BulletAdapter(ExchangeAdapter):
         try:
             # Translate order fields to Bullet's NewOrderArgs structure
             call_data = self._build_place_order_call(order)
-            nonce = self._get_next_nonce()
             tx_b64 = build_bullet_transaction(
                 private_key_b64=self.profile.secret,
                 call_data=call_data,
-                nonce=nonce,
             )
             url = BulletEndpoints.submit_tx()
             response = api_request(
                 url,
-                body={"transaction": tx_b64},
+                body={"body": tx_b64},
                 requestType=HttpMethod.POST,
             )
             return response
@@ -348,16 +391,14 @@ class BulletAdapter(ExchangeAdapter):
         from utils.auth import build_bullet_transaction
         try:
             call_data = self._build_cancel_order_call(order_id, symbol)
-            nonce = self._get_next_nonce()
             tx_b64 = build_bullet_transaction(
                 private_key_b64=self.profile.secret,
                 call_data=call_data,
-                nonce=nonce,
             )
             url = BulletEndpoints.submit_tx()
             response = api_request(
                 url,
-                body={"transaction": tx_b64},
+                body={"body": tx_b64},
                 requestType=HttpMethod.POST,
             )
             return response
@@ -431,39 +472,394 @@ class BulletAdapter(ExchangeAdapter):
     def supports_dust_conversion(self) -> bool:
         return False
 
+    # ── Internal order execution helpers ─────────────────────────────────────
+
+    def _submit_market_order(
+        self,
+        order_ns: Any,
+        source: str,
+        position_id: Optional[str],
+        reason_summary,
+        validation_summary: Optional[str],
+    ) -> Optional[Any]:
+        """Submit a signed Bullet order tx, persist to DB, open/close position.
+
+        Mirrors the logic in trading_builder.ProcessMarketOrder so that Bullet
+        trades are recorded identically to Backpack trades.
+        """
+        from utils.auth import build_bullet_transaction
+        from db.session import SessionLocal
+        from db.crud import (
+            save_trade, open_position, close_position,
+            add_validation_result,
+        )
+        from utils.position_calculator import PositionCalculator
+
+        # 1. Build and sign the transaction
+        try:
+            call_data = self._build_place_order_call(order_ns)
+            tx_b64 = build_bullet_transaction(
+                private_key_b64=self.profile.secret,
+                call_data=call_data,
+            )
+        except Exception as e:
+            self.logger.error(f"[Bullet] tx build failed for {order_ns.symbol}: {e}")
+            return None
+
+        # 2. Submit to Bullet
+        try:
+            url = BulletEndpoints.submit_tx()
+            raw = api_request(url, body={"body": tx_b64}, requestType=HttpMethod.POST)
+        except Exception as e:
+            self.logger.error(f"[Bullet] /tx/submit failed for {order_ns.symbol}: {e}")
+            return None
+
+        # 3. Parse the exchange response into a common OrderResponse
+        order_response = self._parse_order_response(raw, order_ns)
+        if order_response is None:
+            self.logger.error(
+                f"[Bullet] Could not parse /tx/submit response for {order_ns.symbol}: {raw}"
+            )
+            return None
+
+        # 4. Persist to DB (same path as ProcessMarketOrder)
+        db = None
+        try:
+            db = SessionLocal()
+            side_upper = order_response.side.upper()
+            is_opening = position_id is None
+            is_long_entry = side_upper == "BID" and is_opening
+            is_short_entry = side_upper == "ASK" and is_opening
+            direction = "LONG" if side_upper == "BID" else "SHORT"
+
+            saved_trade = save_trade(
+                db, order_response, self.profile.name, source,
+                reason_summary=reason_summary,
+                direction=direction if is_opening else None,
+            )
+            self.logger.info(f"[Bullet] Trade saved: ID {saved_trade.id}")
+
+            if validation_summary:
+                add_validation_result(db, saved_trade, validation_summary=validation_summary)
+
+            if is_long_entry or is_short_entry:
+                tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
+                    entry_price=saved_trade.price,
+                    side=saved_trade.side,
+                    profile=self.profile,
+                )
+                position = open_position(
+                    db=db,
+                    trade=saved_trade,
+                    tp_price=tp_price,
+                    sl_price=sl_price,
+                    trailing_sl_price=trailing_sl_price,
+                    highest_price=saved_trade.price,
+                    lowest_price=saved_trade.price,
+                    direction=direction,
+                )
+                self.logger.info(
+                    f"[Bullet] Position opened: ID {position.id}, "
+                    f"TP: {tp_price}, SL: {sl_price}"
+                )
+                # Note: Bullet TP/SL managed by monitoring loop (no resting limit order placed)
+
+            elif position_id is not None:
+                # Closing a position
+                from db.crud import close_positions_fifo
+                closed = close_positions_fifo(
+                    db=db,
+                    profile_name=self.profile.name,
+                    symbol=order_ns.symbol,
+                    closed_trade=saved_trade,
+                )
+                if closed:
+                    self.logger.info(
+                        f"[Bullet] Position closed: {[p.id for p in closed]}"
+                    )
+
+        except Exception as e:
+            self.logger.error(f"[Bullet] DB persistence failed: {e}", exc_info=True)
+        finally:
+            if db:
+                db.close()
+
+        return order_response
+
+    def _parse_order_response(self, raw: Any, order_ns: Any) -> Optional[Any]:
+        """Parse a Bullet /tx/submit response into an OrderResponse.
+
+        Bullet may return a Binance FAPI-style fill dict or a simple tx acknowledgement.
+        Falls back to a synthetic OrderResponse built from price cache when the
+        response doesn't contain execution details.
+        """
+        from models.trade import OrderResponse
+        import time
+
+        # --- Case 1: Binance FAPI-style fill (orderId + executedQty present) ---
+        if isinstance(raw, dict) and ("orderId" in raw or "id" in raw):
+            try:
+                order_id = str(raw.get("orderId") or raw.get("id", "0"))
+                executed_qty = str(raw.get("executedQty") or raw.get("executedQuantity") or order_ns.quantity)
+                exec_price = str(raw.get("avgPrice") or raw.get("price") or order_ns.price)
+                executed_quote = str(float(executed_qty) * float(exec_price))
+                return OrderResponse(**{
+                    "id": order_id,
+                    "orderType": raw.get("type", "MARKET"),
+                    "symbol": order_ns.symbol,
+                    "side": order_ns.side,
+                    "status": raw.get("status", "FILLED"),
+                    "executedQuantity": executed_qty,
+                    "executedQuoteQuantity": executed_quote,
+                    "price": exec_price,
+                    "createdAt": raw.get("time", int(time.time() * 1000)),
+                })
+            except Exception as e:
+                self.logger.warning(f"[Bullet] FAPI parse failed, trying synthetic: {e}")
+
+        # --- Case 2: tx hash acknowledgement {"hash": "0x..."} ---
+        # Build a synthetic OrderResponse using price cache so DB persistence works
+        try:
+            from cache.price_cache import get_price_cache
+            tx_id = (
+                raw.get("hash") or raw.get("txHash") or raw.get("txId") or "bullet-unknown"
+                if isinstance(raw, dict) else "bullet-unknown"
+            )
+            price_cache = get_price_cache()
+            base = order_ns.symbol.split("-")[0]
+            current_price = price_cache.get_price(base) or float(order_ns.price)
+            executed_qty = str(order_ns.quantity)
+            executed_quote = str(float(executed_qty) * float(current_price))
+            self.logger.info(
+                f"[Bullet] Synthetic OrderResponse: tx={tx_id}, "
+                f"qty={executed_qty}, price={current_price}"
+            )
+            return OrderResponse(**{
+                "id": str(tx_id),
+                "orderType": "MARKET",
+                "symbol": order_ns.symbol,
+                "side": order_ns.side,
+                "status": "FILLED",
+                "executedQuantity": executed_qty,
+                "executedQuoteQuantity": executed_quote,
+                "price": str(current_price),
+                "createdAt": int(time.time() * 1000),
+            })
+        except Exception as e:
+            self.logger.error(f"[Bullet] Synthetic OrderResponse failed: {e}")
+            return None
+
+    def _build_tpsl(self, entry_price: float, side: str, tick_size=None) -> Optional[Dict]:
+        """Build pending_tpsl_pair dict from profile TP/SL percentages.
+
+        Returns None if neither take_profit_pct nor stop_loss_pct is set.
+        Uses Mark price as the trigger condition (same as Bullet UI default).
+        TP/SL orders are IOC market-like so they fill immediately on trigger.
+        """
+        if side == "BID":  # long
+            tp_mult = 1 + float(self.profile.take_profit_pct or 0) / 100
+            sl_mult = 1 - float(self.profile.stop_loss_pct or 0) / 100
+        else:  # short / ask
+            tp_mult = 1 - float(self.profile.take_profit_pct or 0) / 100
+            sl_mult = 1 + float(self.profile.stop_loss_pct or 0) / 100
+
+        tp_leg = None
+        sl_leg = None
+
+        # TP/SL prices must also be multiples of tick size
+        if tick_size is None:
+            tick_size = 0.01  # safe default (SOL tick); caller should pass the real value
+
+        def _round_to_tick(price: float) -> float:
+            from decimal import Decimal
+            t = Decimal(str(tick_size))
+            p = Decimal(str(price))
+            if t <= 0:
+                return price
+            return float((p // t) * t)
+
+        if self.profile.take_profit_pct:
+            tp_price = _round_to_tick(entry_price * tp_mult)
+            tp_leg = {
+                "trigger_price": tp_price,
+                "order_price": tp_price,
+                "price_condition": "Mark",
+                "order_type": "IOC",
+            }
+
+        if self.profile.stop_loss_pct:
+            sl_price = _round_to_tick(entry_price * sl_mult)
+            sl_leg = {
+                "trigger_price": sl_price,
+                "order_price": sl_price,
+                "price_condition": "Mark",
+                "order_type": "IOC",
+            }
+
+        if not tp_leg and not sl_leg:
+            return None
+
+        return {
+            "tp": tp_leg,
+            "sl": sl_leg,
+            "dynamic_size": False,
+        }
+
+    def _get_aggressive_price(self, symbol: str, side: str) -> float:
+        """Return a price with 2% slippage for IOC market-equivalent orders.
+
+        BID (buy):  price = current * 1.02  (ensures fill at market or better)
+        ASK (sell): price = current * 0.98  (ensures fill at market or better)
+        """
+        from cache.price_cache import get_price_cache
+        cache = get_price_cache()
+        base = symbol.split("_")[0].split("-")[0]
+        current = cache.get_price(base)
+        if not current:
+            self.logger.warning(
+                f"[Bullet] No cached price for {base}, using 0 — order may fail"
+            )
+            return 0.0
+        return float(current) * (1.02 if side == "BID" else 0.98)
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _build_place_order_call(self, order: Any) -> Dict:
-        """Build the runtime call payload for a place_order transaction.
+        """Build the call_data dict for build_bullet_transaction (place_orders action).
 
-        TODO: fill in once the NewOrderArgs Borsh schema is confirmed.
-        The /rollup/schema endpoint on mainnet/testnet has the full field list.
+        market_id is looked up from Bullet exchangeInfo by symbol.
         """
         bullet_symbol = _to_bullet_symbol(getattr(order, "symbol", ""))
+        market_id = self._get_market_id(bullet_symbol)
+
+        side = getattr(order, "side", "Bid")
+        # Normalise: Backpack uses "Bid"/"Ask", Bullet Borsh uses BID/ASK — handled inside auth.py
+        order_type = getattr(order, "orderType", "LIMIT")
+
         return {
-            "exchange": {
-                "place_order": {
-                    "symbol": bullet_symbol,
-                    "side": getattr(order, "side", ""),
-                    "order_type": getattr(order, "orderType", "LIMIT"),
-                    "quantity": str(getattr(order, "quantity", "0")),
-                    "price": str(getattr(order, "price", "0")),
-                    "time_in_force": getattr(order, "timeInForce", "GTC"),
-                }
-            }
+            "action": "place_orders",
+            "market_id": market_id,
+            "orders": [{
+                "price": str(getattr(order, "price", "0")),
+                "size": str(getattr(order, "quantity", "0")),
+                "side": side,
+                "order_type": order_type,
+                "reduce_only": getattr(order, "reduce_only", False),
+                "client_order_id": None,
+                "pending_tpsl_pair": getattr(order, "pending_tpsl_pair", None),
+            }],
+            "replace": False,
+            "sub_account_index": 0,
         }
 
     def _build_cancel_order_call(self, order_id: str, symbol: str) -> Dict:
-        """Build the runtime call payload for a cancel_order transaction."""
+        """Build the call_data dict for build_bullet_transaction (cancel_orders action).
+
+        order_id must be the numeric u64 order ID from /fapi/v1/openOrders — NOT the
+        tx hash (0x...) returned by /tx/submit.  Use get_open_orders() to find the
+        numeric orderId for a position before cancelling.
+        """
         bullet_symbol = _to_bullet_symbol(symbol)
+        market_id = self._get_market_id(bullet_symbol)
+
+        # Parse order_id — Bullet order IDs are numeric u64, not hex tx hashes
+        try:
+            numeric_id = int(order_id, 16) if str(order_id).startswith("0x") else int(order_id)
+        except (ValueError, TypeError):
+            raise ValueError(
+                f"[Bullet] cancel_order: order_id must be a numeric u64 (got {order_id!r}). "
+                "Use get_open_orders() to find the numeric orderId — the 0x tx hash "
+                "returned by /tx/submit is NOT the order ID."
+            )
+
         return {
-            "exchange": {
-                "cancel_order": {
-                    "symbol": bullet_symbol,
-                    "order_id": order_id,
-                }
-            }
+            "action": "cancel_orders",
+            "market_id": market_id,
+            "orders": [{
+                "order_id": numeric_id,
+                "client_order_id": None,
+            }],
         }
+
+    def _get_market_id(self, bullet_symbol: str) -> int:
+        """Return the u32 market index for bullet_symbol from Bullet exchangeInfo.
+
+        Bullet market_id is the position (0-indexed) of the symbol in the
+        exchangeInfo symbols array.  Results are cached per-adapter instance.
+        """
+        self._ensure_exchange_info_cache()
+        market_id = self._market_id_cache.get(bullet_symbol, 0)
+        if bullet_symbol not in self._market_id_cache:
+            self.logger.warning(
+                f"[Bullet] market_id not found for {bullet_symbol}, defaulting to 0"
+            )
+        return market_id
+
+    def _get_market_filters(self, bullet_symbol: str):
+        """Return (tick_size, step_size, min_qty) as Decimal for the given symbol."""
+        from decimal import Decimal
+        self._ensure_exchange_info_cache()
+        return self._market_filters_cache.get(
+            bullet_symbol,
+            (Decimal("0.01"), Decimal("0.01"), Decimal("0.01")),  # safe defaults
+        )
+
+    def _ensure_exchange_info_cache(self):
+        """Populate market_id and filter caches from exchangeInfo (once per adapter instance)."""
+        if hasattr(self, "_market_id_cache"):
+            return
+        from decimal import Decimal
+        self._market_id_cache: Dict[str, int] = {}
+        self._market_filters_cache: Dict[str, tuple] = {}
+        url = BulletEndpoints.exchange_info()
+        try:
+            data = api_request(url)
+            if not data:
+                return
+            for s in data.get("symbols", []):
+                sym = s.get("symbol", "")
+                # marketId is provided directly — use it (u16 per schema)
+                self._market_id_cache[sym] = int(s.get("marketId", 0))
+
+                # Parse Binance-style filter array
+                tick_size = Decimal("0.01")
+                step_size = Decimal("0.01")
+                min_qty   = Decimal("0.01")
+                for f in s.get("filters", []):
+                    ft = f.get("filterType", "")
+                    if ft == "PRICE_FILTER" and f.get("tickSize"):
+                        tick_size = Decimal(str(f["tickSize"]))
+                    elif ft == "LOT_SIZE":
+                        if f.get("stepSize"):
+                            step_size = Decimal(str(f["stepSize"]))
+                        if f.get("minQty"):
+                            min_qty = Decimal(str(f["minQty"]))
+                self._market_filters_cache[sym] = (tick_size, step_size, min_qty)
+        except Exception as e:
+            self.logger.warning(f"[Bullet] _ensure_exchange_info_cache failed: {e}")
+
+    def _round_price(self, price: float, tick_size) -> str:
+        """Round price down to nearest tick size."""
+        from decimal import Decimal
+        p = Decimal(str(price))
+        t = Decimal(str(tick_size))
+        if t <= 0:
+            return str(p)
+        rounded = (p // t) * t
+        # Format with same decimal places as tick_size
+        places = max(0, -t.as_tuple().exponent)
+        return f"{rounded:.{places}f}"
+
+    def _round_quantity(self, qty: float, step_size) -> str:
+        """Round quantity down to nearest step size."""
+        from decimal import Decimal
+        q = Decimal(str(qty))
+        s = Decimal(str(step_size))
+        if s <= 0:
+            return str(q)
+        rounded = (q // s) * s
+        places = max(0, -s.as_tuple().exponent)
+        return f"{rounded:.{places}f}"
 
     def _get_next_nonce(self) -> int:
         """Return a monotonically increasing nonce based on current timestamp (ms)."""

@@ -137,6 +137,7 @@ class BulletEndpoints:
     All markets are perpetual futures.
     """
     BASE = "https://tradingapi.mainnet.bullet.xyz"
+    COINGECKO_BASE = "https://api.coingecko.com/api/v3"
     TESTNET = "https://tradingapi.testnet.bullet.xyz"
 
     @classmethod
