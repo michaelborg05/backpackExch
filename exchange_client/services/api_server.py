@@ -2774,6 +2774,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "min_indicators_required", "min_entry_indicators_required",
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
         "min_position_age_for_trend_check", "max_position_hours",
+        "market_type", "direction", "leverage_multiplier",
         "is_active",
     ]
 
@@ -3048,6 +3049,11 @@ def _serialize_profile(p, cb=None) -> dict:
 
         # Circuit breaker (embedded)
         "circuit_breaker":             _serialize_cb(cb) if cb else None,
+
+        # Market & direction
+        "market_type":                 p.market_type or "SPOT",
+        "direction":                   p.direction or "LONG",
+        "leverage_multiplier":         float(p.leverage_multiplier) if p.leverage_multiplier else 1.0,
 
         # Account linkage
         "account_id":                  p.account_id,

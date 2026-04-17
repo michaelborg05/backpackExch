@@ -173,6 +173,8 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         # Market type & direction
         market_type=cfg.get("market_type", "SPOT"),
         direction=cfg.get("direction", "LONG"),
+        # Leverage (perps only; always 1.0 for SPOT)
+        leverage_multiplier=float(cfg.get("leverage_multiplier", 1.0)),
     )
     return profile
 

@@ -67,6 +67,7 @@ class TradingProfile(BaseModel):
     # Position sizing
     default_order_size_usdc: float = 100.0      # Default order size in USDC (fixed amount)
     max_position_size_pct: float = 10.0         # Max position as % of portfolio (e.g., 10% = 10.0)
+    leverage_multiplier: float = Field(1.0, description="Leverage multiplier for perps (e.g. 3.0 = 3x). Scales available balance for position sizing. Always 1.0 for SPOT.")
     
     # Risk management
     max_open_positions: int = 5                  # Max concurrent positions
@@ -142,6 +143,7 @@ class ProfileCreateRequest(BaseModel):
     max_position_size_pct: Optional[float] = 40.0
     max_open_positions: Optional[int] = 5
     max_portfolio_exposure_pct: Optional[float] = 80.0
+    leverage_multiplier: Optional[float] = 1.0
 
     # Signal generation
     signal_timeframe: Optional[str] = "15"
@@ -196,6 +198,7 @@ class ProfileUpdateRequest(BaseModel):
     max_position_size_pct: Optional[float] = None
     max_open_positions: Optional[int] = None
     max_portfolio_exposure_pct: Optional[float] = None
+    leverage_multiplier: Optional[float] = None
 
     signal_timeframe: Optional[str] = None
     signal_cooldown_seconds: Optional[int] = None

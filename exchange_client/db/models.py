@@ -29,6 +29,7 @@ class TradingProfileDB(Base):
     max_position_size_pct = Column(Numeric, nullable=True)
     max_open_positions = Column(Numeric, nullable=True)
     max_portfolio_exposure_pct = Column(Numeric, nullable=True)
+    leverage_multiplier = Column(Float, nullable=False, default=1.0, server_default=text("1.0"))
 
     trading_type =  Column(String, server_default="rules_live")
     strategy_type = Column(String, default=StrategyType.TREND_FOLLOWING.value)

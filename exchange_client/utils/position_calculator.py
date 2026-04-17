@@ -154,11 +154,17 @@ class PositionCalculator:
                     f"max position: {max_position_pct}% of portfolio)"
                 )
             
-            # Check against available balance
+            # Check against available balance, scaled by leverage for perps
             available = self.balance_cache.get_available_balance(profile.name, quote_asset)
-            if available and order_size_usdc > available:
-                order_size_usdc = available * Decimal("0.999")  # 0.1% buffer
-                reason += f" (limited by available balance ${available:.2f})"
+            if available:
+                leverage = Decimal(str(profile.leverage_multiplier)) if profile.leverage_multiplier and profile.leverage_multiplier > 1.0 else Decimal("1.0")
+                buying_power = available * leverage
+                if order_size_usdc > buying_power:
+                    order_size_usdc = buying_power * Decimal("0.999")  # 0.1% buffer
+                    if leverage > Decimal("1.0"):
+                        reason += f" (limited by leveraged buying power ${buying_power:.2f} [{profile.leverage_multiplier}x on ${available:.2f} balance])"
+                    else:
+                        reason += f" (limited by available balance ${available:.2f})"
             
             from db.crud import get_open_positions_for_symbol
 
