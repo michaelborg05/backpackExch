@@ -57,14 +57,15 @@ class PriceCache:
     def get_ticker(self, symbol: str) -> Optional[dict]:
         """Return price + 24h metadata for *symbol*, or None if missing/stale."""
         with self._lock:
-            if not self._is_valid(symbol):
+            resolved = self._resolve_symbol(symbol)
+            if resolved is None:
                 return None
-            price = self._cache.get(symbol)
+            price = self._cache.get(resolved)
             if price is None:
                 return None
-            meta = self._ticker_meta.get(symbol, {})
+            meta = self._ticker_meta.get(resolved, {})
             return {
-                "symbol": symbol,
+                "symbol": resolved,
                 "price": float(price),
                 **meta,
             }
@@ -94,27 +95,43 @@ class PriceCache:
             for symbol, price in prices.items():
                 self.update_price(symbol, price)
     
+    def _resolve_symbol(self, symbol: str) -> Optional[str]:
+        """Return the cache key for symbol, trying alternate exchange formats as fallback."""
+        if symbol in self._cache and self._is_valid(symbol):
+            return symbol
+        # Bullet format "SOL-USD" → try Backpack format "SOL_USDC"
+        if "-" in symbol:
+            base = symbol.split("-")[0].upper()
+            alt = f"{base}_USDC"
+            if alt in self._cache and self._is_valid(alt):
+                return alt
+        # Backpack format "SOL_USDC" → try Bullet format "SOL-USD"
+        elif "_" in symbol:
+            base = symbol.split("_")[0].upper()
+            alt = f"{base}-USD"
+            if alt in self._cache and self._is_valid(alt):
+                return alt
+        return None
+
     def get_price(self, symbol: str) -> Optional[Decimal]:
         """
         Get price for a symbol
-        
+
         Args:
-            symbol: Symbol (e.g., "SOL_USDC")
-            
+            symbol: Symbol (e.g., "SOL_USDC" or "SOL-USD")
+
         Returns:
             Price as Decimal, or None if not found or stale
         """
         with self._lock:
-            if symbol not in self._cache:
-                self.logger.warning(f"Symbol {symbol} not found in cache")
+            resolved = self._resolve_symbol(symbol)
+            if resolved is None:
+                if symbol in self._cache and not self._is_valid(symbol):
+                    self.logger.warning(f"Price for {symbol} is stale")
+                else:
+                    self.logger.warning(f"Symbol {symbol} not found in cache")
                 return None
-            
-            # Check if price is stale
-            if not self._is_valid(symbol):
-                self.logger.warning(f"Price for {symbol} is stale")
-                return None
-            
-            return self._cache[symbol]
+            return self._cache[resolved]
     
     def get_all_prices(self) -> Dict[str, Decimal]:
         """Get all prices from cache"""
