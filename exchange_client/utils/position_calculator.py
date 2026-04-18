@@ -132,9 +132,11 @@ class PositionCalculator:
                 order_size_usdc = Decimal(str(profile.default_order_size_usdc))
                 reason = f"Profile default: ${order_size_usdc}"
             
-            # Check against max position size (as % of portfolio)
+            # Check against max position size (as % of portfolio, scaled by leverage for perps)
+            leverage = Decimal(str(profile.leverage_multiplier)) if profile.leverage_multiplier and profile.leverage_multiplier > 1.0 else Decimal("1.0")
+            leveraged_portfolio_value = total_portfolio_value * leverage
             max_position_pct = self._get_max_position_pct(symbol, profile, symbol_config)
-            max_position_value = (total_portfolio_value * max_position_pct) / Decimal("100")
+            max_position_value = (leveraged_portfolio_value * max_position_pct) / Decimal("100")
             
             existing_position_value = self._get_existing_position_value(db, profile.name, symbol, price)
             
@@ -143,7 +145,7 @@ class PositionCalculator:
                 return None, (
                     f"Max position size reached "
                     f"(${existing_position_value:.2f} / ${max_position_value:.2f} "
-                    f"[{max_position_pct}% of ${total_portfolio_value:.2f}])"
+                    f"[{max_position_pct}% of ${leveraged_portfolio_value:.2f}])"
                 )
             
             # Cap order size to remaining capacity
@@ -157,7 +159,6 @@ class PositionCalculator:
             # Check against available balance, scaled by leverage for perps
             available = self.balance_cache.get_available_balance(profile.name, quote_asset)
             if available:
-                leverage = Decimal(str(profile.leverage_multiplier)) if profile.leverage_multiplier and profile.leverage_multiplier > 1.0 else Decimal("1.0")
                 buying_power = available * leverage
                 if order_size_usdc > buying_power:
                     order_size_usdc = buying_power * Decimal("0.999")  # 0.1% buffer
