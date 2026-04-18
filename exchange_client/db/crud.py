@@ -688,32 +688,25 @@ def manually_reset_circuit_breaker(
 # ===== Daily Balance Snapshots =====
 def get_current_daily_snapshot(
     db: Session,
-    profile_name: str,
-    account_id: Optional[int] = None,
+    account_id: int,
+    profile_name: Optional[str] = None,  # unused, kept for call-site compat during transition
 ) -> Optional[DailyBalanceSnapshot]:
-    if account_id is not None:
-        return (
-            db.query(DailyBalanceSnapshot)
-            .filter(DailyBalanceSnapshot.account_id == account_id)
-            .order_by(DailyBalanceSnapshot.snapshot_date.desc())
-            .first()
-        )
     return (
         db.query(DailyBalanceSnapshot)
-        .filter(DailyBalanceSnapshot.profile_name == profile_name)
+        .filter(DailyBalanceSnapshot.account_id == account_id)
         .order_by(DailyBalanceSnapshot.snapshot_date.desc())
         .first()
     )
 
 def create_daily_snapshot(
     db: Session,
-    profile_name: str,
+    account_id: int,
     starting_balance: Decimal,
-    account_id: Optional[int] = None,       # <-- new
+    profile_name: Optional[str] = None,  # informational label only
 ) -> DailyBalanceSnapshot:
     snapshot = DailyBalanceSnapshot(
+        account_id=account_id,
         profile_name=profile_name,
-        account_id=account_id,              # <-- new
         snapshot_date=datetime.now(timezone.utc),
         starting_balance=starting_balance,
         highest_balance=starting_balance,
@@ -774,13 +767,17 @@ def finalize_daily_snapshot(
 
 def get_snapshot_history(
     db: Session,
-    profile_name: str,
-    limit: int = 30
+    account_id: int,
+    limit: int = 30,
 ) -> List[DailyBalanceSnapshot]:
-    """Get historical snapshots"""
-    return db.query(DailyBalanceSnapshot).filter(
-        DailyBalanceSnapshot.profile_name == profile_name
-    ).order_by(DailyBalanceSnapshot.snapshot_date.desc()).limit(limit).all()
+    """Get historical snapshots for an exchange account."""
+    return (
+        db.query(DailyBalanceSnapshot)
+        .filter(DailyBalanceSnapshot.account_id == account_id)
+        .order_by(DailyBalanceSnapshot.snapshot_date.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def reset_circuit_breaker_baseline(

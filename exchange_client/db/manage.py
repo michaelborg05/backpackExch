@@ -124,11 +124,6 @@ def update_keys():
     from db.models import TradingProfileDB, IndicatorDB
     from utils.db_secrets import encrypt_secret, is_encrypted
 
-    yaml_path = Path(__file__).parent.parent / "config/trading_profilesa.yaml"
-    if not yaml_path.exists():
-        print(f"✗ trading_profiles.yaml not found: {yaml_path}")
-        return
-
     if not os.environ.get("DB_ENCRYPTION_KEY"):
         print(
             "ERROR: DB_ENCRYPTION_KEY is not set.\n"
@@ -139,39 +134,27 @@ def update_keys():
         )
         sys.exit(1)
 
-    with open(yaml_path) as f:
-        data = yaml.safe_load(f)
-
-    profiles_cfg: dict = data.get("profiles", {})
-
     db = SessionLocal()
     try:
-        for name, cfg in profiles_cfg.items():
-
             # ── Resolve credentials ───────────────────────────────────────
-            raw_key    = os.getenv(cfg.get("api_key_env", ""))
-            raw_secret = os.getenv(cfg.get("secret_env", ""))
+        raw_key    = os.getenv("BULLET_DELEGATE_KEY")
+        raw_secret = os.getenv("BULLET_PRIVATE_KEY")
 
-            if not raw_key or not raw_secret:
-                print(f"  SKIP  {name!r} — missing env var "
-                      f"({cfg.get('api_key_env')} / {cfg.get('secret_env')})")
-                skipped += 1
-                continue
-            
-            enc_key    = raw_key    if is_encrypted(raw_key)    else encrypt_secret(raw_key)
-            enc_secret = raw_secret if is_encrypted(raw_secret) else encrypt_secret(raw_secret)
+        profile = input("Enter Profile name: ")
 
-            print (f"raw: {raw_key} - encrypted: {enc_key}")
+        enc_key    = raw_key    if is_encrypted(raw_key)    else encrypt_secret(raw_key)
+        enc_secret = raw_secret if is_encrypted(raw_secret) else encrypt_secret(raw_secret)
 
-            # ── Check for existing profile (idempotency) ──────────────────
-            existing: TradingProfileDB | None = (
-                db.query(TradingProfileDB).filter_by(name=name).first()
-            )
+        print (f"raw: {raw_key} - encrypted: {enc_key}")
 
-            if existing:
-                print(f"    {name!r} — profile already exists in DB (id={existing.id}) - credentials now stored on ExchangeAccount, skipping")
-            else:
-                print(f"  Profile {name!r}  not found")
+        # ── Check for existing profile (idempotency) ──────────────────
+        existing: ExchangeAccount | None = (
+            db.query(ExchangeAccount).filter_by(name=profile).first()
+        )
+        existing.api_key = enc_key
+        existing.secret = enc_secret
+        db.commit()
+        db.refresh(existing)
 
     except Exception as e:
         db.rollback()
@@ -762,7 +745,13 @@ def migrate_circuit_breaker():
                     case "1m_MB_ATR":
                         current_value = 143.14
                     
-                create_daily_snapshot(db, profile.name, current_value)
+                account_id = getattr(profile, 'account_id', None)
+                create_daily_snapshot(
+                    db,
+                    account_id=account_id,
+                    starting_balance=current_value,
+                    profile_name=profile.name,
+                )
                 print(f"✓ Created initial snapshot for {profile.name}: ${current_value:.2f}")
                 
             except Exception as e:

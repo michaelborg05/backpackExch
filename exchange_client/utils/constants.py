@@ -155,9 +155,24 @@ class TrendState(Enum):
 
 class StrategyType(Enum):
     """Trading strategy types"""
-    TREND_FOLLOWING = "trend_following"
-    MEAN_REVERSION = "mean_reversion"
-    RANGE_TRADING = "range_trading"
+    TREND_FOLLOWING       = "trend_following"
+    MEAN_REVERSION        = "mean_reversion"
+    RANGE_TRADING         = "range_trading"
+    SHORT_TREND_FOLLOWING = "short_trend_following"
+    SHORT_MEAN_REVERSION  = "short_mean_reversion"
+
+    @property
+    def is_short(self) -> bool:
+        return self.value.startswith("short_")
+
+    @property
+    def base(self) -> "StrategyType":
+        """Returns the long-side equivalent for shared logic."""
+        if self == StrategyType.SHORT_TREND_FOLLOWING:
+            return StrategyType.TREND_FOLLOWING
+        if self == StrategyType.SHORT_MEAN_REVERSION:
+            return StrategyType.MEAN_REVERSION
+        return self
 
 
 class TradingType(Enum):

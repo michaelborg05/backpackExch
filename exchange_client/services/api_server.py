@@ -1219,11 +1219,32 @@ async def get_all_daily_summaries():
     """Get daily PnL summary for all profiles"""
     profile_manager = get_profile_manager()
     circuit_breaker = get_circuit_breaker()
-    
+
     summaries = {}
     for profile in profile_manager.get_all_profiles():
         summaries[profile.name] = circuit_breaker.get_daily_summary(profile.name)
-    
+
+    return summaries
+
+
+@app.get("/circuit-breaker/account-summaries")
+async def get_account_daily_summaries():
+    """
+    Get today's P&L summary — one entry per exchange account.
+    Suitable for the overview KPI; no double-counting across sibling profiles.
+    """
+    profile_manager = get_profile_manager()
+    circuit_breaker = get_circuit_breaker()
+
+    seen_account_ids: set = set()
+    summaries = []
+    for profile in profile_manager.get_all_profiles():
+        account_id = getattr(profile, 'account_id', None)
+        if account_id in seen_account_ids:
+            continue
+        seen_account_ids.add(account_id)
+        summaries.append(circuit_breaker.get_daily_summary(profile.name))
+
     return summaries
 
 @app.get("/signals/status/{profile_name}")
@@ -2774,7 +2795,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "min_indicators_required", "min_entry_indicators_required",
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
         "min_position_age_for_trend_check", "max_position_hours",
-        "market_type", "direction", "leverage_multiplier",
+        "market_type", "leverage_multiplier",
         "is_active",
     ]
 
@@ -3050,9 +3071,8 @@ def _serialize_profile(p, cb=None) -> dict:
         # Circuit breaker (embedded)
         "circuit_breaker":             _serialize_cb(cb) if cb else None,
 
-        # Market & direction
+        # Market
         "market_type":                 p.market_type or "SPOT",
-        "direction":                   p.direction or "LONG",
         "leverage_multiplier":         float(p.leverage_multiplier) if p.leverage_multiplier else 1.0,
 
         # Account linkage

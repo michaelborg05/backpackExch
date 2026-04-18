@@ -170,9 +170,8 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         max_position_hours=cfg.get("max_position_hours", None),
         # Market regime
         use_market_regime_filter=cfg.get("use_market_regime_filter", False),
-        # Market type & direction
+        # Market type
         market_type=cfg.get("market_type", "SPOT"),
-        direction=cfg.get("direction", "LONG"),
         # Leverage (perps only; always 1.0 for SPOT)
         leverage_multiplier=float(cfg.get("leverage_multiplier", 1.0)),
     )
@@ -350,7 +349,6 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "min_position_age_for_trend_check": row.min_position_age_for_trend_check or 120,
             # Market type & direction
             "market_type": row.market_type or "SPOT",
-            "direction": row.direction or "LONG",
         }
         from utils.db_secrets import resolve_secret
         # Resolve API credentials from linked ExchangeAccount

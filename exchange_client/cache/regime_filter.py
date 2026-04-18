@@ -131,7 +131,7 @@ class RegimeFilter:
         return regime, reason
     
     def _check_high_risk(
-        self, 
+        self,
         symbol: str,
         primary_trend,
         confirm_trend,
@@ -140,120 +140,119 @@ class RegimeFilter:
         price: Decimal = None,
     ) -> Tuple[bool, Optional[str]]:
         """
-        Detect HIGH RISK conditions that invalidate ALL setups
-        
-        These are conditions where even a "perfect" 3/3 bullish trend should be avoided
+        Detect HIGH RISK conditions that invalidate ALL setups.
+        Short strategy variants flip the long-side RSI and whipsaw conditions.
         """
         rsi = primary_trend.rsi
         if price is None:
             price = confirm_trend.price
-            
-        #1. Panic zone
-        if strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
-            # Original logic - block extreme panic
+
+        # 1. PANIC / SQUEEZE ZONES (direction-aware)
+        if strategy_type.is_short:
+            # For shorts: extreme oversold = high bounce risk
+            if rsi < 20:
+                return True, f"Extreme oversold - RSI {rsi:.0f} too low for shorting (bounce risk)"
+            rsi_momentum, _ = self.trend_cache._get_rsi_momentum(symbol, primary_timeframe)
+            if rsi_momentum is not None and rsi_momentum < -12:
+                return True, f"RSI already in free-fall ({rsi_momentum:.1f}) - short entry too late"
+        elif strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
             if rsi < self.rsi_panic:  # 30
                 return True, f"Panic zone - RSI {rsi:.0f} indicates distribution"
-        
         elif strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion LOVES oversold, but not EXTREME panic
-            # Only block if RSI < 20 (true panic) or dropping very fast
-            rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
-                symbol, primary_timeframe
-            )
-            
-            if rsi < 20:  # Extreme panic
+            rsi_momentum, _ = self.trend_cache._get_rsi_momentum(symbol, primary_timeframe)
+            if rsi < 20:
                 return True, f"Extreme panic - RSI {rsi:.0f} too low even for mean reversion"
-            
-            # Block if RSI is plummeting (momentum < -10)
             if rsi_momentum is not None and rsi_momentum < -10:
                 return True, f"Free fall - RSI dropping {rsi_momentum:.1f} (wait for stabilization)"
-                
-        
-        # 2. EUPHORIA ZONE - Retail FOMO topping
-        if rsi > self.rsi_euphoria:
-            return True, f"Euphoria zone - RSI {rsi:.0f} indicates exhaustion"
-        
-        # 3. VOLATILITY SPIKE - Risk expanded beyond normal
+
+        # 2. EUPHORIA / OVERBOUGHT ZONE
+        if strategy_type == StrategyType.SHORT_MEAN_REVERSION:
+            # Short mean reversion WANTS overbought — only block extreme RSI still surging
+            if rsi > 85:
+                rsi_momentum, _ = self.trend_cache._get_rsi_momentum(symbol, primary_timeframe)
+                if rsi_momentum is not None and rsi_momentum > 8:
+                    return True, f"Extreme overbought with surge - RSI {rsi:.0f} still climbing ({rsi_momentum:+.1f})"
+        elif strategy_type == StrategyType.SHORT_TREND_FOLLOWING:
+            # Short trend following: high RSI is our setup — only block if RSI surging upward
+            if rsi > 80:
+                rsi_momentum, _ = self.trend_cache._get_rsi_momentum(symbol, primary_timeframe)
+                if rsi_momentum is not None and rsi_momentum > 10:
+                    return True, f"Euphoria surge - RSI {rsi:.0f} climbing fast ({rsi_momentum:+.1f}) — wait for rollover"
+        else:
+            if rsi > self.rsi_euphoria:
+                return True, f"Euphoria zone - RSI {rsi:.0f} indicates exhaustion"
+
+        # 3. VOLATILITY SPIKE - Risk expanded beyond normal (same for all strategies)
         atr_data = self.atr_cache.get(symbol, primary_timeframe)
         if atr_data is not None:
             atr_ratio = atr_data.get_ratio()
             if atr_ratio > self.atr_spike:
                 return True, f"Volatility spike - ATR {atr_ratio:.2f}x normal (stops unreliable)"
-        
-         # 4. DANGEROUS WHIPSAW - Strong UPTREND breaking sharply
-        # IMPORTANT: Only block when a strong UPTREND is breaking down
-        # Do NOT block bullish recoveries from downtrends (that's 15m leading, which is GOOD)
-        #
-        # Philosophy:
-        # - Uptrend breaking = Danger (institutional exit, something broke)
-        # - Downtrend recovering = Opportunity (15m leading HTF into recovery)
-        #
-        # We're trading LONG only, so:
-        # - Block: Strong bullish HTF + bearish LTF reversal (uptrend breaking)
-        # - Allow: Bearish HTF + bullish LTF recovery (downtrend recovering - GOOD!)
 
-        if strategy_type == StrategyType.MEAN_REVERSION:
+        # 4. WHIPSAW / REVERSAL DETECTION
+        if strategy_type == StrategyType.SHORT_TREND_FOLLOWING:
+            # Block: strong bearish HTF + bullish LTF reversal = short squeeze forming
+            if confirm_trend is not None:
+                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
+                if primary_diff_pct < -self.whipsaw_threshold:  # Strong bearish 60m
+                    if confirm_diff_pct > abs(self.reversal_threshold):  # LTF turning bullish
+                        if price > confirm_trend.ema20:  # Price recaptured LTF EMA = genuine recovery
+                            return True, (
+                                f"Short squeeze risk - strong downtrend but LTF recovering "
+                                f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
+                            )
+        elif strategy_type == StrategyType.SHORT_MEAN_REVERSION:
+            # Block if BOTH timeframes are in a strong coordinated rally (too late to short)
+            if confirm_trend is not None:
+                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
+                if primary_diff_pct > 2.0 and confirm_diff_pct > 2.0:
+                    return True, (
+                        f"Coordinated rally - both timeframes very bullish "
+                        f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%) — wait for exhaustion"
+                    )
+        elif strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion LIKES volatility and reversals
             # Only block if BOTH timeframes are in free fall
             if confirm_trend is not None:
                 primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
                 confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                
-                # Only block if BOTH very bearish (coordinated crash)
                 if primary_diff_pct < -2.0 and confirm_diff_pct < -2.0:
                     return True, (
                         f"Coordinated crash - both timeframes very bearish "
                         f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
                     )
         elif strategy_type == StrategyType.RANGE_TRADING:
-            # Range trading WANTS a strong 60m trend + 15m pullback — that IS
-            # the setup. The whipsaw check would fire on exactly the best range
-            # trade conditions, so we skip it entirely.
-            #
-            # Range trading is still protected by:
-            #   - Panic zone RSI check (above)
-            #   - Euphoria zone RSI check (above)
-            #   - ATR volatility spike check (above)
-            #   - Distribution pattern check (below)
-            #   - Profile's own trend_indicators (60m BB upper hard_stop etc.)
-            pass  # No whipsaw check for range trading
-
+            # Range trading relies on its own entry indicators — skip whipsaw check
+            pass
         else:
-            #strategy_type in (StrategyType.TREND_FOLLOWING,StrategyType.RANGE_TRADING):
-
-            # ... existing whipsaw logic ...
+            # TREND_FOLLOWING: block strong bullish HTF + bearish LTF reversal
             if confirm_trend is not None:
                 primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
                 confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                            
-                # ONLY Case: Strong bullish HTF + Strong bearish LTF
-                # (Do NOT check the inverse - that's a recovery, not a whipsaw)
                 if primary_diff_pct > self.whipsaw_threshold:  # Strong bullish 60m
-                    if confirm_diff_pct < self.reversal_threshold:  # Strong bearish 15m (reversal)
-                        # NEW: Don't block if price has already recovered above the confirm EMA20
-                        # (EMAs are lagging — price above them means the "reversal" is already over)
+                    if confirm_diff_pct < self.reversal_threshold:  # Strong bearish 15m
                         if price > confirm_trend.ema20:
                             pass  # Recovery, not breakdown — let it through
                         else:
                             return True, (
                                 f"Whipsaw reversal - strong uptrend breaking "
                                 f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
-                            )    
-        
-         
-        # 5. DISTRIBUTION PATTERN - High volume selling
-        # (Only flag if we have volume data AND it's extreme)
-        if primary_trend.volume_ratio is not None:
+                            )
+
+        # 5. DISTRIBUTION PATTERN - High volume selling (long strategies only)
+        # For short strategies, high volume selling is a confirmation, not a risk
+        if not strategy_type.is_short and primary_trend.volume_ratio is not None:
             if primary_trend.volume_ratio > self.distribution_volume:
-                # High volume - check if it's selling pressure
                 if price < primary_trend.vwap:  # Below VWAP
-                    # Get RSI momentum to confirm distribution
                     rsi_momentum, rsi_direction = self.trend_cache._get_rsi_momentum(
                         symbol, primary_timeframe
                     )
                     if rsi_direction == "decreasing":
                         return True, f"Distribution pattern - high volume ({primary_trend.volume_ratio:.1f}x) selling below VWAP"
-        
+
         return False, None
     
     def _check_choppy(

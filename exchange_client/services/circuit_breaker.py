@@ -82,8 +82,8 @@ class CircuitBreakerService:
 
     # ── Cache helpers ─────────────────────────────────────────────────────────
 
-    def _cache_key(self, profile_name: str, account_id: Optional[int]) -> str:
-        return f"acct_{account_id}" if account_id is not None else f"prof_{profile_name}"
+    def _cache_key(self, profile_name: str, account_id: int) -> str:
+        return f"acct_{account_id}"
 
     def _ensure_initialized(self):
         if not self._initialized:
@@ -98,20 +98,20 @@ class CircuitBreakerService:
             self._initialized = True
             return
 
-        seen: set = set()
+        seen_account_ids: set = set()
         try:
             with get_db_session() as db:
                 for profile in pm.get_all_profiles():
                     account_id = self._get_account_id(profile.name)
-                    key = self._cache_key(profile.name, account_id)
-                    if key in seen:
+                    if account_id in seen_account_ids:
                         continue
-                    seen.add(key)
+                    seen_account_ids.add(account_id)
+                    key = self._cache_key(profile.name, account_id)
 
                     event = get_active_circuit_breaker(db, profile.name, account_id)
                     self._event_cache[key] = _to_cached_event(event) if event else None
 
-                    snapshot = get_current_daily_snapshot(db, profile.name, account_id)
+                    snapshot = get_current_daily_snapshot(db, account_id) if account_id else None
                     if snapshot:
                         self._snapshot_cache[key] = _to_cached_snapshot(snapshot)
 
@@ -168,7 +168,7 @@ class CircuitBreakerService:
         key = self._cache_key(profile_name, account_id)
         if key not in self._snapshot_cache:
             with get_db_session() as db:
-                snapshot = get_current_daily_snapshot(db, profile_name, account_id)
+                snapshot = get_current_daily_snapshot(db, account_id) if account_id else None
             if snapshot:
                 self._snapshot_cache[key] = _to_cached_snapshot(snapshot)
             else:
@@ -296,24 +296,18 @@ class CircuitBreakerService:
         )
 
         seen_account_ids: set = set()
-        seen_standalone: set = set()
 
         with get_db_session() as db:
             for profile in profile_manager.get_all_profiles():
                 account_id = self._get_account_id(profile.name)
 
-                if account_id is not None:
-                    if account_id in seen_account_ids:
-                        self.logger.debug(
-                            f"[{profile.name}] Skipping — "
-                            f"account_id={account_id} already processed"
-                        )
-                        continue
-                    seen_account_ids.add(account_id)
-                else:
-                    if profile.name in seen_standalone:
-                        continue
-                    seen_standalone.add(profile.name)
+                if account_id in seen_account_ids:
+                    self.logger.debug(
+                        f"[{profile.name}] Skipping — "
+                        f"account_id={account_id} already processed"
+                    )
+                    continue
+                seen_account_ids.add(account_id)
 
                 try:
                     if should_update_snapshots:
@@ -591,7 +585,10 @@ class CircuitBreakerService:
 
             if not cached_snap:
                 new_snap = create_daily_snapshot(
-                    db, profile_name, current_value, account_id
+                    db,
+                    account_id=account_id,
+                    starting_balance=current_value,
+                    profile_name=profile_name,
                 )
                 self._snapshot_cache[key] = _to_cached_snapshot(new_snap)
                 self.logger.info(
@@ -607,7 +604,10 @@ class CircuitBreakerService:
                 # New UTC day — finalise old snapshot and open a new one
                 finalize_daily_snapshot(db, cached_snap.id, current_value)
                 new_snap = create_daily_snapshot(
-                    db, profile_name, current_value, account_id
+                    db,
+                    account_id=account_id,
+                    starting_balance=current_value,
+                    profile_name=profile_name,
                 )
                 self._snapshot_cache[key] = _to_cached_snapshot(new_snap)
                 self.logger.info(

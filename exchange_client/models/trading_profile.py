@@ -18,7 +18,6 @@ class TradingProfile(BaseModel):
     trading_type: TradingType = Field(TradingType.RULES_LIVE, description="Type of trading (e.g., 'rules_live, ai_live, shadow')")
     strategy_type: StrategyType = Field(StrategyType.TREND_FOLLOWING, description="Type of strategy (e.g., 'trend_following', 'mean_reversion')")
     market_type: str = Field("SPOT", description="Market type: 'SPOT' or 'PERP'")
-    direction: str = Field("LONG", description="Trade direction for this profile: 'LONG' or 'SHORT'")
 
     # Position management settings (as percentages)
     take_profit_pct: Optional[Decimal] = Field(None, description="Take profit percentage (e.g., 5.0 for 5%)")
@@ -171,9 +170,8 @@ class ProfileCreateRequest(BaseModel):
     min_position_age_for_trend_check: Optional[int] = 120
     max_position_hours: Optional[int] = None
 
-    # Market & direction
+    # Market type
     market_type: Optional[str] = "SPOT"
-    direction: Optional[str] = "LONG"  # "LONG" or "SHORT"
 
     # Active flag
     is_active: Optional[bool] = True
@@ -186,7 +184,6 @@ class ProfileUpdateRequest(BaseModel):
     trading_type: Optional[str] = None
     strategy_type: Optional[str] = None
     market_type: Optional[str] = None
-    direction: Optional[str] = None  # "LONG" or "SHORT"
 
     take_profit_pct: Optional[float] = None
     stop_loss_pct: Optional[float] = None

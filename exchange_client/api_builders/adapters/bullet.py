@@ -589,14 +589,64 @@ class BulletAdapter(ExchangeAdapter):
     def _parse_order_response(self, raw: Any, order_ns: Any) -> Optional[Any]:
         """Parse a Bullet /tx/submit response into an OrderResponse.
 
-        Bullet may return a Binance FAPI-style fill dict or a simple tx acknowledgement.
-        Falls back to a synthetic OrderResponse built from price cache when the
-        response doesn't contain execution details.
+        Handles three response shapes:
+          1. Bullet native: {id, events:[...], receipt:{result:'successful'}, status:'submitted'}
+          2. Binance FAPI-style: {orderId, executedQty, ...}
+          3. Synthetic fallback using price cache
         """
         from models.trade import OrderResponse
         import time
 
-        # --- Case 1: Binance FAPI-style fill (orderId + executedQty present) ---
+        # --- Case 1: Bullet native tx response with events array ---
+        if isinstance(raw, dict) and "events" in raw and isinstance(raw.get("events"), list):
+            receipt = raw.get("receipt", {})
+            if receipt.get("result") != "successful":
+                self.logger.error(
+                    f"[Bullet] tx result was not successful: {receipt.get('result')}"
+                )
+                return None
+            tx_id = str(raw.get("id", "bullet-unknown"))
+            # Find our Trade event (the taker side — is_maker=False)
+            exec_price = None
+            exec_qty = None
+            order_id = str(order_ns.__dict__.get("order_id", tx_id))
+            for event in raw["events"]:
+                val = event.get("value", {})
+                trade = val.get("trade") or val.get("place_order")
+                if not trade:
+                    continue
+                if event.get("key") == "Exchange/Trade" and not trade.get("is_maker", True):
+                    exec_price = str(trade.get("price", order_ns.price))
+                    exec_qty = str(trade.get("size", order_ns.quantity))
+                    order_id = str(trade.get("order_id", tx_id))
+                    break
+                if event.get("key") == "Exchange/PlaceOrder" and exec_price is None:
+                    # Use PlaceOrder as fallback if no Trade event found
+                    exec_price = str(trade.get("price", order_ns.price))
+                    exec_qty = str(trade.get("size", order_ns.quantity))
+                    order_id = str(trade.get("order_id", tx_id))
+
+            if exec_price is None:
+                exec_price = str(order_ns.price)
+                exec_qty = str(order_ns.quantity)
+
+            executed_quote = str(float(exec_qty) * float(exec_price))
+            self.logger.info(
+                f"[Bullet] tx {tx_id} filled: qty={exec_qty} @ {exec_price}"
+            )
+            return OrderResponse(**{
+                "id": order_id,
+                "orderType": "Market",
+                "symbol": order_ns.symbol,
+                "side": order_ns.side,
+                "status": "Filled",
+                "executedQuantity": exec_qty,
+                "executedQuoteQuantity": executed_quote,
+                "price": exec_price,
+                "createdAt": int(time.time() * 1000),
+            })
+
+        # --- Case 2: Binance FAPI-style fill (orderId + executedQty present) ---
         if isinstance(raw, dict) and ("orderId" in raw or "id" in raw):
             try:
                 order_id = str(raw.get("orderId") or raw.get("id", "0"))
@@ -605,10 +655,10 @@ class BulletAdapter(ExchangeAdapter):
                 executed_quote = str(float(executed_qty) * float(exec_price))
                 return OrderResponse(**{
                     "id": order_id,
-                    "orderType": raw.get("type", "MARKET"),
+                    "orderType": "Market",
                     "symbol": order_ns.symbol,
                     "side": order_ns.side,
-                    "status": raw.get("status", "FILLED"),
+                    "status": "Filled",
                     "executedQuantity": executed_qty,
                     "executedQuoteQuantity": executed_quote,
                     "price": exec_price,
@@ -617,8 +667,7 @@ class BulletAdapter(ExchangeAdapter):
             except Exception as e:
                 self.logger.warning(f"[Bullet] FAPI parse failed, trying synthetic: {e}")
 
-        # --- Case 2: tx hash acknowledgement {"hash": "0x..."} ---
-        # Build a synthetic OrderResponse using price cache so DB persistence works
+        # --- Case 3: Synthetic fallback using price cache ---
         try:
             from cache.price_cache import get_price_cache
             tx_id = (
@@ -627,7 +676,12 @@ class BulletAdapter(ExchangeAdapter):
             )
             price_cache = get_price_cache()
             base = order_ns.symbol.split("-")[0]
-            current_price = price_cache.get_price(base) or float(order_ns.price)
+            current_price = (
+                price_cache.get_price(order_ns.symbol)
+                or price_cache.get_price(f"{base}_USDC")
+                or price_cache.get_price(base)
+                or float(order_ns.price)
+            )
             executed_qty = str(order_ns.quantity)
             executed_quote = str(float(executed_qty) * float(current_price))
             self.logger.info(
@@ -636,10 +690,10 @@ class BulletAdapter(ExchangeAdapter):
             )
             return OrderResponse(**{
                 "id": str(tx_id),
-                "orderType": "MARKET",
+                "orderType": "Market",
                 "symbol": order_ns.symbol,
                 "side": order_ns.side,
-                "status": "FILLED",
+                "status": "Filled",
                 "executedQuantity": executed_qty,
                 "executedQuoteQuantity": executed_quote,
                 "price": str(current_price),

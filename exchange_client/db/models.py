@@ -34,7 +34,6 @@ class TradingProfileDB(Base):
     trading_type =  Column(String, server_default="rules_live")
     strategy_type = Column(String, default=StrategyType.TREND_FOLLOWING.value)
     market_type = Column(String, default="SPOT", server_default=text("'SPOT'"))  # "SPOT" | "PERP"
-    direction = Column(String, default="LONG", server_default=text("'LONG'"))    # "LONG" | "SHORT"
     
     # Timing & Signal Generation
     signal_timeframe = Column(String, default="15")
@@ -233,34 +232,34 @@ class DailyBalanceSnapshot(Base):
     __tablename__ = "daily_balance_snapshots"
     
     id = Column(Integer, primary_key=True)
-    profile_name = Column(String, nullable=False, index=True)
     account_id = Column(
         Integer,
-        ForeignKey("exchange_accounts.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
+        ForeignKey("exchange_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
-    
+    # Informational only — the canonical profile name for this account at creation time
+    profile_name = Column(String, nullable=True, index=True)
+
     snapshot_date = Column(DateTime(timezone=True), nullable=False, index=True)  # Start of 24h period
     starting_balance = Column(Numeric(20, 8), nullable=False)
-    
+
     circuit_breaker_baseline = Column(Numeric(20, 8), nullable=True)
-    
+
     # Optional: track high/low during the period
     highest_balance = Column(Numeric(20, 8), nullable=True)
     lowest_balance = Column(Numeric(20, 8), nullable=True)
-    
+
     # End of period summary (updated when period ends)
     ending_balance = Column(Numeric(20, 8), nullable=True)
     pnl = Column(Numeric(20, 8), nullable=True)
     pnl_pct = Column(Numeric(10, 4), nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+
     __table_args__ = (
-        Index('ix_snapshots_profile_date', 'profile_name', 'snapshot_date'),
-        # Prevent duplicate snapshots for same profile/date
+        # Uniqueness enforced via partial index in migration (account_id + date)
         CheckConstraint('snapshot_date IS NOT NULL', name='valid_snapshot_date'),
     )
 

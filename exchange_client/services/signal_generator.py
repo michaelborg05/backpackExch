@@ -59,21 +59,18 @@ class SignalGenerator:
         self.use_entry_filter = getattr(profile, 'use_entry_filter', False)
         self.entry_timeframe = getattr(profile, 'entry_timeframe', self.trading_timeframe)
         
-        # NEW: Determine regime filter timeframes based on strategy
-        if self.strategy_type == StrategyType.MEAN_REVERSION:
+        # Determine regime filter timeframes based on strategy
+        if self.strategy_type in (StrategyType.MEAN_REVERSION, StrategyType.SHORT_MEAN_REVERSION):
             # Mean reversion: regime checks execution timeframe (where entry logic lives)
             self.regime_primary_tf = self.entry_timeframe    # 15m
             self.regime_confirm_tf = self.entry_timeframe    # 15m
         else:
-            # Trend following: regime checks higher TF + lower TF
+            # Trend following (long and short): regime checks higher TF + lower TF
             self.regime_primary_tf = self.trend_timeframe    # 60m
             self.regime_confirm_tf = self.entry_timeframe    # 15m
 
         # AI_AGENT: lazy-load handler (only instantiated if strategy_type matches)
         self._ai_handler: Optional[AISignalHandler] = None
-
-        # Profile trade direction: "LONG" or "SHORT"
-        self.direction: str = getattr(profile, 'direction', 'LONG') or 'LONG'
 
         # Thresholds
         self.min_volume_ratio = getattr(profile, 'min_volume_ratio', 1.5)
@@ -138,7 +135,7 @@ class SignalGenerator:
         # 1. BALANCE CHECK
         # For SHORT profiles the entry is an ASK (SELL); validate_balance_for_trade
         # handles PERP market_type by always checking USDC regardless of sale_action.
-        balance_action = "SELL" if self.direction == "SHORT" else "BUY"
+        balance_action = "SELL" if self.strategy_type.is_short else "BUY"
         is_valid, balance_error = self._adapter.validate_balance_for_trade(
             sale_action=balance_action,
             symbol=symbol
@@ -198,7 +195,7 @@ class SignalGenerator:
                 )
                        
         # Determine direction for this signal
-        signal_direction = TradeSide.SHORT if self.direction == "SHORT" else TradeSide.LONG
+        signal_direction = TradeSide.SHORT if self.strategy_type.is_short else TradeSide.LONG
 
         # Initialize scoring
         reasons = []
@@ -328,8 +325,9 @@ class SignalGenerator:
             
             reasons.append(f"✅ ATR: {atr_reason}")
         
-        # 8. NOT OVERBOUGHT (safety check - different for each strategy)
+        # 8. RSI SAFETY CHECK (direction-aware)
         if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
+            # Long strategies: penalise overbought
             overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
             indicators['overbought'] = overbought_check
             ob_check = IndicatorResult(
@@ -340,10 +338,8 @@ class SignalGenerator:
                 message=f"RSI {overbought_check['rsi']:.0f} {'not overbought' if overbought_check['is_valid'] else 'overbought'}"
             )
             validation.additional_checks.append(ob_check)
-
             if not overbought_check['is_valid']:
                 reasons.append(f"⚠️  RSI: {ob_reason}")
-                # If over 80, penalise
                 if overbought_check['rsi'] > 80:
                     confidence_score += -30
                 else:
@@ -351,10 +347,31 @@ class SignalGenerator:
             else:
                 reasons.append(f"✅ RSI: {ob_reason}")
                 confidence_score += self.safety_weight
+        elif self.strategy_type == StrategyType.SHORT_TREND_FOLLOWING:
+            # Short trend: penalise oversold (we need room to fall)
+            trend = self.trend_cache.get(symbol, self.trading_timeframe)
+            rsi = float(trend.rsi) if trend else 50.0
+            oversold = rsi < 35
+            ob_check = IndicatorResult(
+                type="rsi_oversold",
+                is_bullish=not oversold,
+                config={"threshold": 35},
+                values={"rsi": rsi},
+                message=f"RSI {rsi:.0f} {'has room to fall' if not oversold else 'oversold - limited downside'}"
+            )
+            validation.additional_checks.append(ob_check)
+            if oversold:
+                reasons.append(f"⚠️  RSI: {rsi:.0f} oversold — limited downside room")
+                if rsi < 25:
+                    confidence_score += -30
+                else:
+                    confidence_score += self.safety_weight * 0.3
+            else:
+                reasons.append(f"✅ RSI: {rsi:.0f} — room to fall")
+                confidence_score += self.safety_weight
         else:
-            # Mean reversion doesn't need overbought check (wants oversold)
-            # But entry indicators already check rsi_oversold, so we skip this
-            reasons.append(f"✅ RSI: Mean reversion (oversold check in entry)")
+            # Mean reversion (long and short): entry indicators handle RSI check
+            reasons.append(f"✅ RSI: Mean reversion (RSI check in entry indicators)")
             confidence_score += self.safety_weight
 
         #calculate bollinger band location        
@@ -370,11 +387,10 @@ class SignalGenerator:
             message=f"%B={pct_b:.2f}" if pct_b is not None else "BB data unavailable"
         )
 
-        # NEW: Calculate confidence based on strategy type
-        if self.strategy_type == StrategyType.MEAN_REVERSION:
-            # Mean reversion has different confidence factors
+        # Calculate confidence based on strategy type
+        if self.strategy_type in (StrategyType.MEAN_REVERSION, StrategyType.SHORT_MEAN_REVERSION):
             confidence_pct = self._mean_reversion_confidence_score(
-                symbol, 
+                symbol,
                 self.entry_timeframe,
                 base_score=confidence_score,
                 max_score=self.max_confidence,
@@ -389,7 +405,7 @@ class SignalGenerator:
                 max_score=self.max_confidence,
                 regime_reason=regime_reason
             )
-        else:
+        else:  # TREND_FOLLOWING and SHORT_TREND_FOLLOWING
             # Trend following: standard normalization + BB position penalty
             confidence_pct = (confidence_score / self.max_confidence) * 100
             bb_penalty, bb_reason = self._get_bb_confidence_penalty(symbol, self.entry_timeframe, pct_b=pct_b)
@@ -445,8 +461,8 @@ class SignalGenerator:
         # Reduces order size when buying high in the band, allows full/larger size lower in band.
         # Mean reversion / range trading manage this via their own entry indicators.
         position_size_scalar = 1.0
-        if self.strategy_type == StrategyType.TREND_FOLLOWING:
-            position_size_scalar, scalar_reason = self._get_bb_position_scalar(symbol, self.entry_timeframe,pct_b=pct_b)
+        if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.SHORT_TREND_FOLLOWING):
+            position_size_scalar, scalar_reason = self._get_bb_position_scalar(symbol, self.entry_timeframe, pct_b=pct_b)
             if position_size_scalar != 1.0:
                 reasons.append(scalar_reason)
                 position_size_scalar = 1.0
@@ -513,7 +529,7 @@ class SignalGenerator:
         AI_LIVE mode: AI decision controls live execution.
         """
 
-        signal_direction = TradeSide.SHORT if self.direction == "SHORT" else TradeSide.LONG
+        signal_direction = TradeSide.SHORT if self.strategy_type.is_short else TradeSide.LONG
 
         # Build gate context from what we already have in cache
         trend_60m = self.trend_cache.get(symbol, self.trend_timeframe)
