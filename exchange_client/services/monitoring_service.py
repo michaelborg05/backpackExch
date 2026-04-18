@@ -521,8 +521,8 @@ class MonitoringService:
             
     def _validate_open_positions(self):
         """
-        Validate open positions against cached balances.
-        Close positions where the token has been sold but position wasn't updated.
+        Validate open positions against the exchange.
+        Close positions where the token has been closed externally but our DB wasn't updated.
         """
 
         profile_manager = get_profile_manager()
@@ -534,55 +534,100 @@ class MonitoringService:
 
         with get_db_session() as db:
             profiles = profile_manager._profiles.values()
-            
+
             for profile in profiles:
                 open_positions = get_open_positions(db, profile.name)
                 if open_positions is None or len(open_positions) == 0:
                     continue
-                # Get cached balances for this profile
-                cached_balances = balance_cache.get_profile_balances(profile.name)
-                
-                if not cached_balances:
-                    self.logger.warning(f"No cached balances for profile {profile.name}, skipping validation")
-                    continue
-                
-                for position in open_positions:
-                    symbol = position.symbol
-                    # Extract base asset (e.g., "SOL" from "SOL_USDC")
-                    base_asset = symbol.split('_')[0]
-                    
-                    # Check if we still hold this token (from cache)
-                    balance_info = cached_balances.get(base_asset)
-                    
-                    expected_quantity = str(position.remaining_quantity)
 
-                    # Check if balance is insufficient
-                    if balance_info is None:
-                        current_balance = 0
-                    else:
-                        current_balance = float(balance_info.get('available', 0)) + float(balance_info.get('locked', 0))
-                    
-                    # If balance is zero or less than 1% of expected, position is invalid
-                    if current_balance < (float(expected_quantity) * 0.01):  # 1% threshold
-                        self.logger.warning(
-                            f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
-                            f"Expected {expected_quantity}, but balance is {current_balance}"
-                        )
-                        
-                        # Close the invalid position
-                        close_invalid_position(db, position.id, reason="INVALID_POSITION")
-                        
-                        self.logger.info(
-                            f"Closed invalid position {position.id} for {symbol} - "
-                            f"token was sold externally"
-                        )
-                        self._send_telegram(
-                            f"⚠️ Closed invalid position for {symbol} - token was sold externally"
-                        )
-                        # Optional: Send notification
-                        # send_telegram_message_sync(
-                        #     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
-                        # )
+                is_perp = getattr(profile, "market_type", "SPOT") == "PERP"
+
+                if is_perp:
+                    # For perp profiles, validate against live exchange positions
+                    self._validate_perp_positions(db, profile, open_positions)
+                else:
+                    # For spot profiles, validate against cached wallet balances
+                    self._validate_spot_positions(db, profile, open_positions, balance_cache)
+
+    def _validate_perp_positions(self, db, profile, open_positions):
+        """Validate perp positions by querying the exchange account for live open positions."""
+        try:
+            adapter = get_adapter(profile)
+            account_data = adapter.get_account()
+        except Exception as e:
+            self.logger.warning(f"Could not fetch account data for {profile.name}: {e}")
+            return
+
+        if not account_data:
+            self.logger.warning(f"Empty account response for {profile.name}, skipping perp validation")
+            return
+
+        # Build a set of symbols with non-zero size on the exchange
+        # Bullet /fapi/v3/account returns {"positions": [{"symbol": "SOL-USD", "positionAmt": "0.33", ...}]}
+        exchange_positions = account_data.get("positions", [])
+        live_symbols = set()
+        for ep in exchange_positions:
+            amt = float(ep.get("positionAmt", 0) or ep.get("size", 0) or 0)
+            if abs(amt) > 0:
+                live_symbols.add(ep.get("symbol", ""))
+
+        for position in open_positions:
+            symbol = position.symbol  # e.g. "SOL-USD"
+            if symbol not in live_symbols:
+                self.logger.warning(
+                    f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
+                    f"No live perp position found on exchange."
+                )
+                close_invalid_position(db, position.id, reason="INVALID_POSITION")
+                self.logger.info(
+                    f"Closed invalid position {position.id} for {symbol} - "
+                    f"position closed externally on exchange"
+                )
+                self._send_telegram(
+                    f"⚠️ Closed invalid position for {symbol} - position closed externally on exchange"
+                )
+
+    def _validate_spot_positions(self, db, profile, open_positions, balance_cache):
+        """Validate spot positions against cached wallet balances."""
+        cached_balances = balance_cache.get_profile_balances(profile.name)
+
+        if not cached_balances:
+            self.logger.warning(f"No cached balances for profile {profile.name}, skipping validation")
+            return
+
+        for position in open_positions:
+            symbol = position.symbol
+            # Extract base asset (e.g., "SOL" from "SOL_USDC")
+            base_asset = symbol.split('_')[0]
+
+            # Check if we still hold this token (from cache)
+            balance_info = cached_balances.get(base_asset)
+
+            expected_quantity = str(position.remaining_quantity)
+
+            # Check if balance is insufficient
+            if balance_info is None:
+                current_balance = 0
+            else:
+                current_balance = float(balance_info.get('available', 0)) + float(balance_info.get('locked', 0))
+
+            # If balance is zero or less than 1% of expected, position is invalid
+            if current_balance < (float(expected_quantity) * 0.01):  # 1% threshold
+                self.logger.warning(
+                    f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
+                    f"Expected {expected_quantity}, but balance is {current_balance}"
+                )
+
+                # Close the invalid position
+                close_invalid_position(db, position.id, reason="INVALID_POSITION")
+
+                self.logger.info(
+                    f"Closed invalid position {position.id} for {symbol} - "
+                    f"token was sold externally"
+                )
+                self._send_telegram(
+                    f"⚠️ Closed invalid position for {symbol} - token was sold externally"
+                )
 
     def _execute_close(self, db, position, profile, reason: str, reason_summary: list[str] = None):
         """
