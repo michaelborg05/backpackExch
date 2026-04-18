@@ -714,10 +714,12 @@ class BulletAdapter(ExchangeAdapter):
         from cache.price_cache import get_price_cache
         cache = get_price_cache()
         base = symbol.split("_")[0].split("-")[0]
-        current = cache.get_price(base)
+        # Price cache keys are Backpack-format (e.g. "ETH_USDC"); try full symbol first,
+        # then fall back to bare base in case a non-Backpack key was stored.
+        current = cache.get_price(symbol) or cache.get_price(f"{base}_USDC") or cache.get_price(base)
         if not current:
             self.logger.warning(
-                f"[Bullet] No cached price for {base}, using 0 — order may fail"
+                f"[Bullet] No cached price for {symbol} ({base}), using 0 — order may fail"
             )
             return 0.0
         return float(current) * (1.005 if side == "BID" else 0.995)
