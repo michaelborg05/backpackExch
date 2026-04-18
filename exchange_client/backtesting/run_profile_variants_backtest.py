@@ -33,7 +33,7 @@ VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC","BTC_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "HYPE_USDC","BTC_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
-    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC", "SUI_USDC"] ),
+    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
 symbols_override = [args.symbol] if args.symbol else None

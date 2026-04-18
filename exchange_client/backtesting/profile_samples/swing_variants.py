@@ -210,7 +210,7 @@ SWING_VARIANTS = {
                 "type": "rsi_range",
                 "params": {
                     "min_value": 47,    # 4hr RSI must be in bullish zone — not oversold, not peaked
-                    "max_value": 69,    # block overbought trends (blow-off risk)
+                    "max_value": 60,    # block overbought trends (blow-off risk)
                     "invert": True,
                     "hard_stop": True,
                 }
@@ -224,15 +224,15 @@ SWING_VARIANTS = {
             },
             {
                 # Price within reasonable distance of EMA50 — not over-extended
-                "type": "price_extended_below_ema",
+                "type": "price_vs_ema",
                 "params": {
                     "ema": 50,
                     "min_gap_pct": -2.5,    # Allow slight dips (false breaks)
-                    "max_gap_pct": 6.5,     # Block if price has run >6.5% above EMA50
+                    "max_gap_pct": 3,     # Block if price has run >6.5% above EMA50
                 }
             },
         ],
-        "min_indicators_required": 2,   # rsi_range + rsi_overbought are both hard stops
+        "min_indicators_required": 3,   # rsi_range + rsi_overbought are both hard stops
     
         # ── 1HR ENTRY FILTER ────────────────────────────────────────────────────────
         # Tighter than v18b: RSI ceiling at 52 (vs 58) and BB at 0.58 (vs 0.68)
@@ -273,6 +273,91 @@ SWING_VARIANTS = {
         "min_entry_indicators_required": 3,
     },
     
+    "p3_v19b_tight_pullback": {
+        **_SWING_BASE,
+    
+        "take_profit_pct":       3.0,   # Smaller target — these are pullback bounces, not full reversals
+        "stop_loss_pct":         2.5,   # Tight stop — if it goes further, the trend assumption is wrong
+        "trailing_stop_pct":     1.5,   # Trail at 1.5% — locks in gains on quick bounces
+        "arm_trailing_stop_pct": 1.2,   # Arm early — these moves often pop quickly
+        "use_trailing_stop":     True,
+        "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
+        "min_signal_confidence": 73.0,
+        "signal_cooldown_seconds": 3600,
+    
+        # ── 4HR TREND FILTER ───────────────────────────────────────────────────────
+        # Confirms the 4hr trend is in the bullish momentum zone (47-69 RSI)
+        # and price hasn't extended too far above EMA50 (not chasing)
+        "trend_indicators": [
+            {
+                "type": "rsi_range",
+                "params": {
+                    "min_value": 47,    # 4hr RSI must be in bullish zone — not oversold, not peaked
+                    "max_value": 60,    # block overbought trends (blow-off risk)
+                    "invert": True,
+                    "hard_stop": True,
+                }
+            },
+            {
+                "type": "rsi_overbought",
+                "params": {
+                    "min_value": 70,    # Belt-and-suspenders: block RSI ≥ 70 explicitly
+                    "lookback_candles": 8,
+                    "hard_stop": True,
+                }
+            },
+            {
+                # Price within reasonable distance of EMA50 — not over-extended
+                "type": "price_vs_ema",
+                "params": {
+                    "ema": 50,
+                    "min_gap_pct": -2.5,    # Allow slight dips (false breaks)
+                    "max_gap_pct": 3,     # Block if price has run >6.5% above EMA50
+                }
+            },
+        ],
+        "min_indicators_required": 3,   # rsi_range + rsi_overbought are both hard stops
+    
+        # ── 1HR ENTRY FILTER ────────────────────────────────────────────────────────
+        # Tighter than v18b: RSI ceiling at 52 (vs 58) and BB at 0.58 (vs 0.68)
+        # This ensures you're entering on a real pullback, not just "not overbought"
+        "entry_indicators": [
+            {"type": "rsi_range", 
+                "params": {
+                    "min": 35,
+                    "max": 52,   # ceiling already covered by rsi_overbought, this adds the floor
+                    "hard_stop": True
+                    ,"invert": True,
+                }, 
+                }
+            ,   # soft — RSI 32-35 shouldn't kill an otherwise clean setup
+            {
+                "type": "bollinger_bands",
+                "params": {
+                    "band":      "upper",
+                    "mode":      "pct_b",
+                    "max_pct_b": 0.58,  # TIGHTER: lower 58% of band — confirmed pullback to value
+                }
+            },
+            {
+                "type": "price_vs_ema",
+                "params": {
+                    "ema":         20,
+                    "min_gap_pct": -4.0,    # Don't enter in freefall
+                    "max_gap_pct":  2.5,    # Must be near/below EMA20 (tighter than v18b's 2.5%)
+                    "hard_stop": True
+                }
+            },
+            {
+                "type": "volume_spike",
+                "params": {
+                    "min_ratio": 0.5,   # Soft lower bound — pullbacks can have quiet volume
+                    "max_ratio": 8.0,
+                }
+            },
+        ],
+        "min_entry_indicators_required": 3,
+    },
     
     # =============================================================================
     # p3_v20_midband
