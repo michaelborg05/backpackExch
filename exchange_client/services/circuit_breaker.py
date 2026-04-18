@@ -721,6 +721,13 @@ class CircuitBreakerService:
 
         return results
 
+    def get_day_start(self, profile_name: str) -> Optional[datetime]:
+        """Return the snapshot_date (day-start) for this profile's account, or None."""
+        self._ensure_initialized()
+        account_id = self._get_account_id(profile_name)
+        snapshot = self._get_cached_snapshot(profile_name, account_id)
+        return snapshot.snapshot_date if snapshot else None
+
     def get_daily_summary(self, profile_name: str) -> dict:
         """
         Get daily P&L summary for a profile.

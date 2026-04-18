@@ -216,8 +216,38 @@ def get_open_positions(db: Session, profile_name: str, symbol: Optional[str] = N
         query = query.filter(Position.symbol == symbol)
     return query.all()
 
+def get_daily_realized_pnl_by_profile(
+    db: Session,
+    profile_names: List[str],
+    since: datetime,
+) -> dict:
+    """
+    Returns {profile_name: {"realized_pnl": float, "trade_count": int}}
+    for positions closed on or after `since`.
+    """
+    rows = (
+        db.query(
+            Position.profile_name,
+            func.sum(Position.profit),
+            func.count(Position.id),
+        )
+        .filter(
+            Position.profile_name.in_(profile_names),
+            Position.status == "CLOSED",
+            Position.closed_at >= since,
+            Position.profit.isnot(None),
+        )
+        .group_by(Position.profile_name)
+        .all()
+    )
+    result = {name: {"realized_pnl": 0.0, "trade_count": 0} for name in profile_names}
+    for name, pnl, count in rows:
+        result[name] = {"realized_pnl": float(pnl or 0), "trade_count": int(count or 0)}
+    return result
+
+
 def get_open_position_for_symbol(
-    db: Session, 
+    db: Session,
     profile_name: str, 
     symbol: str
 ) -> Optional[Position]:

@@ -732,7 +732,7 @@ async function loadOv(){
 
   // Fetch all profiles in parallel: portfolio (for positions) + circuit breaker daily summary
   // Also fetch account-level summaries (one per exchange account) for the P&L KPI
-  const [results, acctSummaries]=await Promise.all([
+  const [results, acctSummaries, dailyPnl]=await Promise.all([
     Promise.all(profs.map(async p=>{
       const [port,cb,mon]=await Promise.all([
         api('/portfolio/'+p),
@@ -743,6 +743,7 @@ async function loadOv(){
       return {prof:p,port,cb,mon};
     })),
     api('/circuit-breaker/account-summaries'),
+    api('/profiles/daily-pnl'),
   ]);
 
   // Regime data from first profile's monitoring call
@@ -823,16 +824,22 @@ async function loadOv(){
     const dedup=accountId??prof;
     const acctPort=accountPortMap[dedup];
     const curVal=parseFloat(acctPort?.total_value??port?.total_value??0);
-    const dayPnl=parseFloat(cb?.daily_pnl??cb?.pnl??0);
-    const dayPnlPct=parseFloat(cb?.daily_pnl_pct??cb?.pnl_pct??0);
-    const posCount=parseInt(port?.positions?.length??port?.open_positions?.length??0);
+    const pnlData=dailyPnl?.[prof]??{};
+    const realizedPnl=parseFloat(pnlData.realized_pnl??0);
+    const unrealizedPnl=parseFloat(pnlData.unrealized_pnl??0);
+    const totalPnl=parseFloat(pnlData.total_pnl??0);
+    const tradeCount=parseInt(pnlData.trade_count??0);
+    const posCount=parseInt(pnlData.open_positions??port?.positions?.length??port?.open_positions?.length??0);
     const cbActive=cb?.circuit_breaker_active??false;
     const startBal=parseFloat(cb?.starting_balance??cb?.start_balance??0);
+    const totalPnlPct=startBal>0?(totalPnl/startBal*100):0;
 
     const statusCls=cbActive?'r':'g';
     const statusTxt=cbActive?'CB ACTIVE':'TRADING';
-    const pnlCls=dayPnl>=0?'g':'r';
-    const pnlSign=dayPnl>=0?'+':'';
+    const pnlCls=totalPnl>=0?'g':'r';
+    const pnlSign=totalPnl>=0?'+':'';
+    const rSign=realizedPnl>=0?'+':'';
+    const uSign=unrealizedPnl>=0?'+':'';
 
     return '<div class="pc" onclick="jumpProfile(\''+prof+'\')" title="Click to select profile">'+
       '<div class="pct">'+
@@ -843,17 +850,17 @@ async function loadOv(){
         '<div class="pci">'+
           '<div class="pcil">Acct Balance</div>'+
           '<div class="pciv">'+fusd(curVal)+'</div>'+
-          '<div class="pcsub">'+posCount+' position'+(posCount!==1?'s':'')+'</div>'+
+          '<div class="pcsub">'+posCount+' open · '+tradeCount+' closed</div>'+
         '</div>'+
         '<div class="pci">'+
           '<div class="pcil">Day P&amp;L</div>'+
-          '<div class="pciv '+pnlCls+'">'+pnlSign+fusd(dayPnl)+'</div>'+
-          '<div class="pcsub '+pnlCls+'">'+pnlSign+dayPnlPct.toFixed(2)+'%</div>'+
+          '<div class="pciv '+pnlCls+'">'+pnlSign+fusd(totalPnl)+'</div>'+
+          '<div class="pcsub '+pnlCls+'">'+pnlSign+totalPnlPct.toFixed(2)+'%</div>'+
         '</div>'+
         '<div class="pci">'+
-          '<div class="pcil">Start Bal</div>'+
-          '<div class="pciv">'+(startBal>0?fusd(startBal):'—')+'</div>'+
-          '<div class="pcsub">Today open</div>'+
+          '<div class="pcil">Realized / Unreal</div>'+
+          '<div class="pciv '+(realizedPnl>=0?'g':'r')+'">'+rSign+fusd(realizedPnl)+'</div>'+
+          '<div class="pcsub '+(unrealizedPnl>=0?'g':'r')+'">'+uSign+fusd(unrealizedPnl)+' open</div>'+
         '</div>'+
       '</div>'+
     '</div>';

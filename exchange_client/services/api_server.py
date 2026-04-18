@@ -1247,6 +1247,70 @@ async def get_account_daily_summaries():
 
     return summaries
 
+@app.get("/profiles/daily-pnl", dependencies=[Depends(require_read_permission)])
+async def get_profiles_daily_pnl(current_user=Depends(get_dashboard_user)):
+    """
+    Per-profile P&L breakdown for today, sourced from the positions table.
+    Realized = SUM(profit) on CLOSED positions since each profile's day-start snapshot.
+    Unrealized = live mark vs entry for each OPEN position.
+    Returns a dict keyed by profile_name.
+    """
+    from datetime import datetime, timezone
+    from db.crud import get_open_positions, get_daily_realized_pnl_by_profile
+    from db.utils import get_db_session
+    from cache.price_cache import get_price_cache
+
+    circuit_breaker = get_circuit_breaker()
+    price_cache = get_price_cache()
+    profile_names = list(current_user.profiles)
+
+    # Day-start per profile from snapshot cache; fall back to UTC midnight
+    utc_midnight = datetime.combine(
+        datetime.now(timezone.utc).date(),
+        datetime.min.time(),
+    ).replace(tzinfo=timezone.utc)
+
+    day_starts = {p: circuit_breaker.get_day_start(p) or utc_midnight for p in profile_names}
+    earliest = min(day_starts.values())
+
+    result = {}
+    with get_db_session() as db:
+        realized_map = get_daily_realized_pnl_by_profile(db, profile_names, earliest)
+
+        for p in profile_names:
+            r = realized_map.get(p, {"realized_pnl": 0.0, "trade_count": 0})
+
+            unrealized_pnl = 0.0
+            open_count = 0
+            for pos in get_open_positions(db, p):
+                open_count += 1
+                mark = price_cache.get_price(pos.symbol)
+                if mark is not None:
+                    try:
+                        entry = float(pos.entry_price)
+                        qty = float(pos.remaining_quantity or pos.quantity)
+                        direction = (pos.direction or "LONG").upper()
+                        if direction == "SHORT":
+                            unrealized_pnl += (entry - float(mark)) * qty
+                        else:
+                            unrealized_pnl += (float(mark) - entry) * qty
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        pass
+
+            total_pnl = r["realized_pnl"] + unrealized_pnl
+
+            result[p] = {
+                "realized_pnl":   round(r["realized_pnl"], 4),
+                "unrealized_pnl": round(unrealized_pnl, 4),
+                "total_pnl":      round(total_pnl, 4),
+                "trade_count":    r["trade_count"],
+                "open_positions": open_count,
+                "day_start":      day_starts[p].isoformat(),
+            }
+
+    return result
+
+
 @app.get("/signals/status/{profile_name}")
 async def get_signal_status(profile_name: str):
     """Get signal generation status for a profile"""
