@@ -119,14 +119,14 @@ class RegimeFilter:
         )
         if is_choppy:
             regime = MarketRegime.CHOPPY
-            reason = f"{"✅ - Good for Range Trading profile - " if strategy_type == StrategyType.RANGE_TRADING else "⚠️"} {chop_reason}"
+            reason = f"{" Good for Range Trading profile - " if strategy_type == StrategyType.RANGE_TRADING else "⚠️"} {chop_reason}"
             self._regime_cache[cache_key] = (regime, reason, time.time())
             self.logger.info(f"{symbol}: {reason}")
             return regime, reason
         
         # DEFAULT: SAFE - trust your trend signals
         regime = MarketRegime.SAFE
-        reason = "✅ Market conditions safe - trust trend signals"
+        reason = "Market conditions safe - trust trend signals"
         self._regime_cache[cache_key] = (regime, reason, time.time())
         return regime, reason
     
@@ -415,7 +415,7 @@ class RegimeFilter:
                     # price oscillating. Pass through and let confidence scorer
                     # reward this via _range_trading_confidence_score().
                     self.logger.info(
-                        f"[{profile_name}] {symbol}: RANGE ✅ CHOPPY (ideal) - {reason}"
+                        f"[{profile_name}] {symbol}: RANGE CHOPPY (ideal) - {reason}"
                     )
                     return True, reason
 
@@ -425,7 +425,7 @@ class RegimeFilter:
                     # doing the work of finding the dip. Let them decide.
                     # Confidence scorer gives lower bonus for SAFE vs CHOPPY.
                     self.logger.info(
-                        f"[{profile_name}] {symbol}: RANGE ✅ SAFE (acceptable) - {reason}"
+                        f"[{profile_name}] {symbol}: RANGE  SAFE (acceptable) - {reason}"
                     )
                     return True, reason
 
