@@ -578,13 +578,69 @@ class MonitoringService:
                     f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
                     f"No live perp position found on exchange."
                 )
+
+                # Try to record P&L from the actual exchange fill; fall back to price cache
+                try:
+                    adapter = get_adapter(profile)
+                    exit_price = None
+                    price_source = None
+
+                    # Prefer actual fill price from userTrades
+                    if hasattr(adapter, "get_latest_close_price"):
+                        opened_at = getattr(position, "opened_at", None) or getattr(position, "created_at", None)
+                        actual_price = adapter.get_latest_close_price(symbol, opened_at=opened_at)
+                        if actual_price:
+                            exit_price = actual_price
+                            price_source = "exchange fill"
+
+                    # Fall back to price cache if trade lookup returned nothing
+                    if exit_price is None:
+                        from cache.price_cache import get_price_cache
+                        price_cache = get_price_cache()
+                        base = symbol.split("-")[0]
+                        cached = (
+                            price_cache.get_price(symbol)
+                            or price_cache.get_price(f"{base}_USDC")
+                            or price_cache.get_price(base)
+                        )
+                        if cached:
+                            exit_price = float(cached)
+                            price_source = "price cache (estimated)"
+
+                    if exit_price and position.entry_trade:
+                        entry_price = float(position.entry_trade.price)
+                        quantity = float(position.remaining_quantity or 0)
+                        is_long = (position.direction or "LONG") != "SHORT"
+                        if is_long:
+                            profit = (exit_price - entry_price) * quantity
+                            profit_pct = ((exit_price - entry_price) / entry_price) * 100
+                        else:
+                            profit = (entry_price - exit_price) * quantity
+                            profit_pct = ((entry_price - exit_price) / entry_price) * 100
+                        position.profit = profit
+                        db.flush()
+                        self.logger.info(
+                            f"Recorded P&L for externally-closed position {position.id} "
+                            f"using {price_source}: ${profit:.2f} ({profit_pct:+.2f}%) "
+                            f"@ exit {exit_price}"
+                        )
+                        icon = "🟢" if profit_pct >= 0 else "🛑"
+                        est = " (est.)" if price_source != "exchange fill" else ""
+                        self._send_telegram(
+                            f"{icon} Position Closed Externally [{profile.display_name if profile.display_name else profile.name}]\n"
+                            f"Symbol: {symbol}\n"
+                            f"Reason: CLOSED_ON_EXCHANGE (TP/SL or manual)\n"
+                            f"Entry: ${entry_price:.4f}\n"
+                            f"Exit{est}: ${exit_price:.4f}\n"
+                            f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)"
+                        )
+                except Exception as pnl_err:
+                    self.logger.warning(f"Could not record P&L for invalid position {position.id}: {pnl_err}")
+
                 close_invalid_position(db, position.id, reason="INVALID_POSITION")
                 self.logger.info(
                     f"Closed invalid position {position.id} for {symbol} - "
                     f"position closed externally on exchange"
-                )
-                self._send_telegram(
-                    f"⚠️ Closed invalid position for {symbol} - position closed externally on exchange"
                 )
 
     def _validate_spot_positions(self, db, profile, open_positions, balance_cache):

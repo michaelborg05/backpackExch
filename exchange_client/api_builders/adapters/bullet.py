@@ -450,6 +450,56 @@ class BulletAdapter(ExchangeAdapter):
             self.logger.error(f"[Bullet] get_order_history() failed: {e}")
             return []
 
+    def get_user_trades(self, symbol: str, limit: int = 10) -> List[Dict]:
+        """Fetch recent fills from /fapi/v1/userTrades for a symbol.
+
+        Returns trades newest-first if the API supports it, otherwise the caller
+        should take the last item from the list. Each fill contains at minimum:
+          price, qty (or quantity), side, time (or timestamp).
+        """
+        bullet_symbol = _to_bullet_symbol(symbol)
+        url = BulletEndpoints.user_trades(self.read_address, symbol=bullet_symbol)
+        try:
+            data = api_request(url)
+            if not data:
+                return []
+            trades = data if isinstance(data, list) else data.get("data", [])
+            return trades[:limit]
+        except Exception as e:
+            self.logger.error(f"[Bullet] get_user_trades({symbol}) failed: {e}")
+            return []
+
+    def get_latest_close_price(self, symbol: str, opened_at=None) -> Optional[float]:
+        """Return the fill price of the most recent closing trade for symbol.
+
+        Looks through userTrades for the most recent ASK (sell/close) fill placed
+        after `opened_at` (a datetime or epoch-ms int). Returns None if not found.
+        """
+        trades = self.get_user_trades(symbol, limit=20)
+        if not trades:
+            return None
+
+        import time as _time
+        opened_ms = None
+        if opened_at is not None:
+            if hasattr(opened_at, "timestamp"):
+                opened_ms = int(opened_at.timestamp() * 1000)
+            else:
+                opened_ms = int(opened_at)
+
+        # Bullet trade fields: side "Ask"/"Bid", price, qty/quantity, time/timestamp
+        for trade in trades:
+            side = str(trade.get("side", "")).lower()
+            if side not in ("ask", "sell"):
+                continue
+            trade_time = trade.get("time") or trade.get("timestamp") or trade.get("tradeTime") or 0
+            if opened_ms and int(trade_time) < opened_ms:
+                continue
+            price = trade.get("price") or trade.get("avgPrice")
+            if price:
+                return float(price)
+        return None
+
     # ── Optional capabilities ─────────────────────────────────────────────────
 
     def get_funding_rate(self, symbol: str = None) -> Optional[List[Dict]]:
@@ -507,19 +557,42 @@ class BulletAdapter(ExchangeAdapter):
             return None
 
         # 2. Submit to Bullet
+        position_already_flat = False
         try:
             url = BulletEndpoints.submit_tx()
             raw = api_request(url, body={"body": tx_b64}, requestType=HttpMethod.POST)
         except Exception as e:
-            self.logger.error(f"[Bullet] /tx/submit failed for {order_ns.symbol}: {e}")
-            return None
+            err_str = str(e)
+            if "size_must_be_positive" in err_str or "size must be greater than zero" in err_str.lower():
+                # Position is already flat on exchange (closed by on-chain TP/SL or externally).
+                # Try to get the actual fill price from userTrades; fall back to price cache.
+                self.logger.warning(
+                    f"[Bullet] {order_ns.symbol} already flat on exchange — "
+                    "looking up actual fill price to record P&L"
+                )
+                position_already_flat = True
+                actual_price = self.get_latest_close_price(order_ns.symbol)
+                if actual_price:
+                    self.logger.info(
+                        f"[Bullet] Found actual close fill for {order_ns.symbol} @ {actual_price}"
+                    )
+                    order_ns.price = str(actual_price)
+                raw = None
+            else:
+                self.logger.error(f"[Bullet] /tx/submit failed for {order_ns.symbol}: {e}")
+                return None
 
         # 3. Parse the exchange response into a common OrderResponse
         order_response = self._parse_order_response(raw, order_ns)
         if order_response is None:
-            self.logger.error(
-                f"[Bullet] Could not parse /tx/submit response for {order_ns.symbol}: {raw}"
-            )
+            if position_already_flat:
+                self.logger.error(
+                    f"[Bullet] Could not synthesise close response for {order_ns.symbol} — skipping P&L record"
+                )
+            else:
+                self.logger.error(
+                    f"[Bullet] Could not parse /tx/submit response for {order_ns.symbol}: {raw}"
+                )
             return None
 
         # 4. Persist to DB (same path as ProcessMarketOrder)

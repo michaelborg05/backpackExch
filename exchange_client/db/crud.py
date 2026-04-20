@@ -267,12 +267,12 @@ def close_invalid_position(
     position = db.query(Position).filter(Position.id == position_id).first()
     if not position:
         raise ValueError(f"Position {position_id} not found")
-    
+
     position.status = "CLOSED"
     position.close_reason = reason
     position.closed_at = datetime.now(timezone.utc)
-    position.profit = None  # No profit calculation since we don't have sell details
-    
+    # Do not overwrite profit — caller may have set an estimate from price cache
+
     db.commit()
     db.refresh(position)
     return position
