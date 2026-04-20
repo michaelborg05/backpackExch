@@ -1906,6 +1906,90 @@ async def delete_indicator(profile_name: str, indicator_id: int):
 
 
 
+@app.post("/indicators/{target_profile}/copy-from/{source_profile}", dependencies=[Depends(require_admin_permission)])
+async def copy_indicators(
+    target_profile: str,
+    source_profile: str,
+    category: Optional[str] = None,   # "trend" | "entry" | None = both
+    mode: str = "replace",             # "replace" | "add"
+):
+    """Copy indicators from source_profile into target_profile.
+
+    category: which indicators to copy — "trend", "entry", or omit for both.
+    mode: "replace" deletes existing indicators in the chosen category first;
+          "add" appends without removing anything.
+    """
+    from db.utils import get_db_session
+    from db.models import IndicatorDB
+    from services.profile_manager import refresh_profiles_from_db
+
+    if target_profile == source_profile:
+        raise HTTPException(status_code=400, detail="Source and target profiles must differ")
+    if mode not in ("replace", "add"):
+        raise HTTPException(status_code=400, detail="mode must be 'replace' or 'add'")
+
+    try:
+        with get_db_session() as db:
+            src_prof = _ind_profile_or_404(db, source_profile)
+            tgt_prof = _ind_profile_or_404(db, target_profile)
+
+            # Fetch source indicators (optionally filtered by category)
+            src_q = db.query(IndicatorDB).filter(IndicatorDB.profile_id == src_prof.id)
+            if category:
+                src_q = src_q.filter(IndicatorDB.category == category)
+            source_inds = src_q.all()
+
+            if not source_inds:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No {'`' + category + '`' if category else ''} indicators found on profile '{source_profile}'"
+                )
+
+            # In replace mode, delete target indicators for the selected category first
+            deleted_count = 0
+            if mode == "replace":
+                tgt_q = db.query(IndicatorDB).filter(IndicatorDB.profile_id == tgt_prof.id)
+                if category:
+                    tgt_q = tgt_q.filter(IndicatorDB.category == category)
+                deleted_count = tgt_q.delete(synchronize_session=False)
+
+            # Insert copies
+            new_inds = []
+            for src in source_inds:
+                new_ind = IndicatorDB(
+                    profile_id=tgt_prof.id,
+                    category=src.category,
+                    indicator_type=src.indicator_type,
+                    params=dict(src.params) if src.params else {},
+                    is_hard_stop=src.is_hard_stop,
+                    enabled=src.enabled,
+                )
+                db.add(new_ind)
+                new_inds.append(new_ind)
+
+            db.commit()
+            refresh_profiles_from_db()
+
+            cat_label = f"`{category}`" if category else "all"
+            apiserver_logger.info(
+                f"Copied {len(new_inds)} {cat_label} indicator(s) from '{source_profile}' "
+                f"to '{target_profile}' (mode={mode}, deleted={deleted_count})"
+            )
+            return {
+                "success": True,
+                "copied": len(new_inds),
+                "deleted": deleted_count,
+                "message": (
+                    f"Copied {len(new_inds)} indicator(s) from '{source_profile}' "
+                    f"({mode}, {deleted_count} removed)"
+                ),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error copying indicators: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ── AI Monitor ────────────────────────────────────────────────────────────────
 
