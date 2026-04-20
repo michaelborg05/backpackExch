@@ -14,7 +14,8 @@ TO DO
 # web page changes
   - Add "exchange accounts" tab similar to profiles
 # Api call to manually refresh caches for various things - like settings, profiles, etc
-
+# occiasionally getting login errors on website
+# When adding new profile, it doesnt keep the spot/perps setting I choose i nthe modal when it loadst he profle page
 No need
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish

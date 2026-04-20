@@ -6,15 +6,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS,SWING_VARIANTS, run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS,SWING_VARIANTS,MEAN_REV_SHORT_VARIANTS, run_all_variants
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 14,
+parser.add_argument("--days",    type=int, default= 7,
                     help="Lookback window in days (default: 7)")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="mr", choices=["all", "range", "mr"],
+parser.add_argument("--set",     default="mr_short", choices=["all", "range", "mr"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
@@ -35,6 +35,8 @@ VARIANT_SETS = {
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
     "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
+    "mr_short":    (MEAN_REV_SHORT_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"]),
+
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
 symbols_override = [args.symbol] if args.symbol else None
@@ -60,6 +62,8 @@ with get_db_session() as db:
             label   = "RANGE TRADING"     
         elif set_name == "mr":
             label   = "MEAN REVERSION"
+        elif set_name == "mr_short":
+            label   = "MEAN REVERSION SHORT"
         elif set_name == "trend":
             label   ="TREND FOLLOWING"
         elif set_name == "4hr_swing":

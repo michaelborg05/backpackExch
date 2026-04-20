@@ -31,11 +31,11 @@ from backtesting.profile_samples.swing_variants import SWING_VARIANTS
 from backtesting.profile_samples.mean_reversion_variants import MEAN_REV_VARIANTS
 from  backtesting.profile_samples.range_variants import RANGE_VARIANTS
 from backtesting.profile_samples.trend_variants import TREND_VARIANTS
-
+from backtesting.profile_samples.mean_reversion_short_variants import MEAN_REV_SHORT_VARIANTS
 # =============================================================================
 # Convenience: all variants in one dict
 # =============================================================================
-ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS}
+ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS}
 
 # =============================================================================
 # Quick sweep runner — use this to run all variants in one go
