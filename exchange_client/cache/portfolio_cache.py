@@ -145,12 +145,20 @@ class PortfolioCache:
         portfolio = self.get_portfolio_summary(profile_name, quote_asset)
         circuit_breaker = get_circuit_breaker()
         limit_summary = circuit_breaker.get_daily_summary(profile_name)
+        GREEN = "\033[92m"
+        RED = "\033[91m"
+        RESET = "\033[0m"
 
+        # Determine color based on pnl value
+ 
+        pnl_val = float(limit_summary.get('daily_pnl', 0) or 0)
+        color = GREEN if pnl_val > 0 else RED if pnl_val < 0 else ""
+                
         if limit_summary:
-            status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else "✅"
-            result = f"({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')} ({limit_summary['daily_pnl_pct']}) {status}"
+            status = f"⛔ - {limit_summary['hours_remaining']}hrs left" if limit_summary.get('circuit_breaker_active') else ""
+            result = f"{color}({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')} ({limit_summary['daily_pnl_pct']}){RESET} {status}"
         else:
-            result = f"({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')} "
+            result = f"{color}({display_name if display_name else profile_name}) Total: ${portfolio.get('total_value')}{RESET} "
 
 
         return result
