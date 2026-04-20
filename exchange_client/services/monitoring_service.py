@@ -705,21 +705,23 @@ class MonitoringService:
             validation_summary = self.record_market_validation_info(symbol, profile)
 
             quantity = str(position.remaining_quantity)
+            is_long = (position.direction or "LONG") != "SHORT"
 
             self.logger.info(
                 f"Executing close order: {symbol} x {quantity} "
-                f"[{profile.name}] Reason: {reason}"
+                f"[{profile.name}] Reason: {reason} Direction: {'LONG' if is_long else 'SHORT'}"
             )
 
-            result = adapter.order_sell(
+            close_kwargs = dict(
                 symbol=symbol,
                 quantity=quantity,
                 source=reason,
                 profile_name=profile.name,
                 position_id=str(position.id),
                 reason_summary=reason_summary,
-                validation_summary=validation_summary
+                validation_summary=validation_summary,
             )
+            result = adapter.order_sell(**close_kwargs) if is_long else adapter.order_buy(**close_kwargs)
             
             if result:
                 self.logger.info(
@@ -768,7 +770,7 @@ class MonitoringService:
                 )
 
                 # Note: Position will be closed automatically by TradingService.ExecuteOrder
-                # which calls close_position() for SELL orders
+                # which calls close_position() for the closing order (SELL for longs, BUY for shorts)
                 
             else:
                 self.logger.error(f"Close order failed for {symbol} [{profile.name}]")
