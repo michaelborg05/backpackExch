@@ -646,7 +646,7 @@ class ReplayTrendCache:
                 band          = params.get("band", "lower")
                 mode          = params.get("mode", "touch")
                 tolerance_pct = params.get("tolerance_pct", 0.5)
-                max_pct_b     = params.get("max_pct_b", 0.75)
+                max_pct_b     = params.get("max_pct_b", None)
                 min_pct_b     = params.get("min_pct_b", None)
                 lookback_candles = params.get("lookback_candles", 0)
 
@@ -666,7 +666,7 @@ class ReplayTrendCache:
                         if pct_b is None:
                             is_bull, msg = False, "BB %B: ✗ (zero band width)"
                         else:
-                            below_max = pct_b <= max_pct_b
+                            below_max = (max_pct_b is None) or (pct_b <= max_pct_b)
                             above_min = (min_pct_b is None) or (pct_b >= min_pct_b)
                             is_bull = below_max and above_min
 

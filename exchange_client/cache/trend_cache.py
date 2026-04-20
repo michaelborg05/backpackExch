@@ -1071,7 +1071,7 @@ class TrendCache:
                 band = params.get("band", "lower")
                 mode = params.get("mode", "touch")
                 tolerance_pct = params.get("tolerance_pct", 0.5)
-                max_pct_b = params.get("max_pct_b", 0.25)
+                max_pct_b = params.get("max_pct_b", None)
                 min_pct_b = params.get("min_pct_b", None) # None = no lower bound
                 lookback_candles = params.get("lookback_candles", 0)
 
@@ -1109,15 +1109,19 @@ class TrendCache:
                                 is_bullish = False
                                 msg = "BB %B: ✗ (band width is zero)"
                             else:
-                                below_max = pct_b <= max_pct_b
+                                below_max = (max_pct_b is None) or (pct_b <= max_pct_b)
                                 above_min = (min_pct_b is None) or (pct_b >= min_pct_b)
                                 is_bullish = below_max and above_min
 
                                 # Build readable range string for the log message
-                                if min_pct_b is not None:
+                                if min_pct_b is not None and max_pct_b is not None:
                                     range_str = f"need {min_pct_b:.2f}–{max_pct_b:.2f}"
-                                else:
+                                elif min_pct_b is not None:
+                                    range_str = f"need >={min_pct_b:.2f}"
+                                elif max_pct_b is not None:
                                     range_str = f"need <={max_pct_b:.2f}"
+                                else:
+                                    range_str = "no bounds"
 
                                 msg = (
                                     f"BB %B ({band}): {'✓' if is_bullish else '✗'} "
