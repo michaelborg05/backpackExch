@@ -235,15 +235,18 @@ class BulletAdapter(ExchangeAdapter):
                   source: str = "MANUAL", **kwargs) -> Optional[Any]:
         """Place a market-equivalent BUY on Bullet (IOC bid at +2% slippage).
 
-        Attaches on-chain TP/SL from the profile if take_profit_pct / stop_loss_pct
-        are configured, so the exchange enforces them without relying on monitoring.
+        When position_id is provided the order is a short-close (reduce_only=True, no TP/SL).
+        Otherwise it opens a long and attaches on-chain TP/SL from the profile.
         """
+        position_id = kwargs.get("position_id")
+        is_close = position_id is not None
+
         bullet_symbol = _to_bullet_symbol(symbol)
         tick_size, step_size, _ = self._get_market_filters(bullet_symbol)
         entry_price = self._get_aggressive_price(symbol, side="BID")
         rounded_price = self._round_price(entry_price, tick_size)
         rounded_qty   = self._round_quantity(float(quantity), step_size)
-        tpsl = self._build_tpsl(float(rounded_price), side="BID", tick_size=tick_size)
+        tpsl = None if is_close else self._build_tpsl(float(rounded_price), side="BID", tick_size=tick_size)
 
         from types import SimpleNamespace
         order_ns = SimpleNamespace(
@@ -252,13 +255,13 @@ class BulletAdapter(ExchangeAdapter):
             orderType="IOC",
             quantity=rounded_qty,
             price=rounded_price,
-            reduce_only=False,
+            reduce_only=is_close,
             pending_tpsl_pair=tpsl,
         )
         return self._submit_market_order(
             order_ns=order_ns,
             source=source,
-            position_id=None,
+            position_id=position_id,
             reason_summary=kwargs.get("reason_summary"),
             validation_summary=kwargs.get("validation_summary"),
         )
