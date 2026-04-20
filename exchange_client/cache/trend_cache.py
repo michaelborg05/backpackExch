@@ -979,7 +979,7 @@ class TrendCache:
                 ema_type = params.get("ema", 20)
                 min_gap_pct = params.get("min_gap_pct", -2.0)
                 max_gap_pct = params.get("max_gap_pct", -10.0)
-                
+
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((current_price - ema_value) / ema_value) * 100
                 values["price"] = current_price
@@ -988,10 +988,61 @@ class TrendCache:
 
                 # Want price below EMA (negative gap) but not too far
                 is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
-                
+
                 msg = (
                     f"Price below EMA{ema_type}: {'✓' if is_bullish else '✗'} "
                     f"({gap_pct:+.2f}% - need between {max_gap_pct:.1f}% and {min_gap_pct:.1f}%)"
+                )
+
+            elif indicator_type == "price_above_vwap":
+                """
+                Bearish when price is ABOVE VWAP (overbought).
+                params: {
+                    min_gap_pct: 1.0,       # Require at least 1% above VWAP
+                    max_gap_pct: 10.0       # But not more than 10% (too extended)
+                }
+                """
+                min_gap_pct = params.get("min_gap_pct", 1.0)
+                max_gap_pct = params.get("max_gap_pct", 10.0)
+
+                gap_pct = ((current_price - trend.vwap) / trend.vwap) * 100
+                values["price"] = current_price
+                values["vwap"] = trend.vwap
+                values["gap_pct"] = gap_pct
+
+                # Want price above VWAP but not TOO far above
+                is_bullish = min_gap_pct <= gap_pct <= max_gap_pct
+
+                msg = (
+                    f"Price above VWAP: {'✓' if is_bullish else '✗'} "
+                    f"({gap_pct:+.2f}% - need between {min_gap_pct:.2f}% and {max_gap_pct:.2f}%)"
+                )
+
+            elif indicator_type == "price_extended_above_ema":
+                """
+                Bearish when price is stretched above EMA (rubber band effect).
+                params: {
+                    ema: 20,                # Which EMA to check
+                    min_gap_pct: 2.0,       # Must be at least 2% above
+                    max_gap_pct: 10.0       # But not more than 10% (too risky)
+                }
+                """
+                ema_type = params.get("ema", 20)
+                min_gap_pct = params.get("min_gap_pct", 2.0)
+                max_gap_pct = params.get("max_gap_pct", 10.0)
+
+                ema_value = trend.ema20 if ema_type == 20 else trend.ema50
+                gap_pct = ((current_price - ema_value) / ema_value) * 100
+                values["price"] = current_price
+                values["ema"] = ema_value
+                values["gap_pct"] = gap_pct
+
+                # Want price above EMA (positive gap) but not too far
+                is_bullish = min_gap_pct <= gap_pct <= max_gap_pct
+
+                msg = (
+                    f"Price above EMA{ema_type}: {'✓' if is_bullish else '✗'} "
+                    f"({gap_pct:+.2f}% - need between {min_gap_pct:.1f}% and {max_gap_pct:.1f}%)"
                 )
 
             elif indicator_type == "bollinger_bands":
@@ -1224,7 +1275,7 @@ class TrendCache:
                     pc_o = pc_h = pc_l = pc_c = None
 
                 # ── Single-candle patterns ────────────────────────────────────
-                if pattern in ("hammer", "doji", "bull_close"):
+                if pattern in ("hammer", "doji", "bull_close", "shooting_star", "bear_close"):
                     if pc_o is None:
                         is_bullish = False
                         msg = (
@@ -1290,8 +1341,40 @@ class TrendCache:
                                 f"need >={min_close_pct:.1%})"
                             )
 
+                        elif pattern == "shooting_star":
+                            # Long upper wick (>=2x body), small lower wick (<=0.3x body).
+                            # Mirror of hammer: rejection at highs, bearish reversal signal.
+                            body_pct       = body / total
+                            uw_ratio       = u_wick / body if body > 0 else 0
+                            lw_ratio       = l_wick / body if body > 0 else 999
+                            values["body_pct"]         = round(body_pct, 4)
+                            values["upper_wick_ratio"] = round(uw_ratio, 4)
+                            values["lower_wick_ratio"] = round(lw_ratio, 4)
+                            is_bullish = (uw_ratio >= 2.0 and lw_ratio <= 0.3
+                                          and body_pct >= min_body_pct)
+                            msg = (
+                                f"Shooting star: {'✓' if is_bullish else '✗'} "
+                                f"(upper_wick={uw_ratio:.1f}x body, "
+                                f"lower_wick={lw_ratio:.1f}x body, "
+                                f"body={body_pct:.1%} of range)"
+                            )
+
+                        elif pattern == "bear_close":
+                            # Candle closed in the lower portion of its range.
+                            # Mirror of bull_close: sellers dominated into the close.
+                            max_close_pct = params.get("max_close_pct", 0.4)
+                            close_pos = (pc_c - pc_l) / total if total > 0 else 0
+                            values["close_position"] = round(close_pos, 4)
+                            values["max_close_pct"]  = max_close_pct
+                            is_bullish = close_pos <= max_close_pct
+                            msg = (
+                                f"Bear close: {'✓' if is_bullish else '✗'} "
+                                f"(closed at {close_pos:.1%} of range, "
+                                f"need <={max_close_pct:.1%})"
+                            )
+
                 # ── Two-closed-candle patterns ────────────────────────────────
-                elif pattern in ("higher_low", "engulfing"):
+                elif pattern in ("higher_low", "engulfing", "lower_high", "bear_engulfing"):
 
                     # Resolve the two closed candles.
                     # Prefer history (both confirmed), fall back to history[-1] +
@@ -1394,11 +1477,74 @@ class TrendCache:
                                 f"engulfs={engulfs}) [{data_source}]"
                             )
 
+                    elif pattern == "lower_high":
+                        # c2 (recent) high must be strictly below c1 (older) high.
+                        # Mirror of higher_low: buying exhaustion, each rally
+                        # finds resistance at a lower level.
+                        require_bear = params.get("require_bear", False)
+
+                        lh_ok   = c2["high"] < c1["high"]
+                        bear_ok = (not require_bear) or (c2["close"] < c2["open"])
+
+                        values["c1_high"]      = c1["high"]
+                        values["c2_high"]      = c2["high"]
+                        values["lower_high"]   = lh_ok
+                        values["require_bear"] = require_bear
+                        values["c2_is_bear"]   = c2["close"] < c2["open"]
+
+                        is_bullish = lh_ok and bear_ok
+                        msg = (
+                            f"Lower high: {'✓' if is_bullish else '✗'} "
+                            f"(c2_high={c2['high']:.4f} vs c1_high={c1['high']:.4f}"
+                            + (f", bear={bear_ok}" if require_bear else "")
+                            + f") [{data_source}]"
+                        )
+
+                    elif pattern == "bear_engulfing":
+                        # Bearish engulfing (two confirmed closed candles):
+                        #   c1 (older) was bullish, c2 (recent) is bearish and
+                        #   its body fully contains c1's body.
+                        if data_source == "live_fallback":
+                            is_bullish = False
+                            msg = (
+                                "Bearish engulfing: ✗ "
+                                "(candle history warming up — need 2 closed candles)"
+                            )
+                        else:
+                            c2_total, c2_body, _, _, c2_bull = _candle_metrics(
+                                c2["open"], c2["high"], c2["low"], c2["close"])
+                            _, c1_body, _, _, c1_bull = _candle_metrics(
+                                c1["open"], c1["high"], c1["low"], c1["close"])
+
+                            c2_bear        = not c2_bull
+                            c2_body_lo     = min(c2["open"], c2["close"])
+                            c2_body_hi     = max(c2["open"], c2["close"])
+                            c1_body_lo     = min(c1["open"], c1["close"])
+                            c1_body_hi     = max(c1["open"], c1["close"])
+                            engulfs        = (c2_body_lo <= c1_body_lo
+                                              and c2_body_hi >= c1_body_hi)
+                            body_pct       = c2_body / c2_total if c2_total > 0 else 0
+
+                            values.update({
+                                "c1_open": c1["open"], "c1_close": c1["close"],
+                                "c2_open": c2["open"], "c2_close": c2["close"],
+                                "c1_bull": c1_bull,    "c2_bear":  c2_bear,
+                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
+                            })
+
+                            is_bullish = c2_bear and c1_bull and engulfs
+                            msg = (
+                                f"Bearish engulfing: {'✓' if is_bullish else '✗'} "
+                                f"(c2_bear={c2_bear}, c1_bull={c1_bull}, "
+                                f"engulfs={engulfs}) [{data_source}]"
+                            )
+
                 else:
                     is_bullish = False
                     msg = (
                         f"Reversal candle: ✗ (unknown pattern '{pattern}' — "
-                        f"use hammer | doji | bull_close | higher_low | engulfing)"
+                        f"use hammer | doji | bull_close | shooting_star | bear_close "
+                        f"| higher_low | engulfing | lower_high | bear_engulfing)"
                     )
 
                 # ── Post-pattern guard: price must not have dropped too far
@@ -1458,6 +1604,42 @@ class TrendCache:
                                 f"{drop_pct:.2f}% from candle close "
                                 f"${ref_close:.4f} → ${current_price:.4f}, "
                                 f"max allowed {max_drop_from_close_pct:.2f}%)"
+                            )
+
+                # ── Post-pattern guard for bear patterns: price must not have
+                # risen too far from the candle close since the signal fired.
+                # Mirror of max_drop_from_close_pct — if price has already
+                # rallied X% above the close, the bearish thesis is breaking down.
+                #
+                # params:
+                #   max_rise_from_close_pct: float  (default: None = disabled)
+                #       E.g. 0.5 means "block if price is already >0.5% above close".
+                max_rise_from_close_pct = params.get("max_rise_from_close_pct", None)
+                if max_rise_from_close_pct is not None:
+                    ref_close = None
+                    if pattern in ("shooting_star", "bear_close") and pc_c is not None:
+                        ref_close = pc_c
+                    elif pattern in ("lower_high", "bear_engulfing"):
+                        try:
+                            ref_close = c2["close"] if c2 is not None else pc_c
+                        except (NameError, TypeError):
+                            ref_close = pc_c
+
+                    if ref_close is not None and ref_close > 0:
+                        rise_pct = ((current_price - ref_close) / ref_close) * 100
+                        values["candle_close_ref"]        = ref_close
+                        values["rise_from_close_pct"]     = round(rise_pct, 4)
+                        values["max_rise_from_close_pct"] = max_rise_from_close_pct
+
+                        if rise_pct > max_rise_from_close_pct:
+                            prev_result = "✓" if is_bullish else "✗"
+                            is_bullish = False
+                            msg = (
+                                f"Reversal candle ({pattern}): ✗ "
+                                f"(pattern {prev_result} but price rose "
+                                f"{rise_pct:.2f}% from candle close "
+                                f"${ref_close:.4f} → ${current_price:.4f}, "
+                                f"max allowed {max_rise_from_close_pct:.2f}%)"
                             )
 
 
@@ -1585,6 +1767,121 @@ class TrendCache:
                             reasons.append("not sustained")
                         
                         msg = f"RSI Reversal Momentum: ✗ ({', '.join(reasons)})"
+
+            elif indicator_type == "rsi_overbought_momentum":
+                # Mirror of rsi_reversal_momentum for short entries.
+                # Confirms RSI peaked above overbought, then dropped sharply and is falling.
+                lookback_candles     = params.get("lookback_candles", 5)
+                overbought_threshold = params.get("overbought_threshold", 70)
+                current_max          = params.get("current_max", 65)
+                drop_required        = params.get("drop_required", True)
+                min_drop             = params.get("min_drop", 5.0)
+                require_sustained    = params.get("require_sustained", True)
+                sustained_fall_mode  = params.get("sustained_fall_mode", "strict")
+
+                key = f"{symbol}_{timeframe}"
+                rsi_history = self._rsi_history.get(key, [])
+
+                if len(rsi_history) < lookback_candles:
+                    is_bullish = False
+                    msg = f"RSI Overbought Momentum: ✗ (insufficient history)"
+                    values["history_length"] = len(rsi_history)
+                else:
+                    current_rsi    = trend.rsi
+                    recent_history = rsi_history[-lookback_candles:]
+
+                    # Check 1: Was RSI overbought in the lookback window?
+                    rsi_values = [rsi for _, rsi in recent_history]
+                    touched_overbought = any(rsi > overbought_threshold for rsi in rsi_values)
+                    max_rsi = max(rsi_values) if rsi_values else current_rsi
+
+                    values["touched_overbought"] = touched_overbought
+                    values["max_rsi"] = float(max_rsi)
+
+                    # Check 2: Did RSI drop sharply (>= min_drop points) after the peak?
+                    if drop_required:
+                        max_drop = 0.0
+                        drop_found = False
+
+                        max_rsi_found = False
+                        for i in range(1, len(rsi_values)):
+                            if not max_rsi_found and rsi_values[i-1] == max_rsi:
+                                max_rsi_found = True
+                            if max_rsi_found:
+                                drop = rsi_values[i-1] - rsi_values[i]
+                                if drop > max_drop:
+                                    max_drop = drop
+                                if drop >= min_drop:
+                                    drop_found = True
+
+                        values["max_drop"] = float(max_drop)
+                        values["drop_found"] = drop_found
+                    else:
+                        drop_found = True
+                        max_drop = 0
+
+                    # Check 3: Current RSI below maximum?
+                    current_below_max = current_rsi <= current_max
+                    values["current_rsi"] = float(current_rsi)
+
+                    if require_sustained:
+                        rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    else:
+                        rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=1)
+
+                    values["rsi_direction"] = rsi_direction
+                    values["rsi_momentum"] = float(rsi_momentum) if rsi_momentum is not None else None
+
+                    if drop_required:
+                        currently_falling = (rsi_momentum is not None
+                                             and rsi_momentum < -2
+                                             and rsi_direction == "decreasing")
+                    else:
+                        currently_falling = True
+
+                    # Check 5 (optional): Sustained fall (falling for 2+ candles)?
+                    sustained_fall = True
+                    if require_sustained and len(rsi_history) >= 3:
+                        last_3 = [rsi for _, rsi in rsi_history[-3:]]
+                        if sustained_fall_mode == "net":
+                            consecutive    = last_3[1] < last_3[0] and last_3[2] < last_3[1]
+                            net_lower      = last_3[2] < last_3[0]
+                            sustained_fall = consecutive or net_lower
+                        else:
+                            sustained_fall = (last_3[1] < last_3[0]) and (last_3[2] < last_3[1])
+                            values["sustained_fall"] = sustained_fall
+
+                    is_bullish = (
+                        touched_overbought and
+                        drop_found and
+                        current_below_max and
+                        currently_falling
+                    )
+
+                    if require_sustained:
+                        is_bullish = is_bullish and sustained_fall
+
+                    if is_bullish:
+                        msg = (
+                            f"RSI Overbought Momentum: ✓ "
+                            f"(RSI {max_rsi:.0f}→{current_rsi:.0f}, "
+                            f"max drop -{max_drop:.1f}, "
+                            f"momentum {rsi_momentum:+.1f})"
+                        )
+                    else:
+                        reasons = []
+                        if not touched_overbought:
+                            reasons.append(f"never >{overbought_threshold}")
+                        if not drop_found:
+                            reasons.append(f"no -{min_drop} drop")
+                        if not current_below_max:
+                            reasons.append(f"RSI {current_rsi:.0f}>{current_max}")
+                        if not currently_falling:
+                            reasons.append("rising")
+                        if require_sustained and not sustained_fall:
+                            reasons.append("not sustained")
+
+                        msg = f"RSI Overbought Momentum: ✗ ({', '.join(reasons)})"
 
             elif indicator_type == "adx_regime":
                 """

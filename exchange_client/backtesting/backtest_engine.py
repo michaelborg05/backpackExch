@@ -620,10 +620,27 @@ class ReplayTrendCache:
                 max_gap_pct = params.get("max_gap_pct", -10.0)
                 ema_value   = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct     = ((current_price - ema_value) / ema_value) * 100 if ema_value else 0
-
                 values      = {"price": current_price, "ema": ema_value, "gap_pct": gap_pct}
                 is_bull     = max_gap_pct <= gap_pct <= min_gap_pct
                 msg         = f"Price below EMA{ema_type}: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
+
+            elif indicator_type == "price_above_vwap":
+                min_gap_pct = params.get("min_gap_pct", 1.0)
+                max_gap_pct = params.get("max_gap_pct", 10.0)
+                gap_pct     = ((current_price - trend.vwap) / trend.vwap) * 100 if trend.vwap else 0
+                values      = {"price": current_price, "vwap": trend.vwap, "gap_pct": gap_pct}
+                is_bull     = min_gap_pct <= gap_pct <= max_gap_pct
+                msg         = f"Price above VWAP: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
+
+            elif indicator_type == "price_extended_above_ema":
+                ema_type    = params.get("ema", 20)
+                min_gap_pct = params.get("min_gap_pct", 2.0)
+                max_gap_pct = params.get("max_gap_pct", 10.0)
+                ema_value   = trend.ema20 if ema_type == 20 else trend.ema50
+                gap_pct     = ((current_price - ema_value) / ema_value) * 100 if ema_value else 0
+                values      = {"price": current_price, "ema": ema_value, "gap_pct": gap_pct}
+                is_bull     = min_gap_pct <= gap_pct <= max_gap_pct
+                msg         = f"Price above EMA{ema_type}: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
 
             elif indicator_type == "bollinger_bands":
                 band          = params.get("band", "lower")
@@ -762,7 +779,7 @@ class ReplayTrendCache:
                     pc_o = pc_h = pc_l = pc_c = None
 
                 # ── Single-candle patterns ────────────────────────────────────
-                if pattern in ("hammer", "doji", "bull_close"):
+                if pattern in ("hammer", "doji", "bull_close", "shooting_star", "bear_close"):
                     if pc_o is None:
                         is_bull = False
                         msg = (
@@ -828,8 +845,36 @@ class ReplayTrendCache:
                                 f"need >={min_close_pct:.1%})"
                             )
 
+                        elif pattern == "shooting_star":
+                            body_pct       = body / total
+                            uw_ratio       = u_wick / body if body > 0 else 0
+                            lw_ratio       = l_wick / body if body > 0 else 999
+                            values["body_pct"]         = round(body_pct, 4)
+                            values["upper_wick_ratio"] = round(uw_ratio, 4)
+                            values["lower_wick_ratio"] = round(lw_ratio, 4)
+                            is_bull = (uw_ratio >= 2.0 and lw_ratio <= 0.3
+                                       and body_pct >= min_body_pct)
+                            msg = (
+                                f"Shooting star: {'✓' if is_bull else '✗'} "
+                                f"(upper_wick={uw_ratio:.1f}x body, "
+                                f"lower_wick={lw_ratio:.1f}x body, "
+                                f"body={body_pct:.1%} of range)"
+                            )
+
+                        elif pattern == "bear_close":
+                            max_close_pct = params.get("max_close_pct", 0.4)
+                            close_pos = (pc_c - pc_l) / total if total > 0 else 0
+                            values["close_position"] = round(close_pos, 4)
+                            values["max_close_pct"]  = max_close_pct
+                            is_bull = close_pos <= max_close_pct
+                            msg = (
+                                f"Bear close: {'✓' if is_bull else '✗'} "
+                                f"(closed at {close_pos:.1%} of range, "
+                                f"need <={max_close_pct:.1%})"
+                            )
+
                 # ── Two-closed-candle patterns ────────────────────────────────
-                elif pattern in ("higher_low", "engulfing"):
+                elif pattern in ("higher_low", "engulfing", "lower_high", "bear_engulfing"):
 
                     # Resolve the two closed candles.
                     # Prefer history (both confirmed), fall back to history[-1] +
@@ -932,12 +977,105 @@ class ReplayTrendCache:
                                 f"engulfs={engulfs}) [{data_source}]"
                             )
 
+                    elif pattern == "lower_high":
+                        require_bear = params.get("require_bear", False)
+                        lh_ok   = c2["high"] < c1["high"]
+                        bear_ok = (not require_bear) or (c2["close"] < c2["open"])
+                        values["c1_high"]      = c1["high"]
+                        values["c2_high"]      = c2["high"]
+                        values["lower_high"]   = lh_ok
+                        values["require_bear"] = require_bear
+                        values["c2_is_bear"]   = c2["close"] < c2["open"]
+                        is_bull = lh_ok and bear_ok
+                        msg = (
+                            f"Lower high: {'✓' if is_bull else '✗'} "
+                            f"(c2_high={c2['high']:.4f} vs c1_high={c1['high']:.4f}"
+                            + (f", bear={bear_ok}" if require_bear else "")
+                            + f") [{data_source}]"
+                        )
+
+                    elif pattern == "bear_engulfing":
+                        if data_source == "live_fallback":
+                            is_bull = False
+                            msg = (
+                                "Bearish engulfing: ✗ "
+                                "(candle history warming up — need 2 closed candles)"
+                            )
+                        else:
+                            c2_total, c2_body, _, _, c2_bull = _candle_metrics(
+                                c2["open"], c2["high"], c2["low"], c2["close"])
+                            _, c1_body, _, _, c1_bull = _candle_metrics(
+                                c1["open"], c1["high"], c1["low"], c1["close"])
+                            c2_bear        = not c2_bull
+                            c2_body_lo     = min(c2["open"], c2["close"])
+                            c2_body_hi     = max(c2["open"], c2["close"])
+                            c1_body_lo     = min(c1["open"], c1["close"])
+                            c1_body_hi     = max(c1["open"], c1["close"])
+                            engulfs        = (c2_body_lo <= c1_body_lo
+                                              and c2_body_hi >= c1_body_hi)
+                            body_pct       = c2_body / c2_total if c2_total > 0 else 0
+                            values.update({
+                                "c1_open": c1["open"], "c1_close": c1["close"],
+                                "c2_open": c2["open"], "c2_close": c2["close"],
+                                "c1_bull": c1_bull,    "c2_bear":  c2_bear,
+                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
+                            })
+                            is_bull = c2_bear and c1_bull and engulfs
+                            msg = (
+                                f"Bearish engulfing: {'✓' if is_bull else '✗'} "
+                                f"(c2_bear={c2_bear}, c1_bull={c1_bull}, "
+                                f"engulfs={engulfs}) [{data_source}]"
+                            )
+
                 else:
                     is_bull = False
                     msg = (
                         f"Reversal candle: ✗ (unknown pattern '{pattern}' — "
-                        f"use hammer | doji | bull_close | higher_low | engulfing)"
+                        f"use hammer | doji | bull_close | shooting_star | bear_close "
+                        f"| higher_low | engulfing | lower_high | bear_engulfing)"
                     )
+
+                max_drop_from_close_pct = params.get("max_drop_from_close_pct", None)
+                if max_drop_from_close_pct is not None:
+                    ref_close = None
+                    if pattern in ("hammer", "doji", "bull_close") and pc_c is not None:
+                        ref_close = pc_c
+                    elif pattern in ("higher_low", "engulfing"):
+                        try:
+                            ref_close = c2["close"] if c2 is not None else pc_c
+                        except (NameError, TypeError):
+                            ref_close = pc_c
+                    if ref_close is not None and ref_close > 0:
+                        drop_pct = ((ref_close - current_price) / ref_close) * 100
+                        if drop_pct > max_drop_from_close_pct:
+                            prev_result = "✓" if is_bull else "✗"
+                            is_bull = False
+                            msg = (
+                                f"Reversal candle ({pattern}): ✗ "
+                                f"(pattern {prev_result} but price dropped "
+                                f"{drop_pct:.2f}% from close, max {max_drop_from_close_pct:.2f}%)"
+                            )
+
+                max_rise_from_close_pct = params.get("max_rise_from_close_pct", None)
+                if max_rise_from_close_pct is not None:
+                    ref_close = None
+                    if pattern in ("shooting_star", "bear_close") and pc_c is not None:
+                        ref_close = pc_c
+                    elif pattern in ("lower_high", "bear_engulfing"):
+                        try:
+                            ref_close = c2["close"] if c2 is not None else pc_c
+                        except (NameError, TypeError):
+                            ref_close = pc_c
+                    if ref_close is not None and ref_close > 0:
+                        rise_pct = ((current_price - ref_close) / ref_close) * 100
+                        if rise_pct > max_rise_from_close_pct:
+                            prev_result = "✓" if is_bull else "✗"
+                            is_bull = False
+                            msg = (
+                                f"Reversal candle ({pattern}): ✗ "
+                                f"(pattern {prev_result} but price rose "
+                                f"{rise_pct:.2f}% from close, max {max_rise_from_close_pct:.2f}%)"
+                            )
 
             elif indicator_type == "rsi_reversal_momentum":
                 lookback_candles   = params.get("lookback_candles", 5)
@@ -1021,7 +1159,81 @@ class ReplayTrendCache:
                     }
                     msg = f"RSI Reversal Momentum: {'✓' if is_bull else '✗'} (RSI {min_rsi_val:.0f}→{current_rsi:.0f})"
 
-            
+            elif indicator_type == "rsi_overbought_momentum":
+                lookback_candles     = params.get("lookback_candles", 5)
+                overbought_threshold = params.get("overbought_threshold", 70)
+                current_max          = params.get("current_max", 65)
+                drop_required        = params.get("drop_required", True)
+                min_drop             = params.get("min_drop", 5.0)
+                require_sustained    = params.get("require_sustained", True)
+                sustained_fall_mode  = params.get("sustained_fall_mode", "strict")
+
+                key_str  = f"{symbol}_{timeframe}"
+                rsi_hist = self._rsi_history.get(key_str, [])
+
+                if len(rsi_hist) < lookback_candles:
+                    is_bull = False
+                    msg = f"RSI Overbought Momentum: ✗ (insufficient history {len(rsi_hist)}/{lookback_candles})"
+                else:
+                    current_rsi        = trend.rsi
+                    recent             = rsi_hist[-lookback_candles:]
+                    rsi_vals           = [r for _, r in recent]
+                    touched_overbought = any(r > overbought_threshold for r in rsi_vals)
+                    max_rsi_val        = max(rsi_vals)
+
+                    if drop_required:
+                        max_drop   = 0.0
+                        drop_found = False
+                        max_found  = False
+                        for i in range(1, len(rsi_vals)):
+                            if not max_found and rsi_vals[i-1] == max_rsi_val:
+                                max_found = True
+                            if max_found:
+                                drp = rsi_vals[i-1] - rsi_vals[i]
+                                if drp > max_drop:
+                                    max_drop = drp
+                                if drp >= min_drop:
+                                    drop_found = True
+                    else:
+                        drop_found = True
+                        max_drop   = 0.0
+
+                    current_below_max = current_rsi <= current_max
+
+                    if require_sustained:
+                        rsi_mom, rsi_dir = self._get_rsi_momentum(symbol, timeframe, lookback=2)
+                    else:
+                        rsi_mom, rsi_dir = self._get_rsi_momentum(symbol, timeframe, lookback=1)
+
+                    currently_falling = (rsi_mom is not None and rsi_mom < -2 and rsi_dir == "decreasing") if drop_required else True
+
+                    sustained_fall = True
+                    if require_sustained and len(rsi_hist) >= 3:
+                        last3 = [r for _, r in rsi_hist[-3:]]
+                        if sustained_fall_mode == "net":
+                            consecutive    = last3[1] < last3[0] and last3[2] < last3[1]
+                            net_lower      = last3[2] < last3[0]
+                            sustained_fall = consecutive or net_lower
+                        else:
+                            sustained_fall = last3[1] < last3[0] and last3[2] < last3[1]
+
+                    is_bull = touched_overbought and drop_found and current_below_max and currently_falling
+
+                    if require_sustained:
+                        is_bull = is_bull and sustained_fall
+
+                    values = {
+                        "touched_overbought": touched_overbought,
+                        "max_rsi":            max_rsi_val,
+                        "drop_found":         drop_found,
+                        "max_drop":           max_drop,
+                        "current_rsi":        current_rsi,
+                        "rsi_direction":      rsi_dir,
+                        "sustained_fall":     sustained_fall,
+                        "sustained_mode":     sustained_fall_mode,
+                    }
+                    msg = f"RSI Overbought Momentum: {'✓' if is_bull else '✗'} (RSI {max_rsi_val:.0f}→{current_rsi:.0f})"
+
             elif indicator_type == "adx_regime":
                 max_adx   = params.get("max_adx", 25)
                 min_adx   = params.get("min_adx", 0)
