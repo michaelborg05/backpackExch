@@ -527,84 +527,100 @@ class ReplayTrendCache:
 
             elif indicator_type == "rsi_overbought":
                 """
-                INVERSE - for short positions or avoiding longs
-                params: {
-                    min_value: 70,              # RSI threshold — fail if above this
-                    lookback_candles: null      # Optional: also fail if RSI exceeded
-                                                # min_value in the last N candles of
-                                                # history (catches post-peak cooling).
-                                                # When omitted, only checks current RSI.
-                }
+                RSI extreme-zone block — works for both long and short entries.
 
-                Without lookback_candles (original behaviour):
-                  Blocks if current RSI > min_value.
+                Long (default, side="long"):
+                  Blocks if current RSI > min_value (overbought).
+                  params: { side: "long", min_value: 70, lookback_candles: null }
 
-                With lookback_candles (new):
-                  Blocks if EITHER:
-                    - current RSI > min_value, OR
-                    - RSI exceeded min_value at any point in the last N significant
-                      candles (i.e. the trend recently peaked and is now cooling).
-
-                Use on the 60m trend filter to catch post-peak entries where the
-                1h RSI has already spiked and fallen back but the trend is spent:
-                  - type: "rsi_overbought"
-                    params:
-                      min_value: 68
-                      lookback_candles: 6   # Block if 60m RSI was >68 in last 6 candles
-                      hard_stop: true
+                Short (side="short"):
+                  Blocks if current RSI < max_value (oversold — bad time to short).
+                  params: { side: "short", max_value: 30, lookback_candles: null }
                 """
-                min_value = params.get("min_value", 70)
+                side = params.get("side", "long")
                 lookback_candles = params.get("lookback_candles", None)
-
                 current_rsi = float(trend.rsi)
                 values["rsi"] = current_rsi
-                values["threshold"] = min_value
+                values["side"] = side
 
-                # --- current candle check (always performed) ---
-                is_overbought = current_rsi > min_value
+                if side == "short":
+                    max_value = params.get("max_value", 30)
+                    values["threshold"] = max_value
+                    is_extreme = current_rsi < max_value
 
-                # --- optional historical lookback ---
-                peak_in_lookback = False
-                if lookback_candles is not None:
-                    key = f"{symbol}_{timeframe}"
-                    rsi_history = self._rsi_history.get(key, [])
-                    if len(rsi_history) >= lookback_candles:
-                        recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
-                        peak_rsi = max(recent_rsi_values)
-                        peak_in_lookback = peak_rsi > min_value
-                        values["lookback_candles"] = lookback_candles
-                        values["peak_rsi_in_lookback"] = round(peak_rsi, 2)
+                    trough_in_lookback = False
+                    if lookback_candles is not None:
+                        key = f"{symbol}_{timeframe}"
+                        rsi_history = self._rsi_history.get(key, [])
+                        if len(rsi_history) >= lookback_candles:
+                            recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
+                            trough_rsi = min(recent_rsi_values)
+                            trough_in_lookback = trough_rsi < max_value
+                            values["lookback_candles"] = lookback_candles
+                            values["trough_rsi_in_lookback"] = round(trough_rsi, 2)
+                        else:
+                            values["lookback_candles"] = lookback_candles
+                            values["lookback_history_len"] = len(rsi_history)
+
+                    is_bull = not is_extreme and not trough_in_lookback
+
+                    if is_extreme:
+                        msg = f"RSI oversold block (short): ✗ (RSI {current_rsi:.1f} < {max_value})"
+                    elif trough_in_lookback:
+                        msg = (
+                            f"RSI oversold block (short): ✗ "
+                            f"(RSI {current_rsi:.1f} ok now, but troughed at "
+                            f"{values['trough_rsi_in_lookback']:.1f} < {max_value} "
+                            f"in last {lookback_candles} candles)"
+                        )
                     else:
-                        # Insufficient history — fail safe: don't block on missing data
-                        values["lookback_candles"] = lookback_candles
-                        values["lookback_history_len"] = len(rsi_history)
+                        lookback_note = (
+                            f", trough {values.get('trough_rsi_in_lookback', 'N/A'):.1f} "
+                            f"in last {lookback_candles} ok"
+                            if lookback_candles is not None and "trough_rsi_in_lookback" in values
+                            else ""
+                        )
+                        msg = f"RSI oversold block (short): ✓ (RSI {current_rsi:.1f}{lookback_note})"
 
-                is_bull = not is_overbought and not peak_in_lookback
-
-                # Build descriptive message
-                if is_overbought:
-                    msg = (
-                        f"RSI overbought check: ✗ "
-                        f"(RSI {current_rsi:.1f} > {min_value})"
-                    )
-                elif peak_in_lookback:
-                    msg = (
-                        f"RSI overbought check: ✗ "
-                        f"(RSI {current_rsi:.1f} ok now, but peaked at "
-                        f"{values['peak_rsi_in_lookback']:.1f} > {min_value} "
-                        f"in last {lookback_candles} candles)"
-                    )
                 else:
-                    lookback_note = (
-                        f", peak {values.get('peak_rsi_in_lookback', 'N/A'):.1f} "
-                        f"in last {lookback_candles} ok"
-                        if lookback_candles is not None and "peak_rsi_in_lookback" in values
-                        else ""
-                    )
-                    msg = (
-                        f"RSI overbought check: ✓ "
-                        f"(RSI {current_rsi:.1f}{lookback_note})"
-                    )
+                    # Long (default): block when RSI is overbought
+                    min_value = params.get("min_value", 70)
+                    values["threshold"] = min_value
+                    is_overbought = current_rsi > min_value
+
+                    peak_in_lookback = False
+                    if lookback_candles is not None:
+                        key = f"{symbol}_{timeframe}"
+                        rsi_history = self._rsi_history.get(key, [])
+                        if len(rsi_history) >= lookback_candles:
+                            recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
+                            peak_rsi = max(recent_rsi_values)
+                            peak_in_lookback = peak_rsi > min_value
+                            values["lookback_candles"] = lookback_candles
+                            values["peak_rsi_in_lookback"] = round(peak_rsi, 2)
+                        else:
+                            values["lookback_candles"] = lookback_candles
+                            values["lookback_history_len"] = len(rsi_history)
+
+                    is_bull = not is_overbought and not peak_in_lookback
+
+                    if is_overbought:
+                        msg = f"RSI overbought check: ✗ (RSI {current_rsi:.1f} > {min_value})"
+                    elif peak_in_lookback:
+                        msg = (
+                            f"RSI overbought check: ✗ "
+                            f"(RSI {current_rsi:.1f} ok now, but peaked at "
+                            f"{values['peak_rsi_in_lookback']:.1f} > {min_value} "
+                            f"in last {lookback_candles} candles)"
+                        )
+                    else:
+                        lookback_note = (
+                            f", peak {values.get('peak_rsi_in_lookback', 'N/A'):.1f} "
+                            f"in last {lookback_candles} ok"
+                            if lookback_candles is not None and "peak_rsi_in_lookback" in values
+                            else ""
+                        )
+                        msg = f"RSI overbought check: ✓ (RSI {current_rsi:.1f}{lookback_note})"
 
             elif indicator_type == "price_below_vwap":
                 min_gap_pct = params.get("min_gap_pct", -1.0)
