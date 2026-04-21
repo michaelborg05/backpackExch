@@ -687,10 +687,14 @@ class ReplayTrendCache:
                             is_bull = below_max and above_min
 
                             # Build readable range string for the log message
-                            if min_pct_b is not None:
+                            if min_pct_b is not None and max_pct_b is not None:
                                 range_str = f"need {min_pct_b:.2f}–{max_pct_b:.2f}"
-                            else:
+                            elif min_pct_b is not None:
+                                range_str = f"need >={min_pct_b:.2f}"
+                            elif max_pct_b is not None:
                                 range_str = f"need <={max_pct_b:.2f}"
+                            else:
+                                range_str = "no range set"
 
                             msg = (
                                 f"BB %B ({band}): {'✓' if is_bull else '✗'} "
