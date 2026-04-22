@@ -155,3 +155,11 @@ class ExchangeAdapter(ABC):
     def supports_dust_conversion(self) -> bool:
         """Return True if this exchange supports dust conversion."""
         return False
+
+    def to_exchange_symbol(self, symbol: str) -> str:
+        """Convert a canonical symbol (e.g. "SOL_USDC") to the exchange-native format.
+
+        The default returns the symbol unchanged. Override in adapters that use a
+        different symbol format (e.g. Bullet converts "SOL_USDC" → "SOL-USD").
+        """
+        return symbol

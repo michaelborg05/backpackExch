@@ -572,8 +572,9 @@ class MonitoringService:
                 live_symbols.add(ep.get("symbol", ""))
 
         for position in open_positions:
-            symbol = position.symbol  # e.g. "SOL-USD"
-            if symbol not in live_symbols:
+            symbol = position.symbol
+            exchange_symbol = adapter.to_exchange_symbol(symbol)
+            if exchange_symbol not in live_symbols and symbol not in live_symbols:
                 self.logger.warning(
                     f"INVALID POSITION DETECTED: {symbol} for {profile.name}. "
                     f"No live perp position found on exchange."
@@ -588,7 +589,7 @@ class MonitoringService:
                     # Prefer actual fill price from userTrades
                     if hasattr(adapter, "get_latest_close_price"):
                         opened_at = getattr(position, "opened_at", None) or getattr(position, "created_at", None)
-                        actual_price = adapter.get_latest_close_price(symbol, opened_at=opened_at)
+                        actual_price = adapter.get_latest_close_price(exchange_symbol, opened_at=opened_at)
                         if actual_price:
                             exit_price = actual_price
                             price_source = "exchange fill"
@@ -768,6 +769,11 @@ class MonitoringService:
                     f"P/L: ${profit:.2f} ({profit_pct:+.2f}%)",
                     MessagePriority.NORMAL
                 )
+
+                # Reset cooldown from close time so the post-close cooldown starts now,
+                # not from when the trade was originally opened.
+                cooldown_key = f"{profile.name}_{symbol}"
+                self._last_signals[cooldown_key] = time.time()
 
                 # Note: Position will be closed automatically by TradingService.ExecuteOrder
                 # which calls close_position() for the closing order (SELL for longs, BUY for shorts)

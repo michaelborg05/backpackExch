@@ -262,6 +262,7 @@ class BulletAdapter(ExchangeAdapter):
             order_ns=order_ns,
             source=source,
             position_id=position_id,
+            original_symbol=symbol,
             reason_summary=kwargs.get("reason_summary"),
             validation_summary=kwargs.get("validation_summary"),
         )
@@ -290,9 +291,13 @@ class BulletAdapter(ExchangeAdapter):
             order_ns=order_ns,
             source=source,
             position_id=position_id,
+            original_symbol=symbol,
             reason_summary=reason_summary,
             validation_summary=validation_summary,
         )
+
+    def to_exchange_symbol(self, symbol: str) -> str:
+        return _to_bullet_symbol(symbol)
 
     def validate_balance_for_trade(self, sale_action: str, symbol: str) -> tuple:
         """Check account balance before placing an order on Bullet.
@@ -534,6 +539,7 @@ class BulletAdapter(ExchangeAdapter):
         position_id: Optional[str],
         reason_summary,
         validation_summary: Optional[str],
+        original_symbol: Optional[str] = None,
     ) -> Optional[Any]:
         """Submit a signed Bullet order tx, persist to DB, open/close position.
 
@@ -608,6 +614,11 @@ class BulletAdapter(ExchangeAdapter):
             is_short_entry = side_upper == "ASK" and is_opening
             direction = "LONG" if side_upper == "BID" else "SHORT"
 
+            # Use the canonical profile symbol (e.g. "SOL_USDC") for DB storage so that
+            # get_open_positions_for_symbol can find positions when checking max_open_positions.
+            if original_symbol:
+                order_response.symbol = original_symbol
+
             saved_trade = save_trade(
                 db, order_response, self.profile.name, source,
                 reason_summary=reason_summary,
@@ -641,12 +652,12 @@ class BulletAdapter(ExchangeAdapter):
                 # Note: Bullet TP/SL managed by monitoring loop (no resting limit order placed)
 
             elif position_id is not None:
-                # Closing a position
+                # Closing a position — use canonical symbol so it matches how the position was stored
                 from db.crud import close_positions_fifo
                 closed = close_positions_fifo(
                     db=db,
                     profile_name=self.profile.name,
-                    symbol=order_ns.symbol,
+                    symbol=original_symbol or order_ns.symbol,
                     sell_trade=saved_trade,
                 )
                 if closed:
