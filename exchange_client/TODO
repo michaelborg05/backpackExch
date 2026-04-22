@@ -16,6 +16,12 @@ TO DO
 # Api call to manually refresh caches for various things - like settings, profiles, etc
 # occiasionally getting login errors on website
 # When adding new profile, it doesnt keep the spot/perps setting I choose i nthe modal when it loadst he profle page
+# add circuit breaker delete/reset to UI
+# The profit figures don't match with balance changes. Find out why. Possibilities
+    - close price being recorded is the theoretical price but maybe my actual trade is triggering at a differnt price
+    - Maybe its not including fees
+#change the way validation results are stored. get rid of the tables with json and just have a new table recording all the key info (Rsi, ema, etc)
+# New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
 No need
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish

@@ -61,58 +61,45 @@ MEAN_REV_SHORT_VARIANTS = {
         "trend_indicators": [
             {
                 "type": "price_extended_above_ema",
-                "params": {"ema": 50, "min_gap_pct": 0.5, "max_gap_pct": 4.0},
+                "params": {"ema": 50, "min_gap_pct": 0.5, "max_gap_pct": 4.5},
                 "hard_stop": True,
             },
         ],
         "min_indicators_required": 1,
         "entry_indicators": [
+            {"type": "volume_spike",             "params": {"min_ratio": 1, "max_ratio": 8.0}},
+            {"type": "bollinger_bands",          "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.75}},
             {"type": "rsi_overbought_momentum",  "params": {"lookback_candles": 6, "overbought_threshold": 62, "current_max": 60, "min_drop": 3.0, "require_sustained": True, "sustained_fall_mode": "net", "drop_required": True}},
             {"type": "price_extended_above_ema", "params": {"ema": 20, "min_gap_pct": 0.7, "max_gap_pct": 8.0}},
-            {"type": "volume_spike",             "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",          "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.75}},
             {"type": "reversal_candle",          "params": {"pattern": "bear_close", "max_close_pct": 0.40, "max_rise_from_close_pct": 0.6}},
             {"type": "price_above_vwap",         "params": {"min_gap_pct": 0.5, "max_gap_pct": 8.0}},
         ],
         "min_entry_indicators_required": 4,
     },
 
-    # -------------------------------------------------------------------------
-    # V2: SPIKE ENTRY — mirror of mr_v2_spike_entry_withTrend
-    # Enter fast on the first big RSI drop candle (distribution spike).
-    # No sustained fall requirement — catch the rejection candle early
-    # before price snaps back. Lower confidence threshold matches the long
-    # version philosophy of accepting more uncertainty for faster entry.
-    # -------------------------------------------------------------------------
-    "mrs_v2_spike_entry": {
+    "mrs_v2_regime_gated_mod": {
         **_MEAN_REV_SHORT_BASE,
         "use_trend_filter": True,
         "trend_timeframe": "60",
         "trend_indicators": [
-            {"type": "price_extended_above_ema",
-             "params": {"ema": 50, "min_gap_pct": 0.5, "max_gap_pct": 4.0}},
+            {
+                "type": "price_extended_above_ema",
+                "params": {"ema": 50, "min_gap_pct": 0.5, "max_gap_pct": 4.5},
+                "hard_stop": True,
+            },
         ],
         "min_indicators_required": 1,
-        "take_profit_pct": 1.0,
-        "stop_loss_pct": 0.7,
         "entry_indicators": [
-            {"type": "rsi_overbought_momentum", "params": {
-                "lookback_candles": 4,
-                "overbought_threshold": 68,
-                "current_max": 72,       # still near the peak — fast entry
-                "min_drop": 4.0,
-                "require_sustained": False,  # single candle drop is enough
-                "drop_required": True,
-            }},
-            {"type": "volume_spike",            "params": {"min_ratio": 1.1, "max_ratio": 8.0}},
-            {"type": "bollinger_bands",         "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.80, "max_pct_b": 1.10}},
-            {"type": "price_above_vwap",        "params": {"min_gap_pct": 0.5, "max_gap_pct": 8.0}},
-            {"type": "rsi_overbought",          "params": {"min_value": 44}},
-            {"type": "reversal_candle",         "params": {"pattern": "bear_close", "max_close_pct": 0.40, "max_rise_from_close_pct": 0.6}},
+            {"type": "volume_spike",             "params": {"min_ratio": 1, "max_ratio": 8.0}},
+            {"type": "bollinger_bands",          "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.75}},
+            {"type": "rsi_overbought_momentum",  "params": {"lookback_candles": 6, "overbought_threshold": 62, "current_max": 65, "min_drop": 3.0, "require_sustained": True, "sustained_fall_mode": "net", "drop_required": True, "hard_stop": True}},
+            {"type": "price_extended_above_ema", "params": {"ema": 20, "min_gap_pct": 0.7, "max_gap_pct": 8.0}},
+            {"type": "reversal_candle",          "params": {"pattern": "bear_close", "max_close_pct": 0.40, "max_rise_from_close_pct": 0.6}},
+            {"type": "price_above_vwap",         "params": {"min_gap_pct": 0.5, "max_gap_pct": 8.0}},
         ],
         "min_entry_indicators_required": 4,
-        "min_signal_confidence": 75.0,
     },
+
 
     # -------------------------------------------------------------------------
     # V3: BEST COMBINED (LOOSER RSI) — mirror of mr_v15_best_combined

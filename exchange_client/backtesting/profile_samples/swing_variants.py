@@ -170,32 +170,12 @@ SWING_VARIANTS = {
         "min_entry_indicators_required": 3,
     },
 
-    
-    # =============================================================================
-    # p3_v19_tight_pullback
-    #
-    # WHAT IT TARGETS:
-    #   The "healthy pullback within an uptrend" — 4hr trend is running (RSI 47-69),
-    #   price pulls back intraday to the lower half of the 1hr Bollinger Band with
-    #   RSI cooling off under 52. Tighter than v18b on both BB and RSI ceiling,
-    #   which filters out shallow/noisy pullbacks.
-    #
-    # BACKTEST (16 days, all 5 symbols):
-    #   Trades: 184  |  Win rate: 69%  |  Avg PnL: +0.97%  |  Best: HYPE (82%), ETH (76%)
-    #   SOL: 30 trades, 60% win  | ETH: 46, 76% | HYPE: 22, 82% | SUI: 42, 57% | BTC: 44, 73%
-    #   NOTE: SOL and SUI are noisier — consider excluding or using stricter gates for those pairs
-    #
-    # TP/SL RATIONALE:
-    #   TP 3% / SL 2.5% gives a 1.2:1 ratio, which works well with 69%+ win rate.
-    #   Tighter than existing profiles (TP5%/SL4%) — suits shorter, sharper pullback bounces.
-    #   Average hold time was ~16-20 bars (hours).
-    # =============================================================================
-    "p3_v19_tight_pullback": {
+    "p3_v19_tight_pullback_old": {
         **_SWING_BASE,
     
         "take_profit_pct":       3.0,   # Smaller target — these are pullback bounces, not full reversals
         "stop_loss_pct":         2.5,   # Tight stop — if it goes further, the trend assumption is wrong
-        "trailing_stop_pct":     1.5,   # Trail at 1.5% — locks in gains on quick bounces
+        "trailing_stop_pct":     1,   # Trail at 1.5% — locks in gains on quick bounces
         "arm_trailing_stop_pct": 1.2,   # Arm early — these moves often pop quickly
         "use_trailing_stop":     True,
         "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
@@ -272,13 +252,13 @@ SWING_VARIANTS = {
         ],
         "min_entry_indicators_required": 3,
     },
-    
-    "p3_v19b_tight_pullback": {
+    #23rd April - This is the new v19 in use
+    "p3_v19_tight_pullback": {
         **_SWING_BASE,
     
         "take_profit_pct":       3.0,   # Smaller target — these are pullback bounces, not full reversals
         "stop_loss_pct":         2.5,   # Tight stop — if it goes further, the trend assumption is wrong
-        "trailing_stop_pct":     1.5,   # Trail at 1.5% — locks in gains on quick bounces
+        "trailing_stop_pct":     1,   # Trail at 1.5% — locks in gains on quick bounces
         "arm_trailing_stop_pct": 1.2,   # Arm early — these moves often pop quickly
         "use_trailing_stop":     True,
         "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
@@ -315,27 +295,36 @@ SWING_VARIANTS = {
                     "max_gap_pct": 3,     # Block if price has run >6.5% above EMA50
                 }
             },
+            {
+                # Price within reasonable distance of EMA50 — not over-extended
+                "type": "adx_regime",
+                "params": {
+                    "min_adx": 10,
+                    "max_adx": 27,    
+                }
+            },
         ],
-        "min_indicators_required": 3,   # rsi_range + rsi_overbought are both hard stops
+        "min_indicators_required": 4,   # rsi_range + rsi_overbought are both hard stops
     
         # ── 1HR ENTRY FILTER ────────────────────────────────────────────────────────
         # Tighter than v18b: RSI ceiling at 52 (vs 58) and BB at 0.58 (vs 0.68)
         # This ensures you're entering on a real pullback, not just "not overbought"
         "entry_indicators": [
-            {"type": "rsi_range", 
+            {
+                "type": "rsi_range",
                 "params": {
-                    "min": 35,
-                    "max": 52,   # ceiling already covered by rsi_overbought, this adds the floor
-                    "hard_stop": True
-                    ,"invert": True,
-                }, 
+                    "min": 35,    # TIGHTER: 1hr RSI must be genuinely cooling (< 52)
+                    "max": 52,    # TIGHTER: 1hr RSI must be genuinely cooling (< 52)
+                    "invert": True,
+                    "hard_stop": True,
                 }
-            ,   # soft — RSI 32-35 shouldn't kill an otherwise clean setup
+            },
             {
                 "type": "bollinger_bands",
                 "params": {
                     "band":      "upper",
                     "mode":      "pct_b",
+                    "min_pct_b": 0.1,  # TIGHTER: lower 58% of band — confirmed pullback to value
                     "max_pct_b": 0.58,  # TIGHTER: lower 58% of band — confirmed pullback to value
                 }
             },
@@ -345,7 +334,6 @@ SWING_VARIANTS = {
                     "ema":         20,
                     "min_gap_pct": -4.0,    # Don't enter in freefall
                     "max_gap_pct":  2.5,    # Must be near/below EMA20 (tighter than v18b's 2.5%)
-                    "hard_stop": True
                 }
             },
             {
@@ -358,7 +346,7 @@ SWING_VARIANTS = {
         ],
         "min_entry_indicators_required": 3,
     },
-    
+
     # =============================================================================
     # p3_v20_midband
     #
