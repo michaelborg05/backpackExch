@@ -145,13 +145,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """
     # 1. Define conditions for skipping the Telegram alert
     is_auth_error = exc.status_code in [401, 403]
-    is_auth_path = request.url.path.startswith("/auth") or request.url.path == "/"
-    
-    # 2. Only send Telegram notification if it's NOT a common auth/redirect error
-    should_notify = telegram and exc.status_code >= 400
-    
-    if is_auth_error and is_auth_path:
-        should_notify = False
+
+    # 2. Only send Telegram notification if it's NOT an auth error (token expiry, unauthorized)
+    should_notify = telegram and exc.status_code >= 400 and not is_auth_error
 
     if should_notify:
         await telegram.send_error_notification(
