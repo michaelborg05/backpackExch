@@ -263,13 +263,11 @@ class BulletAdapter(ExchangeAdapter):
             source=source,
             position_id=position_id,
             original_symbol=symbol,
-            reason_summary=kwargs.get("reason_summary"),
-            validation_summary=kwargs.get("validation_summary"),
+            signal_snapshot=kwargs.get("signal_snapshot"),
         )
 
     def order_sell(self, symbol: str, quantity: str, price: str = "0",
                    source: str = "MANUAL", position_id: str = None,
-                   reason_summary=None, validation_summary: str = None,
                    **kwargs) -> Optional[Any]:
         """Place a market-equivalent SELL/CLOSE on Bullet (IOC ask at -2% slippage)."""
         bullet_symbol = _to_bullet_symbol(symbol)
@@ -292,8 +290,7 @@ class BulletAdapter(ExchangeAdapter):
             source=source,
             position_id=position_id,
             original_symbol=symbol,
-            reason_summary=reason_summary,
-            validation_summary=validation_summary,
+            signal_snapshot=kwargs.get("signal_snapshot"),
         )
 
     def to_exchange_symbol(self, symbol: str) -> str:
@@ -322,8 +319,7 @@ class BulletAdapter(ExchangeAdapter):
             return False, f"Balance check error: {e}"
 
     async def process_tradingview_alert(self, alert: Any, profile_name: str,
-                                        source: str = "WEBHOOK",
-                                        reason_summary=None) -> Optional[Any]:
+                                        source: str = "WEBHOOK") -> Optional[Any]:
         """Handle a TradingView webhook alert for a Bullet profile."""
         action = getattr(alert, "action", None) or (alert.get("action") if isinstance(alert, dict) else None)
         symbol = getattr(alert, "symbol", None) or (alert.get("symbol") if isinstance(alert, dict) else None)
@@ -335,9 +331,9 @@ class BulletAdapter(ExchangeAdapter):
 
         action_upper = action.upper()
         if action_upper in ("BUY", "LONG"):
-            return self.order_buy(symbol=symbol, quantity=quantity, source=source, reason_summary=reason_summary)
+            return self.order_buy(symbol=symbol, quantity=quantity, source=source)
         elif action_upper in ("SELL", "SHORT", "CLOSE"):
-            return self.order_sell(symbol=symbol, quantity=quantity, source=source, reason_summary=reason_summary)
+            return self.order_sell(symbol=symbol, quantity=quantity, source=source)
         else:
             self.logger.warning(f"[Bullet] process_tradingview_alert: unknown action {action!r}")
             return None
@@ -537,8 +533,7 @@ class BulletAdapter(ExchangeAdapter):
         order_ns: Any,
         source: str,
         position_id: Optional[str],
-        reason_summary,
-        validation_summary: Optional[str],
+        signal_snapshot: Optional[dict] = None,
         original_symbol: Optional[str] = None,
     ) -> Optional[Any]:
         """Submit a signed Bullet order tx, persist to DB, open/close position.
@@ -548,10 +543,7 @@ class BulletAdapter(ExchangeAdapter):
         """
         from utils.auth import build_bullet_transaction
         from db.session import SessionLocal
-        from db.crud import (
-            save_trade, open_position, close_position,
-            add_validation_result,
-        )
+        from db.crud import save_trade, open_position, close_position
         from utils.position_calculator import PositionCalculator
 
         # 1. Build and sign the transaction
@@ -621,13 +613,10 @@ class BulletAdapter(ExchangeAdapter):
 
             saved_trade = save_trade(
                 db, order_response, self.profile.name, source,
-                reason_summary=reason_summary,
+                signal_snapshot=signal_snapshot,
                 direction=direction if is_opening else None,
             )
             self.logger.info(f"[Bullet] Trade saved: ID {saved_trade.id}")
-
-            if validation_summary:
-                add_validation_result(db, saved_trade, validation_summary=validation_summary)
 
             if is_long_entry or is_short_entry:
                 tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(

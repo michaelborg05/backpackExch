@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from db.models import Trade, Position, Order
 from models.trade import OrderResponse, OrderHistoryResponse
 from models.trading_profile import TradingProfile
-from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig, TradeValidationResults
+from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
 
-def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None, direction: str = None) -> Trade:
+def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", signal_snapshot: dict = None, direction: str = None) -> Trade:
     """Save a trade to the database"""
 
     if order.price is None or order.price == "0":
@@ -29,14 +29,14 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
         exchange="backpack",
         reason=reason,
         created_at=datetime.now(timezone.utc),
-        reason_summary=reason_summary
+        signal_snapshot=signal_snapshot
     )
     db.add(trade)
     db.commit()
     db.refresh(trade)
     return trade
 
-def save_limit_trade(db: Session, order: OrderHistoryResponse, profile_name: str, reason: str = "MANUAL", reason_summary: List[str] = None) -> Trade:
+def save_limit_trade(db: Session, order: OrderHistoryResponse, profile_name: str, reason: str = "MANUAL") -> Trade:
     """Save a limit trade to the database"""
 
     if order.price is None or order.price == "0":
@@ -55,7 +55,6 @@ def save_limit_trade(db: Session, order: OrderHistoryResponse, profile_name: str
         exchange="backpack",
         reason=reason,
         created_at=datetime.now(timezone.utc),
-        reason_summary=reason_summary
     )
     db.add(trade)
     db.commit()
@@ -116,23 +115,6 @@ def open_position(
     db.refresh(position)
     return position
 
-def add_validation_result(
-    db: Session, 
-    trade: Trade,  # Changed: accept Trade object, not OrderResponse
-    validation_summary: str = None
-):
-    """Add a validation result for a trade"""
-    validation_result = TradeValidationResults(
-        trade_id=trade.id,
-        profile_name=trade.profile_name,
-        symbol=trade.symbol,
-        side=trade.side,
-        validation_summary=validation_summary
-    )
-    db.add(validation_result)
-    db.commit()
-    db.refresh(validation_result)
-    return validation_result
 
 def get_position(db: Session, position_id: int) -> Position:
 

@@ -12,7 +12,6 @@ from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
 from api_builders.factory import get_adapter
 from cache.regime_filter import get_regime_filter
-from models.signal_validation import SignalValidationResult, ValidationGroup, MarketContext, IndicatorResult
 from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
 
 class SignalGenerator:
@@ -200,34 +199,12 @@ class SignalGenerator:
         # Initialize scoring
         reasons = []
         indicators = {}
-        validation = SignalValidationResult(
-            timestamp=time.time(),
-            symbol=symbol,
-            signal_timeframe=self.trading_timeframe,
-            strategy_type=self.strategy_type.value,
-            order_type=signal_direction,
-            score=0.0,
-            score_components=0,
-            market_context=MarketContext(),
-            trend_validation=ValidationGroup(enabled=self.profile.use_trend_filter),
-            entry_validation=ValidationGroup(enabled=self.use_entry_filter)
-        )
-
         confidence_score = 0.0
-        
+
         # 4. TREND FILTER (Higher Timeframe - ONLY for trend_following)
         if self.profile.use_trend_filter:
             trend_check, trend_reason, trend_indicators = self._check_trend(symbol, self.trend_timeframe)
             indicators['trend'] = trend_check
-
-            validation.trend_validation.timeframe = self.trend_timeframe
-            validation.trend_validation.passed = trend_check
-            validation.trend_validation.indicators = trend_indicators
-            validation.trend_validation.indicators_total = len(trend_indicators)
-            validation.trend_validation.indicators_passed = sum(
-                1 for ind in trend_indicators if ind.is_bullish
-            )
-            validation.trend_validation.summary = trend_reason
 
             if not trend_check:
                 self.logger.info(
@@ -253,7 +230,6 @@ class SignalGenerator:
                 current_price=current_price,
                 confidence_score=confidence_score,
                 regime_reason=regime_reason,
-                validation=validation,
                 reasons=reasons,
                 indicators=indicators,
             )
@@ -262,15 +238,6 @@ class SignalGenerator:
         if self.use_entry_filter:
             entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
             indicators['entry_filter'] = entry_check
-
-            validation.entry_validation.timeframe = self.entry_timeframe
-            validation.entry_validation.passed = entry_check
-            validation.entry_validation.indicators = entry_indicators
-            validation.entry_validation.indicators_total = len(entry_indicators)
-            validation.entry_validation.indicators_passed = sum(
-                1 for ind in entry_indicators if ind.is_bullish
-            )
-            validation.entry_validation.summary = entry_reason
 
             if not entry_check:
                 self.logger.info(
@@ -289,12 +256,6 @@ class SignalGenerator:
         volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
         indicators['volume'] = volume_check
 
-        validation.market_context.volume = {
-            "is_sufficient": volume_check['has_volume'],
-            "ratio": float(volume_check['volume_ratio']),
-            "required_ratio": self.min_volume_ratio,
-            "message": f"{volume_check['volume_ratio']:.1f}x average ({self.min_volume_ratio}x required)"
-        }        
         if volume_check['has_volume']:
             reasons.append(f"✅ Volume: {volume_reason}")
             confidence_score += self.volume_weight
@@ -306,38 +267,14 @@ class SignalGenerator:
         if self.profile.use_atr_filter:
             atr_check, atr_reason = self._check_atr(symbol)
             indicators['atr'] = atr_check
-            if atr_check['is_valid'] == False:
-                validation.market_context.atr = {
-                    "is_valid"   : atr_check['is_valid'],
-                    "message": f"{atr_reason}"
-                }        
-            else: 
-                validation.market_context.atr = {
-                    "is_valid"   : atr_check['is_valid'],
-                    "is_volatile": atr_check['is_volatile'],
-                    "ratio": float(atr_check['ratio']),
-                    "message": f"{atr_check['ratio']:.1f}x average ({self.profile.atr_threshold}x - {self.profile.atr_filter_mode})"
-                }        
-
             if not atr_check['is_valid']:
                 self.logger.debug(f"{symbol}: ❌ ATR check failed - {atr_reason}")
-                #return None
-            
             reasons.append(f"✅ ATR: {atr_reason}")
-        
+
         # 8. RSI SAFETY CHECK (direction-aware)
         if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
-            # Long strategies: penalise overbought
             overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
             indicators['overbought'] = overbought_check
-            ob_check = IndicatorResult(
-                type="rsi_overbought",
-                is_bullish=overbought_check['is_valid'],
-                config={"threshold": 70},
-                values={"rsi": float(overbought_check['rsi'])},
-                message=f"RSI {overbought_check['rsi']:.0f} {'not overbought' if overbought_check['is_valid'] else 'overbought'}"
-            )
-            validation.additional_checks.append(ob_check)
             if not overbought_check['is_valid']:
                 reasons.append(f"⚠️  RSI: {ob_reason}")
                 if overbought_check['rsi'] > 80:
@@ -348,18 +285,10 @@ class SignalGenerator:
                 reasons.append(f"✅ RSI: {ob_reason}")
                 confidence_score += self.safety_weight
         elif self.strategy_type == StrategyType.SHORT_TREND_FOLLOWING:
-            # Short trend: penalise oversold (we need room to fall)
             trend = self.trend_cache.get(symbol, self.trading_timeframe)
             rsi = float(trend.rsi) if trend else 50.0
             oversold = rsi < 35
-            ob_check = IndicatorResult(
-                type="rsi_oversold",
-                is_bullish=not oversold,
-                config={"threshold": 35},
-                values={"rsi": rsi},
-                message=f"RSI {rsi:.0f} {'has room to fall' if not oversold else 'oversold - limited downside'}"
-            )
-            validation.additional_checks.append(ob_check)
+            indicators['oversold'] = {"rsi": rsi, "is_valid": not oversold}
             if oversold:
                 reasons.append(f"⚠️  RSI: {rsi:.0f} oversold — limited downside room")
                 if rsi < 25:
@@ -370,7 +299,6 @@ class SignalGenerator:
                 reasons.append(f"✅ RSI: {rsi:.0f} — room to fall")
                 confidence_score += self.safety_weight
         else:
-            # Mean reversion (long and short): entry indicators handle RSI check
             reasons.append(f"✅ RSI: Mean reversion (RSI check in entry indicators)")
             confidence_score += self.safety_weight
 
@@ -379,14 +307,6 @@ class SignalGenerator:
         #Bullish if pct_b below 0.5 - in bottom half of bollinger
         bb_bullish= pct_b is not None and pct_b < 0.5
             
-        bb_check = IndicatorResult(
-            type="bb_band",
-            is_bullish=bb_bullish,
-            config={"below": 0.5},
-            values={"pct_b": round(pct_b, 4) if pct_b is not None else None},
-            message=f"%B={pct_b:.2f}" if pct_b is not None else "BB data unavailable"
-        )
-
         # Calculate confidence based on strategy type
         if self.strategy_type in (StrategyType.MEAN_REVERSION, StrategyType.SHORT_MEAN_REVERSION):
             confidence_pct = self._mean_reversion_confidence_score(
@@ -406,23 +326,13 @@ class SignalGenerator:
                 regime_reason=regime_reason
             )
         else:  # TREND_FOLLOWING and SHORT_TREND_FOLLOWING
-            # Trend following: standard normalization + BB position penalty
             confidence_pct = (confidence_score / self.max_confidence) * 100
             bb_penalty, bb_reason = self._get_bb_confidence_penalty(symbol, self.entry_timeframe, pct_b=pct_b)
             if bb_penalty != 0.0:
                 confidence_pct = max(0.0, confidence_pct + bb_penalty)
                 reasons.append(bb_reason)
-                bb_check.message = bb_reason
-                bb_check.values.update({
-                    "confidence_pct": round(confidence_pct, 2),
-                    "bb_penalty": bb_penalty
-                })
             else:
                 reasons.append(f"✅ %BB= {pct_b:.2f}) — no penalty")
-
-        validation.additional_checks.append(bb_check)
-        validation.score = confidence_pct
-        validation.score_components = 3  # trend, entry, volume
 
         # Check minimum confidence threshold
         if confidence_pct < self.min_confidence:
@@ -430,23 +340,7 @@ class SignalGenerator:
                 f"{symbol}: ❌ Confidence too low: {confidence_pct:.1f}% < {self.min_confidence}%"
             )
             return None
-        
-        # Build human-readable summary
-        parts = []
-        if validation.trend_validation.enabled:
-            icon = "✅" if validation.trend_validation.passed else "❌"
-            parts.append(f"{icon} Trend ({validation.trend_validation.timeframe}m): "
-                        f"{validation.trend_validation.indicators_passed}/{validation.trend_validation.indicators_total}")
-        if validation.entry_validation.enabled:
-            icon = "✅" if validation.entry_validation.passed else "❌"
-            parts.append(f"{icon} Entry ({validation.entry_validation.timeframe}m): "
-                        f"{validation.entry_validation.indicators_passed}/{validation.entry_validation.indicators_total}")
-        parts.append(f"Vol: {volume_check['volume_ratio']:.1f}x")
-        parts.append(f"Score: {confidence_pct:.1f}%")
-        
-        validation.human_readable = " | ".join(parts)
-        validation.overall_passed = True
-         
+
         # Determine signal strength
         if confidence_pct >= 85:
             strength = SignalStrength.STRONG
@@ -458,8 +352,6 @@ class SignalGenerator:
         reasons.append(f"Score {confidence_pct:.1f}% ({strength.value})")
 
         # BB-based position size scalar (trend-following only)
-        # Reduces order size when buying high in the band, allows full/larger size lower in band.
-        # Mean reversion / range trading manage this via their own entry indicators.
         position_size_scalar = 1.0
         if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.SHORT_TREND_FOLLOWING):
             position_size_scalar, scalar_reason = self._get_bb_position_scalar(symbol, self.entry_timeframe, pct_b=pct_b)
@@ -470,7 +362,23 @@ class SignalGenerator:
 
         trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
 
-        # Create signal
+        # Build flat indicator snapshot (in-memory lookups, no recalculation)
+        snapshot_trend = self.trend_cache.get(symbol, self.entry_timeframe)
+        ema_slope, ema_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
+        rsi_delta, rsi_dir = self.trend_cache._get_rsi_momentum(symbol, self.entry_timeframe)
+        signal_snapshot = {
+            "rsi": round(float(snapshot_trend.rsi), 1) if snapshot_trend else None,
+            "rsi_direction": rsi_dir,
+            "rsi_delta": round(rsi_delta, 2) if rsi_delta is not None else None,
+            "ema_slope": round(ema_slope, 4) if ema_slope is not None else None,
+            "ema_direction": ema_dir,
+            "volume_ratio": round(float(snapshot_trend.volume_ratio), 2) if snapshot_trend and snapshot_trend.volume_ratio else None,
+            "adx": round(float(snapshot_trend.adx), 1) if snapshot_trend and snapshot_trend.adx else None,
+            "bb_pct_b": round(pct_b, 3) if pct_b is not None else None,
+            "price": float(snapshot_trend.price) if snapshot_trend else None,
+            "score": round(confidence_pct, 1),
+        }
+
         signal = TradingSignal(
             symbol=symbol,
             action=signal_direction,
@@ -482,7 +390,7 @@ class SignalGenerator:
             indicators=indicators,
             timestamp=time.time(),
             reasons=reasons,
-            validation_details=validation.to_json(),
+            signal_snapshot=signal_snapshot,
             regime_confidence=regime_reason,
             position_size_scalar=position_size_scalar
         )
@@ -511,7 +419,6 @@ class SignalGenerator:
         current_price: float,
         confidence_score: float,
         regime_reason: str,
-        validation: SignalValidationResult,
         reasons: list,
         indicators: dict,
     ) -> Optional[TradingSignal]:
@@ -552,15 +459,6 @@ class SignalGenerator:
                 entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
                 rules_would_enter = entry_check
                 indicators['entry_filter'] = entry_check
-
-                validation.entry_validation.timeframe = self.entry_timeframe
-                validation.entry_validation.passed = entry_check
-                validation.entry_validation.indicators = entry_indicators
-                validation.entry_validation.indicators_total = len(entry_indicators)
-                validation.entry_validation.indicators_passed = sum(
-                    1 for ind in entry_indicators if ind.is_bullish
-                )
-                validation.entry_validation.summary = entry_reason
 
                 if not entry_check:
                     self.logger.info(
@@ -607,63 +505,28 @@ class SignalGenerator:
             # Shadow: rules control live, AI is paper only
             live_decision = rules_would_enter
 
-            if rules_would_enter: 
-                #Add regular checks for entry filter here for now while in shadow mode
+            if rules_would_enter:
                 volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
                 indicators['volume'] = volume_check
-
-                validation.market_context.volume = {
-                    "is_sufficient": volume_check['has_volume'],
-                    "ratio": float(volume_check['volume_ratio']),
-                    "required_ratio": self.min_volume_ratio,
-                    "message": f"{volume_check['volume_ratio']:.1f}x average ({self.min_volume_ratio}x required)"
-                }        
                 if volume_check['has_volume']:
                     reasons.append(f"✅ Volume: {volume_reason}")
                     confidence_score += self.volume_weight
                 else:
                     reasons.append(f"⚠️  Volume: {volume_reason}")
                     confidence_score += self.volume_weight * 0.3
-                
-                # 7. ATR/VOLATILITY CHECK (optional)
+
                 if self.profile.use_atr_filter:
                     atr_check, atr_reason = self._check_atr(symbol)
                     indicators['atr'] = atr_check
-                    if atr_check['is_valid'] == False:
-                        validation.market_context.atr = {
-                            "is_valid"   : atr_check['is_valid'],
-                            "message": f"{atr_reason}"
-                        }        
-                    else: 
-                        validation.market_context.atr = {
-                            "is_valid"   : atr_check['is_valid'],
-                            "is_volatile": atr_check['is_volatile'],
-                            "ratio": float(atr_check['ratio']),
-                            "message": f"{atr_check['ratio']:.1f}x average ({self.profile.atr_threshold}x - {self.profile.atr_filter_mode})"
-                        }        
-
                     if not atr_check['is_valid']:
                         self.logger.debug(f"{symbol}: ❌ ATR check failed - {atr_reason}")
-                        #return None
-                    
                     reasons.append(f"✅ ATR: {atr_reason}")
-                
-                # 8. NOT OVERBOUGHT (safety check - different for each strategy)
+
                 if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
                     overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
                     indicators['overbought'] = overbought_check
-                    ob_check = IndicatorResult(
-                        type="rsi_overbought",
-                        is_bullish=overbought_check['is_valid'],
-                        config={"threshold": 70},
-                        values={"rsi": float(overbought_check['rsi'])},
-                        message=f"RSI {overbought_check['rsi']:.0f} {'not overbought' if overbought_check['is_valid'] else 'overbought'}"
-                    )
-                    validation.additional_checks.append(ob_check)
-
                     if not overbought_check['is_valid']:
                         reasons.append(f"⚠️  RSI: {ob_reason}")
-                        # If over 80, penalise
                         if overbought_check['rsi'] > 80:
                             confidence_score += -30
                         else:
@@ -672,65 +535,39 @@ class SignalGenerator:
                         reasons.append(f"✅ RSI: {ob_reason}")
                         confidence_score += self.safety_weight
                 else:
-                    # Mean reversion doesn't need overbought check (wants oversold)
-                    # But entry indicators already check rsi_oversold, so we skip this
                     reasons.append(f"✅ RSI: Mean reversion (oversold check in entry)")
                     confidence_score += self.safety_weight
 
-                #calculate bollinger band location        
                 pct_b = self._get_bb_position(symbol, self.entry_timeframe, price=float(current_price))
-                #Bullish if pct_b below 0.5 - in bottom half of bollinger
-                bb_bullish= pct_b is not None and pct_b < 0.5
-                    
-                bb_check = IndicatorResult(
-                    type="bb_band",
-                    is_bullish=bb_bullish,
-                    config={"below": 0.5},
-                    values={"pct_b": round(pct_b, 4) if pct_b is not None else None},
-                    message=f"%B={pct_b:.2f}" if pct_b is not None else "BB data unavailable"
-                )
-
-                # NEW: Calculate confidence based on strategy type
                 if self.strategy_type == StrategyType.MEAN_REVERSION:
-                    # Mean reversion has different confidence factors
                     confidence_pct = self._mean_reversion_confidence_score(
-                        symbol, 
-                        self.entry_timeframe,
-                        base_score=confidence_score,
-                        max_score=self.max_confidence
+                        symbol, self.entry_timeframe,
+                        base_score=confidence_score, max_score=self.max_confidence
                     )
                 elif self.strategy_type == StrategyType.RANGE_TRADING:
                     confidence_pct = self._range_trading_confidence_score(
-                        symbol,
-                        self.entry_timeframe,
+                        symbol, self.entry_timeframe,
                         trend_timeframe=self.trend_timeframe,
-                        base_score=confidence_score,
-                        max_score=self.max_confidence,
+                        base_score=confidence_score, max_score=self.max_confidence,
                         regime_reason=regime_reason
                     )
                 else:
-                    # Trend following: standard normalization + BB position penalty
                     confidence_pct = (confidence_score / self.max_confidence) * 100
                     bb_penalty, bb_reason = self._get_bb_confidence_penalty(symbol, self.entry_timeframe, pct_b=pct_b)
                     if bb_penalty != 0.0:
                         confidence_pct = max(0.0, confidence_pct + bb_penalty)
                         reasons.append(bb_reason)
-                        bb_check.message = bb_reason
-                        bb_check.values.update({
-                            "confidence_pct": round(confidence_pct, 2),
-                            "bb_penalty": bb_penalty
-                        })
                     else:
                         reasons.append(f"✅ %BB= {pct_b:.2f}) — no penalty")
-
-                validation.additional_checks.append(bb_check)
-                validation.score = confidence_pct
-                validation.score_components = 3  # trend, entry, volume
+            else:
+                confidence_pct = (confidence_score / self.max_confidence) * 100
+                pct_b = None
 
         else:
             # AI_LIVE: AI controls live execution
             confidence_pct = ai_result.confidence * 100.0
             live_decision = (ai_result.decision == EntryDecision.ENTER)
+            pct_b = None
 
         self.logger.info(
             f"[AI_AGENT/{self.trading_type.value}] {symbol} | "
@@ -771,15 +608,24 @@ class SignalGenerator:
         #     if self.trading_type == TradingType.AI_LIVE and ai_result.suggested_position_size_pct
         #     else 1.0
         # )
-        position_size_scalar= 1.0
-        validation.score = confidence_pct
-        validation.overall_passed = True
-        validation.human_readable = (
-            f"🤖 AI {ai_result.decision.value} | "
-            f"conf={ai_result.confidence:.0%} | "
-            f"{'shadow' if self.trading_type == TradingType.SHADOW else 'live'}"
-        )
+        position_size_scalar = 1.0
         trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
+
+        snapshot_trend = self.trend_cache.get(symbol, self.entry_timeframe)
+        ema_slope, ema_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
+        rsi_delta, rsi_dir = self.trend_cache._get_rsi_momentum(symbol, self.entry_timeframe)
+        signal_snapshot = {
+            "rsi": round(float(snapshot_trend.rsi), 1) if snapshot_trend else None,
+            "rsi_direction": rsi_dir,
+            "rsi_delta": round(rsi_delta, 2) if rsi_delta is not None else None,
+            "ema_slope": round(ema_slope, 4) if ema_slope is not None else None,
+            "ema_direction": ema_dir,
+            "volume_ratio": round(float(snapshot_trend.volume_ratio), 2) if snapshot_trend and snapshot_trend.volume_ratio else None,
+            "adx": round(float(snapshot_trend.adx), 1) if snapshot_trend and snapshot_trend.adx else None,
+            "bb_pct_b": round(pct_b, 3) if pct_b is not None else None,
+            "price": float(snapshot_trend.price) if snapshot_trend else None,
+            "score": round(confidence_pct, 1),
+        }
 
         signal = TradingSignal(
             symbol=symbol,
@@ -792,7 +638,7 @@ class SignalGenerator:
             indicators=indicators,
             timestamp=time.time(),
             reasons=reasons,
-            validation_details=validation.to_json(),
+            signal_snapshot=signal_snapshot,
             regime_confidence=regime_reason,
             position_size_scalar=position_size_scalar,
         )

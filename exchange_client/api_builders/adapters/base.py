@@ -103,7 +103,6 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     def order_sell(self, symbol: str, quantity: str, price: str = "0",
                    source: str = "MANUAL", position_id: str = None,
-                   reason_summary=None, validation_summary: str = None,
                    **kwargs) -> Optional[Any]:
         """Execute a market sell/close order and update the DB position."""
 
@@ -126,8 +125,7 @@ class ExchangeAdapter(ABC):
 
     @abstractmethod
     async def process_tradingview_alert(self, alert: Any, profile_name: str,
-                                        source: str = "WEBHOOK",
-                                        reason_summary=None) -> Optional[Any]:
+                                        source: str = "WEBHOOK") -> Optional[Any]:
         """Process a TradingView webhook alert and execute the appropriate trade."""
 
     # ── Optional capabilities ─────────────────────────────────────────────────
