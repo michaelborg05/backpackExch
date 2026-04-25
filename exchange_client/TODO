@@ -9,19 +9,17 @@ TO DO
 # add backtest to web UI
 # clean up circuit breaker
     - Reporting percent from start but triggering from highest - I.e. Reported CB trigger 1.5% loss even though loss limit was 3%. It was looking at highest price for period instead of cb_trigger amount. Would nee dto 
+# add circuit breaker delete/reset to UI
 # Add TP and SL from AI suggestion to override defaults
-# reduce db reads
 # web page changes
   - Add "exchange accounts" tab similar to profiles
 # Api call to manually refresh caches for various things - like settings, profiles, etc
-# occiasionally getting login errors on website
 # When adding new profile, it doesnt keep the spot/perps setting I choose i nthe modal when it loadst he profle page
-# add circuit breaker delete/reset to UI
 # The profit figures don't match with balance changes. Find out why. Possibilities
     - close price being recorded is the theoretical price but maybe my actual trade is triggering at a differnt price
     - Maybe its not including fees
-#change the way validation results are stored. get rid of the tables with json and just have a new table recording all the key info (Rsi, ema, etc)
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
+
 No need
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish
@@ -119,3 +117,6 @@ Improvement: The "Mean Reversion" Check
 # Get AI to remove the indicators/symbols tab from main page but merge he indicator changes into profiles tab where it has a form to fill out
  - Api explorer. Is it dynamic? 
 # remove apikey/secret from profile table. Keep only in exchange acct
+# reduce db reads
+# occiasionally getting login errors on website
+#change the way validation results are stored. get rid of the tables with json and just have a new table recording all the key info (Rsi, ema, etc)

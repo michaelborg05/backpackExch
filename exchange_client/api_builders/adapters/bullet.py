@@ -651,7 +651,7 @@ class BulletAdapter(ExchangeAdapter):
                 )
                 if closed:
                     self.logger.info(
-                        f"[Bullet] Position closed: {[p.id for p in closed]}"
+                        f"[Bullet] Position closed: {[p['position_id'] for p in closed]}"
                     )
 
         except Exception as e:
