@@ -718,7 +718,7 @@ class TelegramService:
                     price = float(price)
                     entry_price = float(position.entry_price)
                     msg += f"{symbol}: ${entry_price}->${price}{"*" if position.trailing_stop_armed else ""}"
-                    is_short = getattr(position, 'side', 'BID').upper() == 'ASK'
+                    is_short = getattr(position, 'direction', 'LONG').upper() == 'SHORT'
                     if is_short:
                         profit_pct = ((entry_price - price) / entry_price) * 100
                     else:
