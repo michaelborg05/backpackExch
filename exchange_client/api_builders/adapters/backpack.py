@@ -106,15 +106,13 @@ class BackpackAdapter(ExchangeAdapter):
 
     def order_sell(self, symbol: str, quantity: str, price: str = "0",
                    source: str = "MANUAL", position_id: str = None,
-                   reason_summary=None, validation_summary: str = None,
                    **kwargs) -> Optional[Any]:
         from api_builders.trading_builder import TradingService
         try:
             trading = TradingService(self.profile)
             return trading.order_sell(
                 symbol=symbol, quantity=quantity, price=price, source=source,
-                position_id=position_id, reason_summary=reason_summary,
-                validation_summary=validation_summary, **kwargs
+                position_id=position_id, **kwargs
             )
         except Exception as e:
             self.logger.error(f"[Backpack] order_sell({symbol}) failed: {e}")
@@ -139,14 +137,12 @@ class BackpackAdapter(ExchangeAdapter):
             return False, str(e)
 
     async def process_tradingview_alert(self, alert: Any, profile_name: str,
-                                        source: str = "WEBHOOK",
-                                        reason_summary=None) -> Optional[Any]:
+                                        source: str = "WEBHOOK") -> Optional[Any]:
         from api_builders.trading_builder import TradingService, process_tradingview_alert
         try:
             trading = TradingService(self.profile)
             return await process_tradingview_alert(
-                trading, alert, profile_name=profile_name,
-                source=source, reason_summary=reason_summary
+                trading, alert, profile_name=profile_name, source=source
             )
         except Exception as e:
             self.logger.error(f"[Backpack] process_tradingview_alert() failed: {e}")

@@ -26,7 +26,7 @@ from fastapi import HTTPException
 from models.trading_profile import TradingProfile
 from utils.config import Config
 from db.session import SessionLocal
-from db.crud import save_trade, open_position, close_position, save_order, save_limit_trade, update_order,add_validation_result
+from db.crud import save_trade, open_position, close_position, save_order, save_limit_trade, update_order
 from utils.position_calculator import PositionCalculator
 
 class TradingService:
@@ -423,19 +423,19 @@ class TradingService:
         quantize_str = "0." + "0" * decimals
         return value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
-    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL", reason_summary: List[str] = None,validation_summary: str = None, **kwargs) -> OrderResponse:
+    def order_buy(self, symbol: str, quantity: str, price:str = "0",source:str = "MANUAL", signal_snapshot: dict = None, **kwargs) -> OrderResponse:
         """Execute a market buy order"""
         order = create_buy(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
-        return self.ProcessMarketOrder(order, source=source, reason_summary=reason_summary, validation_summary=validation_summary)
+        return self.ProcessMarketOrder(order, source=source, signal_snapshot=signal_snapshot)
 
-    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL",position_id: str =None, reason_summary: List[str] = None, validation_summary: str = None, **kwargs) -> OrderResponse:
+    def order_sell(self, symbol: str, quantity: str, price:str = "0", source:str = "MANUAL",position_id: str =None, signal_snapshot: dict = None, **kwargs) -> OrderResponse:
         """Execute a market sell order"""
         order = create_sell(symbol, quantity, price, **kwargs)
         order = self._validate_and_adjust_order(order)
         order = self._validate_market_rules(order)
-        return self.ProcessMarketOrder(order, source=source, position_id=position_id, reason_summary=reason_summary, validation_summary=validation_summary)
+        return self.ProcessMarketOrder(order, source=source, position_id=position_id, signal_snapshot=signal_snapshot)
 
 
     def get_open_orders(self, symbol: Optional[str] = None):
@@ -719,7 +719,7 @@ class TradingService:
             
         return None
 
-    def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, reason_summary: List[str] = None, validation_summary: str = None) -> OrderResponse:
+    def ProcessMarketOrder(self, order: OrderExecuteRequest, source: str = "MANUAL", position_id: str = None, signal_snapshot: dict = None) -> OrderResponse:
         
         order_response = None  
         db = None
@@ -744,10 +744,8 @@ class TradingService:
             direction = "LONG" if (side_upper == "BID") else "SHORT"
 
             # If order was successful, save to DB (with direction)
-            saved_trade = save_trade(db, order_response, self.profile.name, source, reason_summary=reason_summary, direction=direction if is_opening else None)
+            saved_trade = save_trade(db, order_response, self.profile.name, source, signal_snapshot=signal_snapshot, direction=direction if is_opening else None)
             self.logger.info(f"Trade saved to database: ID {saved_trade.id}")
-            if validation_summary:
-                add_validation_result(db, saved_trade, validation_summary=validation_summary)
 
             # Open LONG position on BID entry
             if is_long_entry:
@@ -1169,7 +1167,7 @@ class TradingService:
         
         return None
 
-async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK", reason_summary: List[str] = None) -> Optional[OrderResponse]:
+async def process_tradingview_alert(trading: TradingService, alert: TradingViewAlert, profile_name: str, source: str = "WEBHOOK") -> Optional[OrderResponse]:
     """
     Process TradingView alert and execute appropriate trade
 
@@ -1185,68 +1183,44 @@ async def process_tradingview_alert(trading: TradingService, alert: TradingViewA
     if not alert.quantity and not alert.quote_quantity:
         raise ValueError("Either quantity or quoteQuantity must be provided")
 
-    # Build order kwargs
     kwargs = {}
-
-    # if alert.quote_quantity:
-    #     kwargs['quote_quantity'] = alert.quote_quantity
-
-    # if alert.stop_loss:
-    #     kwargs['stop_loss_trigger_price'] = alert.stop_loss
-
-    # if alert.take_profit:
-    #     kwargs['take_profit_trigger_price'] = alert.take_profit
-
-    # if alert.post_only:
-    #     kwargs['post_only'] = alert.post_only
-
-    # if alert.reduce_only:
-    #     kwargs['reduce_only'] = alert.reduce_only
 
     # Execute order based on action
     if alert.action == TradingViewAction.BUY:
         if alert.price and alert.price != "0":
-            # Limit buy
             return trading.order_buy(
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
-                reason_summary=reason_summary,
                 **kwargs
             )
         else:
-            # Market buy
             return trading.order_buy(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
-                reason_summary=reason_summary,
                 **kwargs
             )
 
     elif alert.action == TradingViewAction.SELL:
         if alert.price and alert.price != "0":
-            # Limit sell
             return trading.order_sell(
                 symbol=alert.symbol,
                 price=alert.price,
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
-                reason_summary=reason_summary,
                 **kwargs
             )
         else:
-            # Market sell
             return trading.order_sell(
                 symbol=alert.symbol,
                 quantity=alert.quantity,
                 source=source,
                 profile_name=profile_name,
-                reason_summary=reason_summary,
                 **kwargs
             )
 

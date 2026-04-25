@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, List, Dict, Tuple
-from models.signal_validation import SignalValidationResult
+from typing import Optional, List, Dict
 from utils.constants import TradeReason
+from models.signal_snapshot import SignalSnapshot
 
 class SignalStrength(Enum):
     """Signal confidence levels"""
@@ -25,8 +25,8 @@ class TradingSignal:
     trend_timeframe: str
     regime_confidence: str
     # Optional fields with defaults must come last
-    validation_details: Optional[str] = None  # JSON string of SignalValidationResult
-    position_size_scalar: float = 1.0          # BB position scalar (1.0 = full size)
+    signal_snapshot: Optional[SignalSnapshot] = None
+    position_size_scalar: float = 1.0       # BB position scalar (1.0 = full size)
 
     def to_dict(self) -> dict:
         return {
@@ -42,11 +42,3 @@ class TradingSignal:
             "regime_confidence": self.regime_confidence,
             "position_size_scalar": self.position_size_scalar,
         }
-
-    def get_validation_result(self) -> Optional[SignalValidationResult]:
-        """Parse validation_details JSON back into SignalValidationResult object"""
-        if self.validation_details:
-            import json
-            data = json.loads(self.validation_details)
-            return SignalValidationResult.from_dict(data)
-        return None

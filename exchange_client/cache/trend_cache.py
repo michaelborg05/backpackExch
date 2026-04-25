@@ -1,7 +1,6 @@
 # cache/trend_cache.py - Enhanced with database persistence for cache warmup
 
 from typing import Dict, List, Tuple, Optional, Any
-from models.signal_validation import IndicatorResult
 import time
 from utils.logging import log_manager
 from models.webhook import TrendData
@@ -474,48 +473,24 @@ class TrendCache:
         timeframe: str,
         indicators_config: List[Dict] = None,
         min_indicators_required: int = 2,
-        return_structured: bool = False,
         use_hard_stops: bool = True
-    ):
-        """
-        ORIGINAL FUNCTION PRESERVED - Check if trend is bullish for a single timeframe
-        
-        This is the main function used by:
-        - position_manager.py (_check_trend_invalidation)
-        - signal_generator.py (should_trade)
-        - api_server.py (various endpoints)
-        
-        Args:
-            symbol: Trading symbol
-            timeframe: Single timeframe to check
-            indicators_config: List of indicator configs
-            min_indicators_required: Minimum bullish indicators needed
-            
-        Returns:
-            (is_bullish, reason_string)
-        """
+    ) -> Tuple[bool, str]:
+        """Check if trend is bullish for a single timeframe. Returns (is_bullish, reason)."""
         trend = self.get(symbol, timeframe)
-        
+
         if trend is None:
-            return False, f"No trend data for {symbol} {timeframe}", []
-        
-        # Default to all 3 indicators if not specified
+            return False, f"No trend data for {symbol} {timeframe}"
+
         if indicators_config is None:
             indicators_config = [
                 {"type": "ema_cross", "params": {"fast": 20, "slow": 50}},
                 {"type": "rsi_threshold", "params": {"period": 14, "min_value": 50}},
                 {"type": "price_vs_vwap", "params": {}}
             ]
-        
-        is_bullish, summary, indicator_results = self._validate_timeframe_indicators(
+
+        return self._validate_timeframe_indicators(
             symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops
         )
-        
-        if return_structured:
-            return is_bullish, summary, indicator_results
-        else:
-            # Backward compatible - return just bool and string
-            return is_bullish, summary
 
     
     def validate_multi_timeframe_trend(
@@ -594,11 +569,11 @@ class TrendCache:
         indicators: List[Dict],
         min_indicators_required: int,
         use_hard_stops: bool = True
-    ) -> Tuple[bool, str, List[IndicatorResult]]:
+    ) -> Tuple[bool, str]:
         """
         Validate multiple indicators for a single timeframe.
         Returns True if at least min_indicators_required pass.
-        
+
         SUPPORTS BOTH OLD AND NEW INDICATOR NAMES:
         - "ema_alignment" (old) → treated as "ema_cross"
         - "ema_cross" (new) → EMA20 > EMA50
@@ -606,7 +581,6 @@ class TrendCache:
         """
         results = []
         hard_stop_failures = []
-        indicator_results = []
 
         from cache.price_cache import get_price_cache
         price_cache = get_price_cache()
@@ -616,10 +590,9 @@ class TrendCache:
         for indicator_config in indicators:
             indicator_type = indicator_config.get("type")
             params = indicator_config.get("params", {})
-            hard_stop = params.get("hard_stop", False)  
+            hard_stop = params.get("hard_stop", False)
             is_bullish = False
             msg = ""
-            values = {}
 
             # === BACKWARD COMPATIBILITY: ema_alignment → ema_cross ===
             if indicator_type == "ema_alignment":
@@ -631,9 +604,7 @@ class TrendCache:
                 # EMA20 must be above EMA50 (with optional slope check)
                 use_slope = params.get("use_slope", False)
                 min_slope_pct = params.get("min_slope_pct", 0.01)
-                values["ema20"] = trend.ema20
-                values["ema50"] = trend.ema50
-                
+
                 if use_slope:
                     # Check both cross and slope
                     slope_pct, slope_direction = self._get_ema_slope(symbol, timeframe, "ema20")
@@ -642,8 +613,6 @@ class TrendCache:
                         is_bullish = trend.ema20 > trend.ema50
                         msg = f"EMA cross: {'✓' if is_bullish else '✗'} (no slope data)"
                     else:
-                        values["slope_pct"] = slope_pct
-                        values["slope_direction"] = slope_direction
                         is_bullish = (
                             trend.ema20 > trend.ema50 and 
                             slope_pct >= min_slope_pct
@@ -660,14 +629,10 @@ class TrendCache:
                 early_threshold = params.get("early_threshold", 40)
                 
                 rsi = trend.rsi
-                values["rsi"] = float(rsi)
-                values["threshold"] = min_rsi
 
                 if use_momentum:
                     rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
-                    values["momentum"] = rsi_momentum
-                    values["direction"] = rsi_direction
-                    
+
                     # Early entry logic
                     if rsi >= early_threshold and rsi < min_rsi:
                         if rsi_direction == "increasing" and rsi_momentum >= 1.0:
@@ -693,9 +658,6 @@ class TrendCache:
             elif indicator_type == "price_vs_vwap":
                 # Uses latest price and VWAP (refreshed every update)
                 is_bullish = current_price > trend.vwap
-                values["price"] = float(current_price)
-                values["vwap"] = float(trend.vwap)
-
                 msg = f"Price vs VWAP: {'✓' if is_bullish else '✗'} ({current_price:.2f} vs {trend.vwap:.2f})"
             
             elif indicator_type == "price_vs_ema":
@@ -707,9 +669,6 @@ class TrendCache:
 
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((current_price - ema_value) / ema_value) * 100
-                values["ema_value"] = float(ema_value)
-                values["gap_pct"] = float(gap_pct)
-
                 is_bullish = gap_pct >= min_gap_pct
                 if max_gap_pct > 0:
                     is_bullish = is_bullish and gap_pct <= max_gap_pct
@@ -733,10 +692,7 @@ class TrendCache:
                 if slope_pct is None:
                     is_bullish = False
                     msg = f"EMA{ema_type} slope: ✗ (no data)"
-                    values["slope_pct"] = f"NA"
-
                 else:
-                    values["slope_pct"] = float(slope_pct)
                     if required_direction == "rising":
                         is_bullish = slope_pct > min_slope_pct
                         direction = "rising" if slope_pct > min_slope_pct else "flat/falling"
@@ -764,12 +720,7 @@ class TrendCache:
                 invert = params.get("invert", False)
                 momentum_override = params.get('momentum_override_threshold', None)
                 rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
-                values["rsi_momentum"] = rsi_momentum
-                values["rsi_direction"] = rsi_direction
-                values["rsi"] = trend.rsi
-
                 in_range = min_rsi <= trend.rsi <= max_rsi
-                values["within_range"] = in_range
                 if invert:
                     is_bullish = in_range
                     msg = f"RSI range: {'✓' if is_bullish else '✗'} (RSI {trend.rsi:.1f} {'in' if in_range else 'outside'} {min_rsi}-{max_rsi})"
@@ -798,10 +749,6 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", 0.3)
                 
                 gap_pct = abs((trend.ema20 - trend.ema50) / trend.ema50) * 100
-                values["ema20"] = trend.ema20
-                values["ema50"] = trend.ema50
-                values["gap_pct"] = gap_pct
-
                 if mode == "min":
                     is_bullish = gap_pct >= min_gap_pct
                     msg = f"EMA gap: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% gap - need >{min_gap_pct}%)"
@@ -816,10 +763,6 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", 1.0)
                 
                 gap_pct = abs((current_price - trend.ema50) / trend.ema50) * 100
-                values["price"] = current_price
-                values["ema50"] = trend.ema50
-                values["gap_pct"] = gap_pct
-                
                 is_bullish = gap_pct > max_gap_pct
                 msg = f"Price/EMA50 range: {'✓' if is_bullish else '✗'} ({gap_pct:.2f}% from EMA50 - need >{max_gap_pct}%)"
 
@@ -838,20 +781,13 @@ class TrendCache:
                 
                 # Check if oversold
                 is_oversold = trend.rsi < max_value
-                values["rsi"] = trend.rsi
-
                 if require_rising:
                     rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe)
                     is_turning_up = (
-                        rsi_momentum is not None and 
-                        rsi_direction == "increasing" and 
+                        rsi_momentum is not None and
+                        rsi_direction == "increasing" and
                         rsi_momentum >= min_momentum
                     )
-                    values["rsi_momentum"] = rsi_momentum
-                    values["rsi_direction"] = rsi_direction
-                    values["oversold"] = is_oversold
-                    values["is_turning_up"] = is_turning_up
-
                     is_bullish = is_oversold and is_turning_up
                     msg = (
                         f"RSI oversold: {'✓' if is_bullish else '✗'} "
@@ -896,16 +832,14 @@ class TrendCache:
                 side = params.get("side", "long")
                 lookback_candles = params.get("lookback_candles", None)
                 current_rsi = float(trend.rsi)
-                values["rsi"] = current_rsi
-                values["side"] = side
 
                 if side == "short":
                     # Short: block when RSI is oversold (too low to enter a short)
                     max_value = params.get("max_value", 30)
-                    values["threshold"] = max_value
                     is_extreme = current_rsi < max_value
 
                     trough_in_lookback = False
+                    trough_rsi_rounded = None
                     if lookback_candles is not None:
                         key = f"{symbol}_{timeframe}"
                         rsi_history = self._rsi_history.get(key, [])
@@ -913,11 +847,7 @@ class TrendCache:
                             recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
                             trough_rsi = min(recent_rsi_values)
                             trough_in_lookback = trough_rsi < max_value
-                            values["lookback_candles"] = lookback_candles
-                            values["trough_rsi_in_lookback"] = round(trough_rsi, 2)
-                        else:
-                            values["lookback_candles"] = lookback_candles
-                            values["lookback_history_len"] = len(rsi_history)
+                            trough_rsi_rounded = round(trough_rsi, 2)
 
                     is_bullish = not is_extreme and not trough_in_lookback
 
@@ -927,14 +857,13 @@ class TrendCache:
                         msg = (
                             f"RSI oversold block (short): ✗ "
                             f"(RSI {current_rsi:.1f} ok now, but troughed at "
-                            f"{values['trough_rsi_in_lookback']:.1f} < {max_value} "
+                            f"{trough_rsi_rounded:.1f} < {max_value} "
                             f"in last {lookback_candles} candles)"
                         )
                     else:
                         lookback_note = (
-                            f", trough {values.get('trough_rsi_in_lookback', 'N/A'):.1f} "
-                            f"in last {lookback_candles} ok"
-                            if lookback_candles is not None and "trough_rsi_in_lookback" in values
+                            f", trough {trough_rsi_rounded:.1f} in last {lookback_candles} ok"
+                            if lookback_candles is not None and trough_rsi_rounded is not None
                             else ""
                         )
                         msg = f"RSI oversold block (short): ✓ (RSI {current_rsi:.1f}{lookback_note})"
@@ -942,10 +871,10 @@ class TrendCache:
                 else:
                     # Long (default): block when RSI is overbought (too high to enter a long)
                     min_value = params.get("min_value", 70)
-                    values["threshold"] = min_value
                     is_overbought = current_rsi > min_value
 
                     peak_in_lookback = False
+                    peak_rsi_rounded = None
                     if lookback_candles is not None:
                         key = f"{symbol}_{timeframe}"
                         rsi_history = self._rsi_history.get(key, [])
@@ -953,11 +882,7 @@ class TrendCache:
                             recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
                             peak_rsi = max(recent_rsi_values)
                             peak_in_lookback = peak_rsi > min_value
-                            values["lookback_candles"] = lookback_candles
-                            values["peak_rsi_in_lookback"] = round(peak_rsi, 2)
-                        else:
-                            values["lookback_candles"] = lookback_candles
-                            values["lookback_history_len"] = len(rsi_history)
+                            peak_rsi_rounded = round(peak_rsi, 2)
 
                     is_bullish = not is_overbought and not peak_in_lookback
 
@@ -967,14 +892,13 @@ class TrendCache:
                         msg = (
                             f"RSI overbought check: ✗ "
                             f"(RSI {current_rsi:.1f} ok now, but peaked at "
-                            f"{values['peak_rsi_in_lookback']:.1f} > {min_value} "
+                            f"{peak_rsi_rounded:.1f} > {min_value} "
                             f"in last {lookback_candles} candles)"
                         )
                     else:
                         lookback_note = (
-                            f", peak {values.get('peak_rsi_in_lookback', 'N/A'):.1f} "
-                            f"in last {lookback_candles} ok"
-                            if lookback_candles is not None and "peak_rsi_in_lookback" in values
+                            f", peak {peak_rsi_rounded:.1f} in last {lookback_candles} ok"
+                            if lookback_candles is not None and peak_rsi_rounded is not None
                             else ""
                         )
                         msg = f"RSI overbought check: ✓ (RSI {current_rsi:.1f}{lookback_note})"
@@ -991,11 +915,6 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", -10.0)  # e.g., -10.0 = max 10% below
 
                 gap_pct = ((current_price - trend.vwap) / trend.vwap) * 100
-                values["price"] = current_price
-                values["vwap"] = trend.vwap
-                values["gap_pct"] = gap_pct
-
-                # Want price below VWAP but not TOO far below
                 is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
                 
                 msg = (
@@ -1018,11 +937,6 @@ class TrendCache:
 
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((current_price - ema_value) / ema_value) * 100
-                values["price"] = current_price
-                values["ema"] = ema_value
-                values["gap_pct"] = gap_pct
-
-                # Want price below EMA (negative gap) but not too far
                 is_bullish = max_gap_pct <= gap_pct <= min_gap_pct
 
                 msg = (
@@ -1042,11 +956,6 @@ class TrendCache:
                 max_gap_pct = params.get("max_gap_pct", 10.0)
 
                 gap_pct = ((current_price - trend.vwap) / trend.vwap) * 100
-                values["price"] = current_price
-                values["vwap"] = trend.vwap
-                values["gap_pct"] = gap_pct
-
-                # Want price above VWAP but not TOO far above
                 is_bullish = min_gap_pct <= gap_pct <= max_gap_pct
 
                 msg = (
@@ -1069,11 +978,6 @@ class TrendCache:
 
                 ema_value = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct = ((current_price - ema_value) / ema_value) * 100
-                values["price"] = current_price
-                values["ema"] = ema_value
-                values["gap_pct"] = gap_pct
-
-                # Want price above EMA (positive gap) but not too far
                 is_bullish = min_gap_pct <= gap_pct <= max_gap_pct
 
                 msg = (
@@ -1119,21 +1023,12 @@ class TrendCache:
                     bb_upper = trend.bb.bb_upper
                     bb_basis = trend.bb.bb_basis
 
-                    values["bb_lower"] = bb_lower
-                    values["bb_upper"] = bb_upper
-                    values["bb_basis"] = bb_basis
-                    values["price"]    = current_price
-
                     if bb_lower is None or bb_upper is None:
                         is_bullish = False
                         msg = "Bollinger Bands: ✗ (no BB data — check Pine script is sending bb fields)"
                     else:
                         band_width = bb_upper - bb_lower
                         pct_b = (current_price - bb_lower) / band_width if band_width > 0 else None
-                        bb_width_norm = (band_width / bb_basis) if bb_basis and bb_basis > 0 else None
-
-                        values["pct_b"]    = round(pct_b, 4) if pct_b is not None else None
-                        values["bb_width"] = round(bb_width_norm, 5) if bb_width_norm is not None else None
 
                         if mode == "pct_b":
                             # Range check: is %B within [min_pct_b, max_pct_b]?
@@ -1167,7 +1062,6 @@ class TrendCache:
                         elif mode == "touch":
                             target_band = bb_lower if band == "lower" else bb_upper
                             distance_pct = abs((current_price - target_band) / target_band) * 100
-                            values["distance_pct"] = round(distance_pct, 4)
                             is_bullish = distance_pct <= tolerance_pct
                             msg = (
                                 f"BB {band} touch: {'✓' if is_bullish else '✗'} "
@@ -1182,9 +1076,6 @@ class TrendCache:
                                 bb_key = f"{symbol}_{timeframe}"
                                 bb_hist = self._bb_history.get(bb_key, [])
                                 window = bb_hist[-lookback_candles:] if bb_hist else []
-                                
-                                values["lookback_candles"] = lookback_candles
-                                values["history_candles"] = len(window)
                                 
                                 if not window:
                                     is_bullish = False
@@ -1213,7 +1104,6 @@ class TrendCache:
                             elif band == "lower":
                                 is_bullish = current_price <= bb_lower
                                 gap_pct = ((current_price - bb_lower) / bb_lower) * 100
-                                values["gap_pct"] = round(gap_pct, 4)
                                 msg = (
                                     f"BB lower breach: {'✓' if is_bullish else '✗'} "
                                     f"(price {gap_pct:+.2f}% vs lower band)"
@@ -1221,7 +1111,6 @@ class TrendCache:
                             else:  # upper
                                 is_bullish = current_price < bb_upper
                                 gap_pct = ((current_price - bb_upper) / bb_upper) * 100
-                                values["gap_pct"] = round(gap_pct, 4)
                                 msg = (
                                     f"BB upper breach check: {'✓' if is_bullish else '✗'} "
                                     f"(price {gap_pct:+.2f}% vs upper band)"
@@ -1239,11 +1128,9 @@ class TrendCache:
                 max_ratio = params.get("max_ratio", 10.0)
                 
                 if trend.volume_ratio is None:
-                    values["volume_ratio"] = None
                     is_bullish = False
                     msg = "Volume spike: ✗ (no volume data)"
                 else:
-                    values["volume_ratio"] = trend.volume_ratio
                     is_bullish = min_ratio <= trend.volume_ratio <= max_ratio
                     msg = (
                         f"Volume spike: {'✓' if is_bullish else '✗'} "
@@ -1285,8 +1172,6 @@ class TrendCache:
                 max_body_pct   = params.get("max_body_pct", 0.35)
                 min_close_pct  = params.get("min_close_pct", 0.6)   # for bull_close
 
-                values["pattern"] = pattern
-
                 # ── Helper: derive candle metrics from an OHLC dict ──────────
                 def _candle_metrics(o, h, l, c):
                     total  = h - l
@@ -1324,15 +1209,6 @@ class TrendCache:
                         )
                     else:
                         total, body, l_wick, u_wick, is_bull = _candle_metrics(pc_o, pc_h, pc_l, pc_c)
-                        values.update({
-                            "candle_open":  pc_o, "candle_high": pc_h,
-                            "candle_low":   pc_l, "candle_close": pc_c,
-                            "total_range":  round(total, 6),
-                            "body_size":    round(body, 6),
-                            "lower_wick":   round(l_wick, 6),
-                            "upper_wick":   round(u_wick, 6),
-                            "is_bull_candle": is_bull,
-                        })
 
                         if total == 0:
                             is_bullish = False
@@ -1344,9 +1220,6 @@ class TrendCache:
                             body_pct       = body / total
                             lw_ratio       = l_wick / body if body > 0 else 0
                             uw_ratio       = u_wick / body if body > 0 else 999
-                            values["body_pct"]         = round(body_pct, 4)
-                            values["lower_wick_ratio"] = round(lw_ratio, 4)
-                            values["upper_wick_ratio"] = round(uw_ratio, 4)
                             is_bullish = (lw_ratio >= 2.0 and uw_ratio <= 0.3
                                           and body_pct >= min_body_pct)
                             msg = (
@@ -1358,7 +1231,6 @@ class TrendCache:
 
                         elif pattern == "doji":
                             body_pct = body / total
-                            values["body_pct"] = round(body_pct, 4)
                             is_bullish = body_pct <= max_body_pct
                             msg = (
                                 f"Doji: {'✓' if is_bullish else '✗'} "
@@ -1372,8 +1244,6 @@ class TrendCache:
                             # Use case: in a range, small red candles that hold their
                             # upper half show buyers absorbing the sell pressure.
                             close_pos = (pc_c - pc_l) / total if total > 0 else 0
-                            values["close_position"] = round(close_pos, 4)
-                            values["min_close_pct"]  = min_close_pct
                             is_bullish = close_pos >= min_close_pct
                             msg = (
                                 f"Bull close: {'✓' if is_bullish else '✗'} "
@@ -1387,9 +1257,6 @@ class TrendCache:
                             body_pct       = body / total
                             uw_ratio       = u_wick / body if body > 0 else 0
                             lw_ratio       = l_wick / body if body > 0 else 999
-                            values["body_pct"]         = round(body_pct, 4)
-                            values["upper_wick_ratio"] = round(uw_ratio, 4)
-                            values["lower_wick_ratio"] = round(lw_ratio, 4)
                             is_bullish = (uw_ratio >= 2.0 and lw_ratio <= 0.3
                                           and body_pct >= min_body_pct)
                             msg = (
@@ -1404,8 +1271,6 @@ class TrendCache:
                             # Mirror of bull_close: sellers dominated into the close.
                             max_close_pct = params.get("max_close_pct", 0.4)
                             close_pos = (pc_c - pc_l) / total if total > 0 else 0
-                            values["close_position"] = round(close_pos, 4)
-                            values["max_close_pct"]  = max_close_pct
                             is_bullish = close_pos <= max_close_pct
                             msg = (
                                 f"Bear close: {'✓' if is_bullish else '✗'} "
@@ -1442,8 +1307,6 @@ class TrendCache:
                         c1 = c2 = None
                         data_source = "no_data"
 
-                    values["data_source"] = data_source
-
                     if c1 is None or c2 is None:
                         is_bullish = False
                         msg = (
@@ -1461,12 +1324,6 @@ class TrendCache:
 
                         hl_ok   = c2["low"] > c1["low"]
                         bull_ok = (not require_bull) or (c2["close"] > c2["open"])
-
-                        values["c1_low"]       = c1["low"]
-                        values["c2_low"]       = c2["low"]
-                        values["higher_low"]   = hl_ok
-                        values["require_bull"] = require_bull
-                        values["c2_is_bull"]   = c2["close"] > c2["open"]
 
                         is_bullish = hl_ok and bull_ok
                         msg = (
@@ -1503,13 +1360,6 @@ class TrendCache:
                                               and c2_body_hi >= c1_body_hi)
                             body_pct       = c2_body / c2_total if c2_total > 0 else 0
 
-                            values.update({
-                                "c1_open": c1["open"], "c1_close": c1["close"],
-                                "c2_open": c2["open"], "c2_close": c2["close"],
-                                "c1_bear": c1_bear,    "c2_bull":  c2_bull,
-                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
-                            })
-
                             is_bullish = c2_bull and c1_bear and engulfs
                             msg = (
                                 f"Bullish engulfing: {'✓' if is_bullish else '✗'} "
@@ -1525,12 +1375,6 @@ class TrendCache:
 
                         lh_ok   = c2["high"] < c1["high"]
                         bear_ok = (not require_bear) or (c2["close"] < c2["open"])
-
-                        values["c1_high"]      = c1["high"]
-                        values["c2_high"]      = c2["high"]
-                        values["lower_high"]   = lh_ok
-                        values["require_bear"] = require_bear
-                        values["c2_is_bear"]   = c2["close"] < c2["open"]
 
                         is_bullish = lh_ok and bear_ok
                         msg = (
@@ -1564,13 +1408,6 @@ class TrendCache:
                             engulfs        = (c2_body_lo <= c1_body_lo
                                               and c2_body_hi >= c1_body_hi)
                             body_pct       = c2_body / c2_total if c2_total > 0 else 0
-
-                            values.update({
-                                "c1_open": c1["open"], "c1_close": c1["close"],
-                                "c2_open": c2["open"], "c2_close": c2["close"],
-                                "c1_bull": c1_bull,    "c2_bear":  c2_bear,
-                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
-                            })
 
                             is_bullish = c2_bear and c1_bull and engulfs
                             msg = (
@@ -1629,10 +1466,6 @@ class TrendCache:
 
                     if ref_close is not None and ref_close > 0:
                         drop_pct = ((ref_close - current_price) / ref_close) * 100
-                        values["candle_close_ref"]      = ref_close
-                        values["drop_from_close_pct"]   = round(drop_pct, 4)
-                        values["max_drop_from_close_pct"] = max_drop_from_close_pct
-
                         if drop_pct > max_drop_from_close_pct:
                             # Price has fallen too far below the candle close —
                             # override the pattern result regardless of what it found.
@@ -1667,10 +1500,6 @@ class TrendCache:
 
                     if ref_close is not None and ref_close > 0:
                         rise_pct = ((current_price - ref_close) / ref_close) * 100
-                        values["candle_close_ref"]        = ref_close
-                        values["rise_from_close_pct"]     = round(rise_pct, 4)
-                        values["max_rise_from_close_pct"] = max_rise_from_close_pct
-
                         if rise_pct > max_rise_from_close_pct:
                             prev_result = "✓" if is_bullish else "✗"
                             is_bullish = False
@@ -1700,7 +1529,6 @@ class TrendCache:
                 if len(rsi_history) < lookback_candles:
                     is_bullish = False
                     msg = f"RSI Reversal Momentum: ✗ (insufficient history)"
-                    values["history_length"] = len(rsi_history)
                 else:
                     current_rsi = trend.rsi
                     recent_history = rsi_history[-lookback_candles:]
@@ -1709,9 +1537,6 @@ class TrendCache:
                     rsi_values = [rsi for _, rsi in recent_history]
                     touched_oversold = any(rsi < oversold_threshold for rsi in rsi_values)
                     min_rsi = min(rsi_values) if rsi_values else current_rsi
-                    
-                    values["touched_oversold"] = touched_oversold
-                    values["min_rsi"] = float(min_rsi)
                     
                     # Check 2: Did RSI jump sharply (>5 points) at some point?
                     if jump_required:
@@ -1730,16 +1555,13 @@ class TrendCache:
                                 if jump >= min_jump:
                                     jump_found = True
                         
-                        values["max_jump"] = float(max_jump)
-                        values["jump_found"] = jump_found
                     else:
                         jump_found = True
                         max_jump = 0
 
                     # Check 3: Current RSI above minimum?
                     current_above_min = current_rsi >= current_min
-                    values["current_rsi"] = float(current_rsi)
-                    
+
                     #check momentum
                     if require_sustained == True:
                         #If require sustained, look over last 2 candle gaps
@@ -1748,9 +1570,6 @@ class TrendCache:
                         #else just check previous jump
                         rsi_momentum, rsi_direction  = self._get_rsi_momentum(symbol, timeframe, lookback=1)
                         
-                    values["rsi_direction"] = rsi_direction
-                    values["rsi_momentum"] = float(rsi_momentum)
-
                     #current rising is true if momentum above 2 and direction increasing.
                     # Direction increasing only possible if recent candle is positive
                     if jump_required:
@@ -1772,8 +1591,7 @@ class TrendCache:
                         else:
                             # "strict" (default): must be strictly consecutive up-up
                             sustained_rise = (last_3[1] > last_3[0]) and (last_3[2] > last_3[1])
-                            values["sustained_rise"] = sustained_rise
-                    
+
                     # ALL conditions must pass
                     is_bullish = (
                         touched_oversold and 
@@ -1825,7 +1643,6 @@ class TrendCache:
                 if len(rsi_history) < lookback_candles:
                     is_bullish = False
                     msg = f"RSI Overbought Momentum: ✗ (insufficient history)"
-                    values["history_length"] = len(rsi_history)
                 else:
                     current_rsi    = trend.rsi
                     recent_history = rsi_history[-lookback_candles:]
@@ -1834,9 +1651,6 @@ class TrendCache:
                     rsi_values = [rsi for _, rsi in recent_history]
                     touched_overbought = any(rsi > overbought_threshold for rsi in rsi_values)
                     max_rsi = max(rsi_values) if rsi_values else current_rsi
-
-                    values["touched_overbought"] = touched_overbought
-                    values["max_rsi"] = float(max_rsi)
 
                     # Check 2: Did RSI drop sharply (>= min_drop points) after the peak?
                     if drop_required:
@@ -1854,23 +1668,16 @@ class TrendCache:
                                 if drop >= min_drop:
                                     drop_found = True
 
-                        values["max_drop"] = float(max_drop)
-                        values["drop_found"] = drop_found
                     else:
                         drop_found = True
                         max_drop = 0
 
                     # Check 3: Current RSI below maximum?
                     current_below_max = current_rsi <= current_max
-                    values["current_rsi"] = float(current_rsi)
-
                     if require_sustained:
                         rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=2)
                     else:
                         rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=1)
-
-                    values["rsi_direction"] = rsi_direction
-                    values["rsi_momentum"] = float(rsi_momentum) if rsi_momentum is not None else None
 
                     if drop_required:
                         currently_falling = (rsi_momentum is not None
@@ -1889,7 +1696,6 @@ class TrendCache:
                             sustained_fall = consecutive or net_lower
                         else:
                             sustained_fall = (last_3[1] < last_3[0]) and (last_3[2] < last_3[1])
-                            values["sustained_fall"] = sustained_fall
 
                     is_bullish = (
                         touched_overbought and
@@ -1957,10 +1763,6 @@ class TrendCache:
                 min_adx   = params.get("min_adx", 0)
 
                 adx_value = getattr(trend, 'adx', None)
-                values["adx"] = adx_value
-                values["max_adx"] = max_adx
-                values["min_adx"] = min_adx
-
                 if adx_value is None:
                     # ADX not yet in TrendData — fail gracefully rather than crash.
                     # Add 'adx: float = None' to your TrendData model and update
@@ -2033,12 +1835,6 @@ class TrendCache:
                     symbol, timeframe, lookback,
                     expand_threshold_pct, contract_threshold_pct
                 )
-
-                values["width_direction"] = width_direction
-                values["width_change"]    = round(width_change, 6) if width_change is not None else None
-                values["current_width"]   = round(current_width, 6) if current_width is not None else None
-                values["required"]        = required_direction
-                values["lookback"]        = lookback
 
                 if width_direction is None:
                     is_bullish = False
@@ -2114,11 +1910,6 @@ class TrendCache:
 
                 pct_b_change, pct_b_direction = self._get_pct_b_trend(symbol, timeframe, lookback)
 
-                values["pct_b_direction"] = pct_b_direction
-                values["pct_b_change"]    = round(pct_b_change, 4) if pct_b_change is not None else None
-                values["required"]        = required_direction
-                values["lookback"]        = lookback
-
                 if pct_b_direction is None:
                     is_bullish = False
                     msg = f"BB %B momentum: ✗ (insufficient BB history — need {lookback} candles)"
@@ -2149,38 +1940,21 @@ class TrendCache:
                         
             results.append((is_bullish, msg))
             if hard_stop and not is_bullish:
-                values["hard_stop"] = True
                 hard_stop_failures.append(msg)
 
-            result = IndicatorResult(
-                type=indicator_type,
-                is_bullish=is_bullish,
-                config=params,
-                values=values,
-                message=msg
-            )
-            indicator_results.append(result)
-        
-
-        # NEW: Check for hard_stop failures FIRST (before scoring) - Skip if use_hard_stops is false (Mainly for trend invalidation checks)
         if use_hard_stops and hard_stop_failures:
             details = ", ".join(msg for _, msg in results)
             failed_indicators = "; ".join(hard_stop_failures)
-            return False, f"🚫 HARD STOP: {failed_indicators} ({details})", indicator_results   
-             
-        # Count bullish indicators
-        bullish_count = sum(1 for r in indicator_results if r.is_bullish)
-        total_count = len(indicator_results)
-        
-        # Build detailed reason
-        details = ", ".join(r.message for r in indicator_results)
+            return False, f"🚫 HARD STOP: {failed_indicators} ({details})"
+
+        bullish_count = sum(1 for is_b, _ in results if is_b)
+        total_count = len(results)
+        details = ", ".join(msg for _, msg in results)
 
         if bullish_count >= min_indicators_required:
-            summary = f"{bullish_count}/{total_count} bullish ({details})"
-            return True, summary, indicator_results
+            return True, f"{bullish_count}/{total_count} bullish ({details})"
         else:
-            summary = f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
-            return False, summary, indicator_results
+            return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
     
     def get_cache_info(self) -> dict:
         """Get cache status with statistics including DB persistence stats"""

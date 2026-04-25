@@ -105,7 +105,7 @@ class Trade(Base):
     exchange = Column(String, default="backpack")
     reason = Column(String, default=TradeReason.MANUAL, server_default=text("'MANUAL'"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    reason_summary = Column(JSON, nullable=True)
+    signal_snapshot = Column(JSON, nullable=True)
 
     __table_args__ = (
         CheckConstraint("side IN ('BID', 'ASK')", name="valid_side"),
@@ -333,33 +333,6 @@ class Order(Base):
         CheckConstraint("purpose IN ('TAKE_PROFIT', 'STOP_LOSS', 'TRAILING_STOP', 'ENTRY')", name="valid_order_purpose"),
         Index('ix_orders_status_profile', 'status', 'profile_name'),
     )
-
-class TradeValidationResults(Base):
-    __tablename__ = "trade_validation_results"
-
-    id = Column(Integer, primary_key=True)
-    trade_id = Column(Integer, ForeignKey('trades.id'), nullable=False)
-    profile_name = Column(String, nullable=False)
-    side = Column(String, nullable=True)
-    symbol = Column(String, nullable=False)
-    validation_summary = Column(String)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        Index('ix_trade_validation_results_trade', 'trade_id'),
-    )
-    
-    def get_validation_result(self):
-        """Parse validation_summary into structured object"""
-        if self.validation_summary:
-            import json
-            from models.signal_validation import SignalValidationResult
-            data = json.loads(self.validation_summary)
-            return SignalValidationResult.from_dict(data)
-        return None
-
-# Add this to db/models.py
 
 class Settings(Base):
     """

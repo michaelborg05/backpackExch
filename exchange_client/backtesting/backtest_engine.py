@@ -173,17 +173,11 @@ class ReplayTrendCache:
         timeframe: str,
         indicators_config=None,
         min_indicators_required: int = 2,
-        return_structured: bool = False,
         use_hard_stops: bool = True,
-    ):
-        """
-        Delegates to _validate_timeframe_indicators exactly as TrendCache does.
-        We import and call the method directly to stay in sync.
-        """
+    ) -> tuple:
+        """Delegates to _validate_timeframe_indicators exactly as TrendCache does."""
         trend = self.get(symbol, timeframe)
         if trend is None:
-            if return_structured:
-                return False, f"No trend data for {symbol} {timeframe}", []
             return False, f"No trend data for {symbol} {timeframe}"
 
         if indicators_config is None:
@@ -193,13 +187,9 @@ class ReplayTrendCache:
                 {"type": "price_vs_vwap",  "params": {}},
             ]
 
-        is_bull, summary, results = self._validate_timeframe_indicators(
+        return self._validate_timeframe_indicators(
             symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops
         )
-
-        if return_structured:
-            return is_bull, summary, results
-        return is_bull, summary
 
     # ------------------------------------------------------------------
     # Private helpers — exact copies from TrendCache (no DB calls here)
@@ -359,11 +349,8 @@ class ReplayTrendCache:
         types supported. Uses self._get_ema_slope / _get_rsi_momentum instead
         of the live cache versions.
         """
-        from models.signal_validation import IndicatorResult
-
         results = []
         hard_stop_failures = []
-        indicator_results  = []
 
         # Use the candle close as current price in replay (no live price cache)
         current_price = trend.price
@@ -374,7 +361,6 @@ class ReplayTrendCache:
             hard_stop      = params.get("hard_stop", False)
             is_bull        = False
             msg            = ""
-            values         = {}
 
             # --- backward compat ---
             if indicator_type == "ema_alignment":
@@ -385,16 +371,12 @@ class ReplayTrendCache:
             if indicator_type == "ema_cross":
                 use_slope     = params.get("use_slope", False)
                 min_slope_pct = params.get("min_slope_pct", 0.01)
-                values["ema20"] = trend.ema20
-                values["ema50"] = trend.ema50
                 if use_slope:
                     slope_pct, slope_dir = self._get_ema_slope(symbol, timeframe, "ema20")
                     if slope_pct is None:
                         is_bull = trend.ema20 > trend.ema50
                         msg = f"EMA cross: {'✓' if is_bull else '✗'} (no slope data)"
                     else:
-                        values["slope_pct"]       = slope_pct
-                        values["slope_direction"] = slope_dir
                         is_bull = trend.ema20 > trend.ema50 and slope_pct >= min_slope_pct
                         msg = f"EMA cross: {'✓' if is_bull else '✗'} ({trend.ema20:.4f}/{trend.ema50:.4f} slope {slope_dir})"
                 else:
@@ -406,12 +388,8 @@ class ReplayTrendCache:
                 use_momentum   = params.get("use_momentum", True)
                 early_threshold= params.get("early_threshold", 40)
                 rsi = trend.rsi
-                values["rsi"] = float(rsi)
-                values["threshold"] = min_rsi
                 if use_momentum:
                     rsi_mom, rsi_dir = self._get_rsi_momentum(symbol, timeframe)
-                    values["momentum"]  = rsi_mom
-                    values["direction"] = rsi_dir
                     if rsi >= early_threshold and rsi < min_rsi:
                         if rsi_dir == "increasing" and rsi_mom is not None and rsi_mom >= 1.0:
                             is_bull = True
@@ -431,7 +409,6 @@ class ReplayTrendCache:
 
             elif indicator_type == "price_vs_vwap":
                 is_bull = current_price > trend.vwap if trend.vwap else False
-                values  = {"price": current_price, "vwap": trend.vwap}
                 msg     = f"Price vs VWAP: {'✓' if is_bull else '✗'} ({current_price:.4f}/{trend.vwap:.4f})"
 
             elif indicator_type == "price_vs_ema":
@@ -440,7 +417,6 @@ class ReplayTrendCache:
                 max_gap_pct = params.get("max_gap_pct", 0.0)
                 ema_value   = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct     = ((current_price - ema_value) / ema_value) * 100
-                values      = {"ema_value": ema_value, "gap_pct": gap_pct}
                 is_bull     = gap_pct >= min_gap_pct
                 if max_gap_pct > 0:
                     is_bull = is_bull and gap_pct <= max_gap_pct
@@ -456,9 +432,7 @@ class ReplayTrendCache:
                 if slope_pct is None:
                     is_bull = False
                     msg     = f"EMA{ema_type} slope: ✗ (no data)"
-                    values["slope_pct"] = "NA"
                 else:
-                    values["slope_pct"] = float(slope_pct)
                     if req_dir == "rising":
                         is_bull   = slope_pct > min_slope
                         direction = "rising" if is_bull else "flat/falling"
@@ -481,7 +455,6 @@ class ReplayTrendCache:
                 mom_over = params.get("momentum_override_threshold", None)
                 rsi_mom, rsi_dir = self._get_rsi_momentum(symbol, timeframe)
                 in_range = min_rsi <= trend.rsi <= max_rsi
-                values   = {"rsi": trend.rsi, "rsi_momentum": rsi_mom, "rsi_direction": rsi_dir, "within_range": in_range}
                 if invert:
                     is_bull = in_range
                     msg = f"RSI range: {'✓' if is_bull else '✗'} (RSI {trend.rsi:.1f} {'in' if in_range else 'outside'} {min_rsi}-{max_rsi})"
@@ -501,7 +474,6 @@ class ReplayTrendCache:
                 max_gap_pct = params.get("max_gap_pct", 0.3)
                 mode        = params.get("mode", "min")
                 gap_pct     = abs((trend.ema20 - trend.ema50) / trend.ema50) * 100 if trend.ema50 else 0
-                values      = {"ema20": trend.ema20, "ema50": trend.ema50, "gap_pct": gap_pct}
                 is_bull     = gap_pct >= min_gap_pct if mode == "min" else gap_pct <= max_gap_pct
                 msg         = f"EMA gap: {'✓' if is_bull else '✗'} ({gap_pct:.2f}%)"
 
@@ -510,7 +482,6 @@ class ReplayTrendCache:
                 require_rising = params.get("require_rising", True)
                 min_momentum   = params.get("min_momentum", 0.5)
                 is_oversold    = trend.rsi < max_value
-                values["rsi"] = trend.rsi
                 if require_rising:
                     rsi_mom, rsi_dir = self._get_rsi_momentum(symbol, timeframe)
                     is_turning_up = (
@@ -518,7 +489,6 @@ class ReplayTrendCache:
                         rsi_dir == "increasing" and
                         rsi_mom >= min_momentum
                     )
-                    values.update({"rsi_momentum": rsi_mom, "rsi_direction": rsi_dir})
                     is_bull = is_oversold and is_turning_up
                     msg = f"RSI oversold: {'✓' if is_bull else '✗'} (RSI {trend.rsi:.1f}, turning={is_turning_up})"
                 else:
@@ -540,15 +510,13 @@ class ReplayTrendCache:
                 side = params.get("side", "long")
                 lookback_candles = params.get("lookback_candles", None)
                 current_rsi = float(trend.rsi)
-                values["rsi"] = current_rsi
-                values["side"] = side
 
                 if side == "short":
                     max_value = params.get("max_value", 30)
-                    values["threshold"] = max_value
                     is_extreme = current_rsi < max_value
 
                     trough_in_lookback = False
+                    trough_rsi_rounded = None
                     if lookback_candles is not None:
                         key = f"{symbol}_{timeframe}"
                         rsi_history = self._rsi_history.get(key, [])
@@ -556,11 +524,7 @@ class ReplayTrendCache:
                             recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
                             trough_rsi = min(recent_rsi_values)
                             trough_in_lookback = trough_rsi < max_value
-                            values["lookback_candles"] = lookback_candles
-                            values["trough_rsi_in_lookback"] = round(trough_rsi, 2)
-                        else:
-                            values["lookback_candles"] = lookback_candles
-                            values["lookback_history_len"] = len(rsi_history)
+                            trough_rsi_rounded = round(trough_rsi, 2)
 
                     is_bull = not is_extreme and not trough_in_lookback
 
@@ -570,14 +534,13 @@ class ReplayTrendCache:
                         msg = (
                             f"RSI oversold block (short): ✗ "
                             f"(RSI {current_rsi:.1f} ok now, but troughed at "
-                            f"{values['trough_rsi_in_lookback']:.1f} < {max_value} "
+                            f"{trough_rsi_rounded:.1f} < {max_value} "
                             f"in last {lookback_candles} candles)"
                         )
                     else:
                         lookback_note = (
-                            f", trough {values.get('trough_rsi_in_lookback', 'N/A'):.1f} "
-                            f"in last {lookback_candles} ok"
-                            if lookback_candles is not None and "trough_rsi_in_lookback" in values
+                            f", trough {trough_rsi_rounded:.1f} in last {lookback_candles} ok"
+                            if lookback_candles is not None and trough_rsi_rounded is not None
                             else ""
                         )
                         msg = f"RSI oversold block (short): ✓ (RSI {current_rsi:.1f}{lookback_note})"
@@ -585,10 +548,10 @@ class ReplayTrendCache:
                 else:
                     # Long (default): block when RSI is overbought
                     min_value = params.get("min_value", 70)
-                    values["threshold"] = min_value
                     is_overbought = current_rsi > min_value
 
                     peak_in_lookback = False
+                    peak_rsi_rounded = None
                     if lookback_candles is not None:
                         key = f"{symbol}_{timeframe}"
                         rsi_history = self._rsi_history.get(key, [])
@@ -596,11 +559,7 @@ class ReplayTrendCache:
                             recent_rsi_values = [rsi for _, rsi in rsi_history[-lookback_candles:]]
                             peak_rsi = max(recent_rsi_values)
                             peak_in_lookback = peak_rsi > min_value
-                            values["lookback_candles"] = lookback_candles
-                            values["peak_rsi_in_lookback"] = round(peak_rsi, 2)
-                        else:
-                            values["lookback_candles"] = lookback_candles
-                            values["lookback_history_len"] = len(rsi_history)
+                            peak_rsi_rounded = round(peak_rsi, 2)
 
                     is_bull = not is_overbought and not peak_in_lookback
 
@@ -610,14 +569,13 @@ class ReplayTrendCache:
                         msg = (
                             f"RSI overbought check: ✗ "
                             f"(RSI {current_rsi:.1f} ok now, but peaked at "
-                            f"{values['peak_rsi_in_lookback']:.1f} > {min_value} "
+                            f"{peak_rsi_rounded:.1f} > {min_value} "
                             f"in last {lookback_candles} candles)"
                         )
                     else:
                         lookback_note = (
-                            f", peak {values.get('peak_rsi_in_lookback', 'N/A'):.1f} "
-                            f"in last {lookback_candles} ok"
-                            if lookback_candles is not None and "peak_rsi_in_lookback" in values
+                            f", peak {peak_rsi_rounded:.1f} in last {lookback_candles} ok"
+                            if lookback_candles is not None and peak_rsi_rounded is not None
                             else ""
                         )
                         msg = f"RSI overbought check: ✓ (RSI {current_rsi:.1f}{lookback_note})"
@@ -626,7 +584,6 @@ class ReplayTrendCache:
                 min_gap_pct = params.get("min_gap_pct", -1.0)
                 max_gap_pct = params.get("max_gap_pct", -10.0)
                 gap_pct     = ((current_price - trend.vwap) / trend.vwap) * 100 if trend.vwap else 0
-                values      = {"price": current_price, "vwap": trend.vwap, "gap_pct": gap_pct}
                 is_bull     = max_gap_pct <= gap_pct <= min_gap_pct
                 msg         = f"Price below VWAP: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
 
@@ -636,7 +593,6 @@ class ReplayTrendCache:
                 max_gap_pct = params.get("max_gap_pct", -10.0)
                 ema_value   = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct     = ((current_price - ema_value) / ema_value) * 100 if ema_value else 0
-                values      = {"price": current_price, "ema": ema_value, "gap_pct": gap_pct}
                 is_bull     = max_gap_pct <= gap_pct <= min_gap_pct
                 msg         = f"Price below EMA{ema_type}: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
 
@@ -644,7 +600,6 @@ class ReplayTrendCache:
                 min_gap_pct = params.get("min_gap_pct", 1.0)
                 max_gap_pct = params.get("max_gap_pct", 10.0)
                 gap_pct     = ((current_price - trend.vwap) / trend.vwap) * 100 if trend.vwap else 0
-                values      = {"price": current_price, "vwap": trend.vwap, "gap_pct": gap_pct}
                 is_bull     = min_gap_pct <= gap_pct <= max_gap_pct
                 msg         = f"Price above VWAP: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
 
@@ -654,7 +609,6 @@ class ReplayTrendCache:
                 max_gap_pct = params.get("max_gap_pct", 10.0)
                 ema_value   = trend.ema20 if ema_type == 20 else trend.ema50
                 gap_pct     = ((current_price - ema_value) / ema_value) * 100 if ema_value else 0
-                values      = {"price": current_price, "ema": ema_value, "gap_pct": gap_pct}
                 is_bull     = min_gap_pct <= gap_pct <= max_gap_pct
                 msg         = f"Price above EMA{ema_type}: {'✓' if is_bull else '✗'} ({gap_pct:+.2f}%)"
 
@@ -675,8 +629,6 @@ class ReplayTrendCache:
                     bb_basis   = trend.bb.bb_basis
                     band_width = bb_upper - bb_lower
                     pct_b      = (current_price - bb_lower) / band_width if band_width > 0 else None
-                    values     = {"bb_lower": bb_lower, "bb_upper": bb_upper, "bb_basis": bb_basis,
-                                  "price": current_price, "pct_b": round(pct_b, 4) if pct_b is not None else None}
 
                     if mode == "pct_b":
                         if pct_b is None:
@@ -704,7 +656,6 @@ class ReplayTrendCache:
                     elif mode == "touch":
                         target   = bb_lower if band == "lower" else bb_upper
                         dist_pct = abs((current_price - target) / target) * 100 if target else 0
-                        values["distance_pct"] = round(dist_pct, 4)
                         is_bull = dist_pct <= tolerance_pct
                         msg = f"BB {band} touch: {'✓' if is_bull else '✗'} ({dist_pct:.2f}% from band)"
                     else:  # breach
@@ -713,9 +664,6 @@ class ReplayTrendCache:
                             bb_key = f"{symbol}_{timeframe}"
                             bb_hist = self._bb_history.get(bb_key, [])
                             window = bb_hist[-lookback_candles:] if bb_hist else []
-                            
-                            values["lookback_candles"] = lookback_candles
-                            values["history_candles"] = len(window)
                             
                             if not window:
                                 is_bull = False
@@ -757,10 +705,8 @@ class ReplayTrendCache:
                 max_ratio = params.get("max_ratio", 10.0)
                 if trend.volume_ratio is None:
                     is_bull, msg = False, "Volume spike: ✗ (no data)"
-                    values["volume_ratio"] = None
                 else:
                     is_bull = min_ratio <= trend.volume_ratio <= max_ratio
-                    values["volume_ratio"] = trend.volume_ratio
                     msg = f"Volume spike: {'✓' if is_bull else '✗'} ({trend.volume_ratio:.2f}x)"
 
             elif indicator_type == "reversal_candle":
@@ -768,8 +714,6 @@ class ReplayTrendCache:
                 min_body_pct   = params.get("min_body_pct", 0.1)
                 max_body_pct   = params.get("max_body_pct", 0.35)
                 min_close_pct  = params.get("min_close_pct", 0.6)   # for bull_close
-
-                values["pattern"] = pattern
 
                 # ── Helper: derive candle metrics from an OHLC dict ──────────
                 def _candle_metrics(o, h, l, c):
@@ -828,9 +772,6 @@ class ReplayTrendCache:
                             body_pct       = body / total
                             lw_ratio       = l_wick / body if body > 0 else 0
                             uw_ratio       = u_wick / body if body > 0 else 999
-                            values["body_pct"]         = round(body_pct, 4)
-                            values["lower_wick_ratio"] = round(lw_ratio, 4)
-                            values["upper_wick_ratio"] = round(uw_ratio, 4)
                             is_bull = (lw_ratio >= 2.0 and uw_ratio <= 0.3
                                           and body_pct >= min_body_pct)
                             msg = (
@@ -842,7 +783,6 @@ class ReplayTrendCache:
 
                         elif pattern == "doji":
                             body_pct = body / total
-                            values["body_pct"] = round(body_pct, 4)
                             is_bull = body_pct <= max_body_pct
                             msg = (
                                 f"Doji: {'✓' if is_bull else '✗'} "
@@ -856,8 +796,6 @@ class ReplayTrendCache:
                             # Use case: in a range, small red candles that hold their
                             # upper half show buyers absorbing the sell pressure.
                             close_pos = (pc_c - pc_l) / total if total > 0 else 0
-                            values["close_position"] = round(close_pos, 4)
-                            values["min_close_pct"]  = min_close_pct
                             is_bull = close_pos >= min_close_pct
                             msg = (
                                 f"Bull close: {'✓' if is_bull else '✗'} "
@@ -869,9 +807,6 @@ class ReplayTrendCache:
                             body_pct       = body / total
                             uw_ratio       = u_wick / body if body > 0 else 0
                             lw_ratio       = l_wick / body if body > 0 else 999
-                            values["body_pct"]         = round(body_pct, 4)
-                            values["upper_wick_ratio"] = round(uw_ratio, 4)
-                            values["lower_wick_ratio"] = round(lw_ratio, 4)
                             is_bull = (uw_ratio >= 2.0 and lw_ratio <= 0.3
                                        and body_pct >= min_body_pct)
                             msg = (
@@ -884,8 +819,6 @@ class ReplayTrendCache:
                         elif pattern == "bear_close":
                             max_close_pct = params.get("max_close_pct", 0.4)
                             close_pos = (pc_c - pc_l) / total if total > 0 else 0
-                            values["close_position"] = round(close_pos, 4)
-                            values["max_close_pct"]  = max_close_pct
                             is_bull = close_pos <= max_close_pct
                             msg = (
                                 f"Bear close: {'✓' if is_bull else '✗'} "
@@ -922,8 +855,6 @@ class ReplayTrendCache:
                         c1 = c2 = None
                         data_source = "no_data"
 
-                    values["data_source"] = data_source
-
                     if c1 is None or c2 is None:
                         is_bull = False
                         msg = (
@@ -941,12 +872,6 @@ class ReplayTrendCache:
 
                         hl_ok   = c2["low"] > c1["low"]
                         bull_ok = (not require_bull) or (c2["close"] > c2["open"])
-
-                        values["c1_low"]       = c1["low"]
-                        values["c2_low"]       = c2["low"]
-                        values["higher_low"]   = hl_ok
-                        values["require_bull"] = require_bull
-                        values["c2_is_bull"]   = c2["close"] > c2["open"]
 
                         is_bull = hl_ok and bull_ok
                         msg = (
@@ -1001,11 +926,6 @@ class ReplayTrendCache:
                         require_bear = params.get("require_bear", False)
                         lh_ok   = c2["high"] < c1["high"]
                         bear_ok = (not require_bear) or (c2["close"] < c2["open"])
-                        values["c1_high"]      = c1["high"]
-                        values["c2_high"]      = c2["high"]
-                        values["lower_high"]   = lh_ok
-                        values["require_bear"] = require_bear
-                        values["c2_is_bear"]   = c2["close"] < c2["open"]
                         is_bull = lh_ok and bear_ok
                         msg = (
                             f"Lower high: {'✓' if is_bull else '✗'} "
@@ -1259,10 +1179,6 @@ class ReplayTrendCache:
                 min_adx   = params.get("min_adx", 0)
 
                 adx_value = getattr(trend, 'adx', None)
-                values["adx"] = adx_value
-                values["max_adx"] = max_adx
-                values["min_adx"] = min_adx
-
                 if adx_value is None:
                     # ADX not yet in TrendData — fail gracefully rather than crash.
                     # Add 'adx: float = None' to your TrendData model and update
@@ -1295,12 +1211,6 @@ class ReplayTrendCache:
                     symbol, timeframe, lookback,
                     expand_threshold_pct, contract_threshold_pct
                 )
-
-                values["width_direction"] = width_direction
-                values["width_change"]    = round(width_change, 6) if width_change is not None else None
-                values["current_width"]   = round(current_width, 6) if current_width is not None else None
-                values["required"]        = required_direction
-                values["lookback"]        = lookback
 
                 if width_direction is None:
                     is_bull = False
@@ -1340,11 +1250,6 @@ class ReplayTrendCache:
 
                 pct_b_change, pct_b_direction = self._get_pct_b_trend(symbol, timeframe, lookback)
 
-                values["pct_b_direction"] = pct_b_direction
-                values["pct_b_change"]    = round(pct_b_change, 4) if pct_b_change is not None else None
-                values["required"]        = required_direction
-                values["lookback"]        = lookback
-
                 if pct_b_direction is None:
                     is_bull = False
                     msg = f"BB %B momentum: ✗ (insufficient BB history — need {lookback} candles)"
@@ -1377,37 +1282,22 @@ class ReplayTrendCache:
                 is_bull = False
                 msg = f"Unknown indicator type: {indicator_type}"
 
-            # -----------------------------------------------------------
-            try:
-                from models.signal_validation import IndicatorResult
-                result_obj = IndicatorResult(
-                    type=indicator_type,
-                    is_bullish=is_bull,
-                    config=params,
-                    values=values,
-                    message=msg,
-                )
-            except Exception:
-                # Fallback if IndicatorResult import fails in isolated testing
-                result_obj = type("IR", (), {"is_bullish": is_bull, "message": msg, "type": indicator_type})()
-
-            indicator_results.append(result_obj)
             results.append((is_bull, msg))
             if hard_stop and not is_bull:
                 hard_stop_failures.append(msg)
 
-        # Hard stop check
         if use_hard_stops and hard_stop_failures:
-            return False, f"HARD STOP: {'; '.join(hard_stop_failures)}", indicator_results
+            details = ", ".join(msg for _, msg in results)
+            return False, f"HARD STOP: {'; '.join(hard_stop_failures)} ({details})"
 
-        bullish_count = sum(1 for r in indicator_results if r.is_bullish)
-        total_count   = len(indicator_results)
-        details       = ", ".join(r.message for r in indicator_results)
+        bullish_count = sum(1 for is_b, _ in results if is_b)
+        total_count   = len(results)
+        details       = ", ".join(msg for _, msg in results)
 
         if bullish_count >= min_indicators_required:
-            return True, f"{bullish_count}/{total_count} bullish ({details})", indicator_results
+            return True, f"{bullish_count}/{total_count} bullish ({details})"
         else:
-            return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})", indicator_results
+            return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
 
 
 # ===========================================================================
@@ -2130,12 +2020,11 @@ class BacktestEngine:
 
             # Run trend filter (HTF)
             if self.profile.use_trend_filter:
-                trend_ok, _, _ = cache.is_bullish(
+                trend_ok, _ = cache.is_bullish(
                     symbol,
                     self.profile.trend_timeframe,
                     indicators_config=self.profile.trend_indicators,
                     min_indicators_required=self.profile.min_indicators_required,
-                    return_structured=True,
                 )
                 if not trend_ok:
                     if self.verbose:
@@ -2144,12 +2033,11 @@ class BacktestEngine:
 
             # Run entry filter (execution TF)
             if self.profile.use_entry_filter:
-                entry_ok, entry_reason, entry_indicators = cache.is_bullish(
+                entry_ok, entry_reason = cache.is_bullish(
                     symbol,
                     self.profile.entry_timeframe,
                     indicators_config=self.profile.entry_indicators,
                     min_indicators_required=self.profile.min_entry_indicators_required,
-                    return_structured=True,
                 )
                 if not entry_ok:
                     if self.verbose:
@@ -2157,7 +2045,6 @@ class BacktestEngine:
                     continue
             else:
                 entry_reason = "entry filter off"
-                entry_indicators = []
 
             # Volume check
             volume_ratio = float(row.volume_ratio) if row.volume_ratio is not None else None

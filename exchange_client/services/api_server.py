@@ -753,7 +753,6 @@ async def tradingview_webhook(
                     alert,
                     profile_name=profile_name,
                     source=TradeReason.WEBHOOK,
-                    reason_summary=reasons,
                 )
                 
                 executed_price = None

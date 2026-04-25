@@ -2,7 +2,6 @@ import json
 import time
 import threading
 from typing import List,  Dict,Optional
-from models.signal_validation import SignalValidationResult
 from services.position_manager import get_position_manager
 from utils.logging import log_manager
 from utils.config import Config
@@ -20,6 +19,7 @@ from cache.market_info_cache import get_market_info_cache
 from models.balance import BalanceReader
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal
+from models.signal_snapshot import SignalSnapshot
 from models.trade import OrderResponse
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
@@ -509,13 +509,7 @@ class MonitoringService:
                             # Extract reason type (TREND_INVALIDATION or STALE_POSITION)
                             reason_type = exit_reason.split(':')[0]
                             
-                            self._execute_close(
-                                db, 
-                                position, 
-                                profile, 
-                                reason=reason_type,
-                                reason_summary=[exit_reason],
-                            )
+                            self._execute_close(db, position, profile, reason=reason_type)
                             continue
 
             
@@ -686,25 +680,19 @@ class MonitoringService:
                     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
                 )
 
-    def _execute_close(self, db, position, profile, reason: str, reason_summary: list[str] = None):
+    def _execute_close(self, db, position, profile, reason: str):
         """
         Execute a close order for a position.
 
         Args:
-            db            : Database session
-            position      : Position object to close
-            profile       : TradingProfile for this position
-            reason        : TAKE_PROFIT | STOP_LOSS | TRAILING_STOP | TREND_INVALIDATION | ...
-            reason_summary: Optional list of reason strings for trade record
+            db      : Database session
+            position: Position object to close
+            profile : TradingProfile for this position
+            reason  : TAKE_PROFIT | STOP_LOSS | TRAILING_STOP | TREND_INVALIDATION | ...
         """
         try:
             adapter = get_adapter(profile)
             symbol = position.symbol
-            validation_summary = ""
-            # If stop loss, analyse market conditions and record in db for review later
-#            if reason=="STOP_LOSS":
-            validation_summary = self.record_market_validation_info(symbol, profile)
-
             quantity = str(position.remaining_quantity)
             is_long = (position.direction or "LONG") != "SHORT"
 
@@ -713,14 +701,30 @@ class MonitoringService:
                 f"[{profile.name}] Reason: {reason} Direction: {'LONG' if is_long else 'SHORT'}"
             )
 
+            # Capture market state at close time for post-trade analysis
+            from cache.trend_cache import get_trend_cache
+            _tc = get_trend_cache()
+            _tf = getattr(profile, 'entry_timeframe', getattr(profile, 'signal_timeframe', '15'))
+            _t = _tc.get(symbol, _tf)
+            _ema20_slope, _ema20_dir = _tc._get_ema_slope(symbol, _tf)
+            _rsi_delta, _rsi_dir = _tc._get_rsi_momentum(symbol, _tf)
+            close_snapshot = SignalSnapshot.build(
+                trend=_t,
+                timeframe=_tf,
+                ema20_slope=_ema20_slope,
+                ema20_dir=_ema20_dir,
+                rsi_delta=_rsi_delta,
+                rsi_dir=_rsi_dir,
+                pct_b=_t.bb_pct_b if _t else None,
+            )
+
             close_kwargs = dict(
                 symbol=symbol,
                 quantity=quantity,
                 source=reason,
                 profile_name=profile.name,
                 position_id=str(position.id),
-                reason_summary=reason_summary,
-                validation_summary=validation_summary,
+                signal_snapshot=close_snapshot,
             )
             result = adapter.order_sell(**close_kwargs) if is_long else adapter.order_buy(**close_kwargs)
             
@@ -849,90 +853,6 @@ class MonitoringService:
                 f"❌ Unexpected error closing position for {position.symbol} [{profile.display_name if profile.display_name else profile.name}]: {str(e)}",
                 MessagePriority.HIGH
             )
-
-    def record_market_validation_info(self, symbol: str, profile) -> str:
-        """
-        Record market validation information from the order response.
-        Add to db table with trend and entry info to understand more on why Stop loss was hit
-        """
-        from models.signal_validation import ValidationGroup, MarketContext
-        from utils.constants import TradeSide
-        from cache.trend_cache import get_trend_cache
-
-        validation = SignalValidationResult(
-            timestamp=time.time(),
-            symbol=symbol,
-            signal_timeframe="15",
-            strategy_type=profile.strategy_type.value,
-            order_type=TradeSide.SELL,
-            score=0.0,
-            score_components=0,
-            market_context=MarketContext(),
-            trend_validation=ValidationGroup(enabled=profile.use_trend_filter),
-            entry_validation=ValidationGroup(enabled=profile.use_entry_filter)
-        )
-        trend_cache = get_trend_cache()
-        
-        if profile.use_trend_filter:
-            indicators_config = getattr(profile, 'trend_indicators', None)
-            min_required = getattr(profile, 'min_indicators_required', 2)
-
-            is_bullish, trend_reason, indicator_results = trend_cache.is_bullish(
-                symbol=symbol,
-                timeframe="60",
-                indicators_config=indicators_config,
-                min_indicators_required=min_required,
-                return_structured=True
-            )
-
-            validation.trend_validation.timeframe = "60"
-            validation.trend_validation.passed = is_bullish
-            validation.trend_validation.indicators = indicator_results
-            validation.trend_validation.indicators_total = len(indicator_results)
-            validation.trend_validation.indicators_passed = sum(
-                1 for ind in indicator_results if ind.is_bullish
-            )
-            validation.trend_validation.summary = trend_reason
-
-        if profile.use_entry_filter:
-
-            entry_indicators_config = getattr(profile, 'entry_indicators', None)
-            min_required = getattr(profile, 'min_entry_indicators_required', 2)
-
-            if entry_indicators_config is not None:
-                is_bullish, entry_reason, entry_indicators = trend_cache.is_bullish(
-                    symbol=symbol,
-                    timeframe="15",
-                    indicators_config=entry_indicators_config,
-                    min_indicators_required=min_required,
-                    return_structured=True
-                )
-
-                validation.entry_validation.timeframe = profile.entry_timeframe
-                validation.entry_validation.passed = is_bullish
-                validation.entry_validation.indicators = entry_indicators
-                validation.entry_validation.indicators_total = len(entry_indicators)
-                validation.entry_validation.indicators_passed = sum(
-                    1 for ind in entry_indicators if ind.is_bullish
-                )
-                validation.entry_validation.summary = entry_reason
-
-        parts = []
-        if validation.trend_validation.enabled:
-            icon = "✅" if validation.trend_validation.passed else "❌"
-            parts.append(f"{icon} Trend ({validation.trend_validation.timeframe}m): "
-                        f"{validation.trend_validation.indicators_passed}/{validation.trend_validation.indicators_total}")
-        if validation.entry_validation.enabled:
-            icon = "✅" if validation.entry_validation.passed else "❌"
-            parts.append(f"{icon} Entry ({validation.entry_validation.timeframe}m): "
-                        f"{validation.entry_validation.indicators_passed}/{validation.entry_validation.indicators_total}")
-        
-        validation.human_readable = " | ".join(parts)
-        validation.overall_passed = True
-
-        validation_details=validation.to_json()
-
-        return validation_details
 
     def _monitor_atr(self):
         """Monitor ATR for all tickers"""
@@ -1259,8 +1179,7 @@ class MonitoringService:
                 quantity=str(quantity),
                 source=f"SIGNAL_{signal.strength.name}",
                 profile_name=profile.name,
-                reason_summary=signal.reasons,
-                validation_summary=signal.validation_details,
+                signal_snapshot=signal.signal_snapshot,
             )
             if is_long_signal:
                 result = adapter.order_buy(**order_kwargs)
