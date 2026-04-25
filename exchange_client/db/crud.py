@@ -9,8 +9,11 @@ from models.trade import OrderResponse, OrderHistoryResponse
 from models.trading_profile import TradingProfile
 from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
 
-def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", signal_snapshot: dict = None, direction: str = None) -> Trade:
+def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", signal_snapshot=None, direction: str = None) -> Trade:
     """Save a trade to the database"""
+    from models.signal_snapshot import SignalSnapshot
+    if isinstance(signal_snapshot, SignalSnapshot):
+        signal_snapshot = signal_snapshot.model_dump()
 
     if order.price is None or order.price == "0":
         # Calculate average price from executed values

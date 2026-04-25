@@ -10,6 +10,7 @@ from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
+from models.signal_snapshot import SignalSnapshot
 from api_builders.factory import get_adapter
 from cache.regime_filter import get_regime_filter
 from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
@@ -203,7 +204,7 @@ class SignalGenerator:
 
         # 4. TREND FILTER (Higher Timeframe - ONLY for trend_following)
         if self.profile.use_trend_filter:
-            trend_check, trend_reason, trend_indicators = self._check_trend(symbol, self.trend_timeframe)
+            trend_check, trend_reason = self._check_trend(symbol, self.trend_timeframe)
             indicators['trend'] = trend_check
 
             if not trend_check:
@@ -236,7 +237,7 @@ class SignalGenerator:
 
         # 5. ENTRY FILTER (Execution Timeframe)
         if self.use_entry_filter:
-            entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
+            entry_check, entry_reason = self._check_entry_filter(symbol, self.entry_timeframe)
             indicators['entry_filter'] = entry_check
 
             if not entry_check:
@@ -364,20 +365,18 @@ class SignalGenerator:
 
         # Build flat indicator snapshot (in-memory lookups, no recalculation)
         snapshot_trend = self.trend_cache.get(symbol, self.entry_timeframe)
-        ema_slope, ema_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
+        ema20_slope, ema20_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
         rsi_delta, rsi_dir = self.trend_cache._get_rsi_momentum(symbol, self.entry_timeframe)
-        signal_snapshot = {
-            "rsi": round(float(snapshot_trend.rsi), 1) if snapshot_trend else None,
-            "rsi_direction": rsi_dir,
-            "rsi_delta": round(rsi_delta, 2) if rsi_delta is not None else None,
-            "ema_slope": round(ema_slope, 4) if ema_slope is not None else None,
-            "ema_direction": ema_dir,
-            "volume_ratio": round(float(snapshot_trend.volume_ratio), 2) if snapshot_trend and snapshot_trend.volume_ratio else None,
-            "adx": round(float(snapshot_trend.adx), 1) if snapshot_trend and snapshot_trend.adx else None,
-            "bb_pct_b": round(pct_b, 3) if pct_b is not None else None,
-            "price": float(snapshot_trend.price) if snapshot_trend else None,
-            "score": round(confidence_pct, 1),
-        }
+        signal_snapshot = SignalSnapshot.build(
+            trend=snapshot_trend,
+            timeframe=self.entry_timeframe,
+            ema20_slope=ema20_slope,
+            ema20_dir=ema20_dir,
+            rsi_delta=rsi_delta,
+            rsi_dir=rsi_dir,
+            pct_b=pct_b,
+            score=confidence_pct,
+        )
 
         signal = TradingSignal(
             symbol=symbol,
@@ -456,7 +455,7 @@ class SignalGenerator:
         rules_would_enter = False
         if self.use_entry_filter:
             try:
-                entry_check, entry_reason, entry_indicators = self._check_entry_filter(symbol, self.entry_timeframe)
+                entry_check, entry_reason = self._check_entry_filter(symbol, self.entry_timeframe)
                 rules_would_enter = entry_check
                 indicators['entry_filter'] = entry_check
 
@@ -612,20 +611,18 @@ class SignalGenerator:
         trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
 
         snapshot_trend = self.trend_cache.get(symbol, self.entry_timeframe)
-        ema_slope, ema_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
+        ema20_slope, ema20_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
         rsi_delta, rsi_dir = self.trend_cache._get_rsi_momentum(symbol, self.entry_timeframe)
-        signal_snapshot = {
-            "rsi": round(float(snapshot_trend.rsi), 1) if snapshot_trend else None,
-            "rsi_direction": rsi_dir,
-            "rsi_delta": round(rsi_delta, 2) if rsi_delta is not None else None,
-            "ema_slope": round(ema_slope, 4) if ema_slope is not None else None,
-            "ema_direction": ema_dir,
-            "volume_ratio": round(float(snapshot_trend.volume_ratio), 2) if snapshot_trend and snapshot_trend.volume_ratio else None,
-            "adx": round(float(snapshot_trend.adx), 1) if snapshot_trend and snapshot_trend.adx else None,
-            "bb_pct_b": round(pct_b, 3) if pct_b is not None else None,
-            "price": float(snapshot_trend.price) if snapshot_trend else None,
-            "score": round(confidence_pct, 1),
-        }
+        signal_snapshot = SignalSnapshot.build(
+            trend=snapshot_trend,
+            timeframe=self.entry_timeframe,
+            ema20_slope=ema20_slope,
+            ema20_dir=ema20_dir,
+            rsi_delta=rsi_delta,
+            rsi_dir=rsi_dir,
+            pct_b=pct_b,
+            score=confidence_pct,
+        )
 
         signal = TradingSignal(
             symbol=symbol,
@@ -658,34 +655,27 @@ class SignalGenerator:
         indicators_config = getattr(self.profile, 'trend_indicators', None)
         min_required = getattr(self.profile, 'min_indicators_required', 2)
 
-        is_bullish, reason, indicator_results = self.trend_cache.is_bullish(
+        return self.trend_cache.is_bullish(
             symbol=symbol,
             timeframe=timeframe,
             indicators_config=indicators_config,
             min_indicators_required=min_required,
-            return_structured=True
         )
 
-        return is_bullish, reason, indicator_results
-
-    def _check_entry_filter(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
+    def _check_entry_filter(self, symbol: str, timeframe: str) -> Tuple[bool, str]:
         """Check entry conditions using YAML-configured entry_indicators"""
         indicators_config = getattr(self.profile, 'entry_indicators', None)
         min_required = getattr(self.profile, 'min_entry_indicators_required', 2)
-        
+
         if indicators_config is None:
-            # No entry filter configured - pass
-            return False, "No entry filter configured", None
-        
-        is_bullish, reason, indicator_results = self.trend_cache.is_bullish(
+            return False, "No entry filter configured"
+
+        return self.trend_cache.is_bullish(
             symbol=symbol,
             timeframe=timeframe,
             indicators_config=indicators_config,
             min_indicators_required=min_required,
-            return_structured=True
         )
-        
-        return is_bullish, reason, indicator_results
 
     def _check_volume(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Check volume confirmation"""

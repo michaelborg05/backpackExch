@@ -19,6 +19,7 @@ from cache.market_info_cache import get_market_info_cache
 from models.balance import BalanceReader
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal
+from models.signal_snapshot import SignalSnapshot
 from models.trade import OrderResponse
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
@@ -705,19 +706,17 @@ class MonitoringService:
             _tc = get_trend_cache()
             _tf = getattr(profile, 'entry_timeframe', getattr(profile, 'signal_timeframe', '15'))
             _t = _tc.get(symbol, _tf)
-            _ema_slope, _ema_dir = _tc._get_ema_slope(symbol, _tf)
+            _ema20_slope, _ema20_dir = _tc._get_ema_slope(symbol, _tf)
             _rsi_delta, _rsi_dir = _tc._get_rsi_momentum(symbol, _tf)
-            close_snapshot = {
-                "rsi": round(float(_t.rsi), 1) if _t else None,
-                "rsi_direction": _rsi_dir,
-                "rsi_delta": round(_rsi_delta, 2) if _rsi_delta is not None else None,
-                "ema_slope": round(_ema_slope, 4) if _ema_slope is not None else None,
-                "ema_direction": _ema_dir,
-                "volume_ratio": round(float(_t.volume_ratio), 2) if _t and _t.volume_ratio else None,
-                "adx": round(float(_t.adx), 1) if _t and _t.adx else None,
-                "bb_pct_b": round(_t.bb_pct_b, 3) if _t and _t.bb_pct_b is not None else None,
-                "price": float(_t.price) if _t else None,
-            }
+            close_snapshot = SignalSnapshot.build(
+                trend=_t,
+                timeframe=_tf,
+                ema20_slope=_ema20_slope,
+                ema20_dir=_ema20_dir,
+                rsi_delta=_rsi_delta,
+                rsi_dir=_rsi_dir,
+                pct_b=_t.bb_pct_b if _t else None,
+            )
 
             close_kwargs = dict(
                 symbol=symbol,

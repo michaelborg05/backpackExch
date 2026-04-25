@@ -1,24 +1,23 @@
-"""19.trade_signal_snapshot
+"""19.trade_signal_snapshot.py
 
-Replace trades.reason_summary with signal_snapshot JSON column.
-Drop trade_validation_results table entirely.
-
-Revision ID: a1b2c3d4e5f6
+Revision ID: fa6a968f35dd
 Revises: fef960dbb682
-Create Date: 2026-04-23
+Create Date: 2026-04-24 19:02:24.676060
 
 """
 from typing import Sequence, Union
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 
-revision: str = 'a1b2c3d4e5f6'
+# revision identifiers, used by Alembic.
+revision: str = 'fa6a968f35dd'
 down_revision: Union[str, Sequence[str], None] = 'fef960dbb682'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
 
 
 def upgrade() -> None:

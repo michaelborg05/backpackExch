@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List, Dict
 from utils.constants import TradeReason
+from models.signal_snapshot import SignalSnapshot
 
 class SignalStrength(Enum):
     """Signal confidence levels"""
@@ -24,7 +25,7 @@ class TradingSignal:
     trend_timeframe: str
     regime_confidence: str
     # Optional fields with defaults must come last
-    signal_snapshot: Optional[Dict] = None  # Flat indicator snapshot stored in trades DB
+    signal_snapshot: Optional[SignalSnapshot] = None
     position_size_scalar: float = 1.0       # BB position scalar (1.0 = full size)
 
     def to_dict(self) -> dict:

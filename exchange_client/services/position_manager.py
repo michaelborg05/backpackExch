@@ -135,7 +135,6 @@ class PositionManager:
                 timeframe=indicator_timeframe,
                 indicators_config=indicators_config,
                 min_indicators_required=min_required,
-                return_structured=False,
                 use_hard_stops=False    #For trend invalidation, want to check all indicators, not reject on 1 failure
             )
 
