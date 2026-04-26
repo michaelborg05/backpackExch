@@ -198,6 +198,22 @@ class SettingsHelper:
         """interval between performing health/alert checks """
         return self._get_int('alert_healthcheck_interval', 60)
 
+    # Data retention
+    @property
+    def retention_trans_history_days(self) -> int:
+        """Days to retain orders, positions, trades, and ai_signal_log"""
+        return self._get_int('retention_trans_history_days', 90)
+
+    @property
+    def retention_trenddata_history_days(self) -> int:
+        """Days to retain trend_analysis_log"""
+        return self._get_int('retention_trenddata_history_days', 90)
+
+    @property
+    def retention_audit_history_days(self) -> int:
+        """Days to retain circuit_breaker_events, config_audit_log, daily_balance_snapshots"""
+        return self._get_int('retention_audit_history_days', 28)
+
     def get_custom(self, setting_name: str, default: Any = None) -> Any:
         """
         Get a custom setting not covered by properties

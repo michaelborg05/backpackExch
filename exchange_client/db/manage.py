@@ -1031,10 +1031,15 @@ def populate_default_settings():
                 'alert_re_alert_cooldown': '900',   # time between raising the same alert
                 'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
                 'profile_refresh_interval': '30',      # how many cycles to refresh profile from db - 30 x 30 seconds = 10 mins
+                # Data retention (days)
+                'retention_trans_history_days': '90',   # orders, positions, trades, ai_signal_log
+                'retention_trenddata_history_days': '90', # trend_analysis_log
+                'retention_audit_history_days': '28',          # circuit_breaker_events, config_audit_log, daily_balance_snapshots
             }
             new_settings = {
-                'profile_refresh_interval': '30',
-
+                'retention_trans_history_days': '90',
+                'retention_trenddata_history_days': '90',
+                'retention_audit_history_days': '28',
             }
             created = initialize_default_settings(db, default_settings=new_settings)
             

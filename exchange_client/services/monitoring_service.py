@@ -91,6 +91,9 @@ class MonitoringService:
         self._trend_invalidation_counter = 0
         self.position_validation_counter = 0
         self._profile_refresh_counter = 0
+        self._retention_check_counter = 0
+        from datetime import datetime, timezone
+        self._last_retention_date = datetime.now(timezone.utc).date()
 
     @property
     def tickers(self) -> list:
@@ -147,8 +150,12 @@ class MonitoringService:
                 self._signal_check_counter += 1
                 self._trend_invalidation_counter += 1
                 self._profile_refresh_counter += 1
+                self._retention_check_counter += 1
                 self.logger.debug(f"Beginning loop #{self.call_count}")
 
+                if self._retention_check_counter >= 20:
+                    self._maybe_run_retention()
+                    self._retention_check_counter = 0
                     
                 # Monitor prices for all tickers
                 self._monitor_prices()
@@ -999,6 +1006,25 @@ class MonitoringService:
                 MessagePriority.HIGH
             )
 
+
+    def _maybe_run_retention(self):
+        """Run data retention once per UTC day when the date ticks over."""
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date()
+
+        if self._last_retention_date == today:
+            return
+
+        self.logger.info(f"UTC day rolled over ({today}), running retention policies...")
+        try:
+            from services.retention_service import get_retention_service
+            results = get_retention_service().run()
+            self._last_retention_date = today
+            if results:
+                total = sum(results.values())
+                self.logger.info(f"Retention complete: {total} rows removed across all tables")
+        except Exception as e:
+            self.logger.error(f"Retention run failed: {e}", exc_info=True)
 
     def _check_signals(self):
         """
