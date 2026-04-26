@@ -535,7 +535,7 @@ class CircuitBreakerService:
                         profile_name=profile_name,
                         account_id=account_id,
                         reason=reason,
-                        trigger_value_pct=cb_pnl_pct,
+                        trigger_value_pct=drawdown_pnl_pct,
                         balance_at_trigger=current_value,
                         daily_start_balance=cb_baseline,
                         lock_hours=config.loss_lock_hours,
@@ -756,6 +756,10 @@ class CircuitBreakerService:
             cb_pnl = current_value - cb_baseline
             cb_pnl_pct = (cb_pnl / cb_baseline) * 100
 
+            highest = snapshot.highest_balance or snapshot.starting_balance
+            drawdown_pnl = current_value - highest
+            drawdown_pnl_pct = (drawdown_pnl / highest) * 100
+
             now_utc = datetime.now(timezone.utc)
             next_midnight = datetime.combine(
                 now_utc.date() + timedelta(days=1),
@@ -767,6 +771,7 @@ class CircuitBreakerService:
         else:
             daily_pnl = daily_pnl_pct = None
             cb_pnl_pct = cb_baseline = hours_until_reset = None
+            drawdown_pnl_pct = highest = None
 
         hours_remaining = (
             (
@@ -787,6 +792,9 @@ class CircuitBreakerService:
                 str(cb_baseline)
                 if cb_baseline else "Same as daily start"
             ),
+            "highest_balance":          (
+                str(highest) if highest is not None else "N/A"
+            ),
             "current_balance":          str(current_value),
             "daily_pnl":                (
                 str(daily_pnl) if daily_pnl is not None else "N/A"
@@ -799,6 +807,10 @@ class CircuitBreakerService:
                 f"{cb_pnl_pct:+.2f}%"
                 if cb_pnl_pct is not None else "N/A"
             ),
+            "drawdown_pnl_pct":         (
+                f"{drawdown_pnl_pct:+.2f}%"
+                if drawdown_pnl_pct is not None else "N/A"
+            ),
             "hours_until_reset":        (
                 round(hours_until_reset, 1)
                 if hours_until_reset else "N/A"
@@ -810,6 +822,7 @@ class CircuitBreakerService:
                 f"-{config.max_daily_loss_pct}%" if config else "N/A"
             ),
             "circuit_breaker_active":   active_event is not None,
+            "event_reason":             active_event.reason if active_event else None,
             "hours_remaining":          (
                 round(hours_remaining, 2)
                 if hours_remaining else "N/A"

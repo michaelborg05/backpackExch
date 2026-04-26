@@ -446,8 +446,13 @@
           <!-- ── CIRCUIT BREAKER TAB ────────────────────────────────────── -->
           <div class="tab-panel" id="tab-cb">
             <div id="cb-active-banner" style="display:none" class="active-breaker-banner">
-              <div class="ab-label">⚡ Circuit Breaker Active</div>
-              <div class="ab-text" id="cb-active-text">—</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                <div>
+                  <div class="ab-label">⚡ Circuit Breaker Active</div>
+                  <div class="ab-text" id="cb-active-text">—</div>
+                </div>
+                <button onclick="resetCB()" style="background:var(--red,#c0392b);color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;flex-shrink:0">Reset CB</button>
+              </div>
             </div>
             <div class="form-section">
               <div class="section-title">Daily Limits</div>
@@ -1743,20 +1748,33 @@ async function loadCBSummary(profileName) {
     const s = await api('/circuit-breaker/daily-summary/' + profileName);
     if (s?.circuit_breaker_active) {
       banner.style.display = 'block';
+      const drawdown = s.drawdown_pnl_pct ?? '—';
+      const reason = s.event_reason ? s.event_reason.split(':')[0] : '';
       document.getElementById('cb-active-text').textContent =
-        `${s.daily_pnl_pct ?? '—'}  ·  ${s.hours_remaining}h remaining`;
+        `${reason ? reason + '  ·  ' : ''}Drawdown: ${drawdown}  ·  ${s.hours_remaining}h remaining`;
     } else {
       banner.style.display = 'none';
     }
     sumEl.innerHTML = s ? `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-width:700px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-width:860px">
         ${cbStat('Day P&L', s.daily_pnl_pct, s.daily_pnl)}
         ${cbStat('CB P&L', s.cb_pnl_pct)}
+        ${cbStat('Drawdown', s.drawdown_pnl_pct)}
+        ${cbStat('High Water', s.highest_balance)}
         ${cbStat('Start Balance', s.daily_start_balance)}
         ${cbStat('Current', s.current_balance)}
         ${cbStat('Reset In', s.hours_until_reset + 'h')}
       </div>` : '';
   } catch { banner.style.display = 'none'; }
+}
+
+async function resetCB() {
+  if (!_currentProfile) return;
+  if (!confirm('Reset circuit breaker for ' + _currentProfile.name + '?\nThis will deactivate the lock and reset the CB baseline.')) return;
+  const r = await api('/circuit-breaker/reset/' + _currentProfile.name, { method: 'POST' });
+  if (r) {
+    loadCBSummary(_currentProfile.name);
+  }
 }
 
 function cbStat(label, val, sub) {
