@@ -2,6 +2,7 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from typing import Optional
 from contextlib import asynccontextmanager
 from models.webhook import TradingViewAlert, WebhookResponse
@@ -925,12 +926,15 @@ async def get_user_open_positions(
             positions = get_open_positions(db, profile_name)
             for pos in positions:
                 raw_mark = price_cache.get_price(pos.symbol)
+                direction = (pos.direction or "LONG").upper()
+                is_short = direction == "SHORT"
                 try:
                     mark = float(raw_mark) if raw_mark is not None else None
                     entry = float(pos.entry_price)
                     qty = float(pos.remaining_quantity or pos.quantity)
-                    unrealised_pnl = round((mark - entry) * qty, 4) if mark is not None else None
-                    pnl_pct = round(((mark - entry) / entry) * 100, 3) if mark and entry else None
+                    price_diff = (entry - mark) if is_short else (mark - entry)
+                    unrealised_pnl = round(price_diff * qty, 4) if mark is not None else None
+                    pnl_pct = round((price_diff / entry) * 100, 3) if mark and entry else None
                 except (TypeError, ValueError, ZeroDivisionError):
                     mark = None
                     unrealised_pnl = None
@@ -939,7 +943,7 @@ async def get_user_open_positions(
                 result.append({
                     "profile_name":       profile_name,
                     "symbol":             pos.symbol,
-                    "side":               "long",
+                    "side":               direction.lower(),
                     "quantity":           str(pos.remaining_quantity or pos.quantity),
                     "entry_price":        str(pos.entry_price),
                     "mark_price":         mark,
@@ -3300,6 +3304,221 @@ async def get_audit_log(
         apiserver_logger.error(f"Error querying audit log: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
  
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin — Log Level
+# ══════════════════════════════════════════════════════════════════════════════
+
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+class LogLevelRequest(BaseModel):
+    level: str
+
+@app.get("/admin/log-level", dependencies=[Depends(require_admin_permission)])
+async def admin_get_log_level():
+    import logging
+    root = logging.getLogger()
+    return {"level": logging.getLevelName(root.level)}
+
+@app.put("/admin/log-level", dependencies=[Depends(require_admin_permission)])
+async def admin_set_log_level(body: LogLevelRequest):
+    import logging
+    level = body.level.upper()
+    if level not in _VALID_LOG_LEVELS:
+        raise HTTPException(status_code=400, detail=f"Invalid level '{level}'. Valid: {sorted(_VALID_LOG_LEVELS)}")
+    logging.getLogger().setLevel(level)
+    apiserver_logger.info(f"Log level changed to {level} via admin API")
+    return {"level": level}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin — Force Signal Scan (all profiles)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/admin/signals/scan-all", dependencies=[Depends(require_admin_permission)])
+async def admin_scan_all_profiles():
+    """Run signal scan across every active profile. Read-only — no trades executed."""
+    from db.crud import get_active_symbols
+    from db.utils import get_db_session
+    from services.signal_generator import get_signal_generator
+
+    pm = get_profile_manager()
+    if pm is None:
+        raise HTTPException(status_code=503, detail="ProfileManager not initialised")
+
+    profiles = pm.get_all_profiles()
+    if not profiles:
+        raise HTTPException(status_code=503, detail="No active profiles loaded")
+
+    with get_db_session() as db:
+        db_tickers = get_active_symbols(db)
+    symbols = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "BTC_USDC"]
+
+    results = []
+    for profile in profiles:
+        try:
+            sg = get_signal_generator(profile)
+            signals = sg.scan_symbols(symbols)
+            results.append({
+                "profile": profile.name,
+                "symbols_scanned": len(symbols),
+                "signals_found": len(signals),
+                "signals": [s.to_dict() for s in signals],
+                "error": None,
+            })
+        except Exception as e:
+            results.append({
+                "profile": profile.name,
+                "symbols_scanned": 0,
+                "signals_found": 0,
+                "signals": [],
+                "error": str(e),
+            })
+
+    return {
+        "profiles_scanned": len(results),
+        "symbols": symbols,
+        "results": results,
+    }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin — Settings Management
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SettingUpsertRequest(BaseModel):
+    value: str
+
+@app.get("/admin/settings", dependencies=[Depends(require_admin_permission)])
+async def admin_get_settings():
+    """Return all settings rows grouped by profile_name."""
+    from db.crud_settings import get_all_settings
+    from db.utils import get_db_session
+    try:
+        with get_db_session() as db:
+            rows = get_all_settings(db)
+        result = {}
+        for r in rows:
+            result.setdefault(r.profile_name, []).append({
+                "setting_name": r.setting_name,
+                "value": r.value,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/admin/settings/{profile_name}/{setting_name}", dependencies=[Depends(require_admin_permission)])
+async def admin_upsert_setting(profile_name: str, setting_name: str, body: SettingUpsertRequest):
+    """Create or update a setting, then immediately refresh the settings cache."""
+    from db.crud_settings import update_setting
+    from db.utils import get_db_session
+    from cache.settings_cache import get_settings_cache
+    try:
+        with get_db_session() as db:
+            update_setting(db, setting_name, body.value, profile_name)
+        sc = get_settings_cache()
+        if sc:
+            sc.refresh()
+        return {"ok": True, "profile_name": profile_name, "setting_name": setting_name, "value": body.value}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/admin/settings/{profile_name}/{setting_name}", dependencies=[Depends(require_admin_permission)])
+async def admin_delete_setting(profile_name: str, setting_name: str):
+    """Delete a setting and refresh the settings cache."""
+    from db.crud_settings import delete_setting
+    from db.utils import get_db_session
+    from cache.settings_cache import get_settings_cache
+    try:
+        with get_db_session() as db:
+            deleted = delete_setting(db, setting_name, profile_name)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Setting not found")
+        sc = get_settings_cache()
+        if sc:
+            sc.refresh()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin — Cache Refresh
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CACHE_NAMES = {"settings", "profiles", "circuit_breaker", "signal_generators"}
+
+@app.post("/admin/cache/refresh/{cache_name}", dependencies=[Depends(require_admin_permission)])
+async def admin_refresh_cache(cache_name: str):
+    """Manually trigger a cache refresh. Supported: settings, profiles, circuit_breaker, signal_generators."""
+    if cache_name not in _CACHE_NAMES:
+        raise HTTPException(status_code=400, detail=f"Unknown cache '{cache_name}'. Valid: {sorted(_CACHE_NAMES)}")
+
+    try:
+        if cache_name == "settings":
+            from cache.settings_cache import get_settings_cache
+            sc = get_settings_cache()
+            if sc is None:
+                raise HTTPException(status_code=503, detail="Settings cache not initialised")
+            sc.refresh()
+            info = sc.get_cache_info()
+            return {"ok": True, "cache": cache_name, "info": info}
+
+        elif cache_name == "profiles":
+            from services.profile_manager import refresh_profiles_from_db
+            result = refresh_profiles_from_db()
+            if result.get("error"):
+                raise HTTPException(status_code=500, detail=result["error"])
+            return {
+                "ok": True,
+                "cache": cache_name,
+                "added": list(result.get("added", [])),
+                "removed": list(result.get("removed", [])),
+            }
+
+        elif cache_name == "circuit_breaker":
+            cb = get_circuit_breaker()
+            if cb is None:
+                raise HTTPException(status_code=503, detail="Circuit breaker not initialised")
+            cb.invalidate_config_cache()
+            return {"ok": True, "cache": cache_name, "detail": "Config cache cleared; will reload from DB on next access"}
+
+        elif cache_name == "signal_generators":
+            from services.signal_generator import invalidate_all_signal_generators
+            invalidate_all_signal_generators()
+            return {"ok": True, "cache": cache_name, "detail": "All signal generator caches invalidated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/cache/status", dependencies=[Depends(require_admin_permission)])
+async def admin_cache_status():
+    """Return status info for key caches."""
+    from cache.settings_cache import get_settings_cache
+    out = {}
+    sc = get_settings_cache()
+    if sc:
+        out["settings"] = sc.get_cache_info()
+
+    pm = get_profile_manager()
+    if pm:
+        out["profiles"] = {"profile_count": len(pm.get_profile_names()), "names": pm.get_profile_names()}
+
+    cb = get_circuit_breaker()
+    if cb:
+        try:
+            all_breakers = cb.get_all_breakers()
+            out["circuit_breaker"] = {"breaker_count": len(all_breakers)}
+        except Exception:
+            out["circuit_breaker"] = {"status": "unavailable"}
+
+    sgs = get_all_signal_generators()
+    out["signal_generators"] = {"count": len(sgs) if sgs else 0}
+
+    return out
+
+
 app.include_router(auth_router)
 
 # Mount static files directory

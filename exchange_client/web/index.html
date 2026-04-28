@@ -47,6 +47,7 @@
     <div class="nt" onclick="st('ai',this)">AI Monitor</div>
     <div class="nt" onclick="st('prompts',this)">AI Prompts</div>
     <div class="nt" onclick="st('auditlog',this)">Audit Log</div>
+    <div class="nt" onclick="st('system',this)">System</div>
   </nav>
   <main id="main-panels">
     <div class="panel on" id="p-overview">
@@ -648,6 +649,121 @@
       </div>
     </div>
   </div><!-- /p-profiles -->
+
+  <!-- ── System Panel ──────────────────────────────────────────────────────── -->
+  <div class="panel" id="p-system">
+
+    <!-- Cache Management -->
+    <div class="card fi" style="margin-bottom:18px">
+      <div class="ch">
+        <span class="ct">Cache Management</span>
+        <span class="cb">Manually refresh in-memory caches without a service restart</span>
+      </div>
+      <div style="padding:18px 20px">
+        <div id="sys-cache-status" style="font-size:11px;color:var(--txd);margin-bottom:14px">—</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px">
+          <button class="mbtn" onclick="sysRefreshCache('settings')">Refresh Settings Cache</button>
+          <button class="mbtn" onclick="sysRefreshCache('profiles')">Refresh Profile Cache</button>
+          <button class="mbtn" onclick="sysRefreshCache('circuit_breaker')">Refresh Circuit Breaker Cache</button>
+          <button class="mbtn" onclick="sysRefreshCache('signal_generators')">Invalidate Signal Generators</button>
+          <button class="mbtn a" onclick="sysLoadCacheStatus()">&#8635; Status</button>
+        </div>
+        <div id="sys-cache-info" style="font-size:11px;font-family:'Space Mono',monospace;color:var(--tx);white-space:pre-wrap;background:var(--bg);border:1px solid var(--brd);padding:10px 12px;display:none;border-radius:4px"></div>
+      </div>
+    </div>
+
+    <!-- Log Level Toggle -->
+    <div class="card fi" style="margin-bottom:18px">
+      <div class="ch">
+        <span class="ct">Log Level</span>
+        <span class="cb">Change runtime log verbosity — takes effect immediately, resets to config on restart</span>
+      </div>
+      <div style="padding:18px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--txd)">Current:</span>
+        <span id="sys-log-current" style="font-size:13px;font-family:'Space Mono',monospace;font-weight:700;color:var(--tx)">—</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap" id="sys-log-btns">
+          <button class="mbtn" onclick="sysSetLogLevel('DEBUG')"   style="font-size:11px">DEBUG</button>
+          <button class="mbtn" onclick="sysSetLogLevel('INFO')"    style="font-size:11px">INFO</button>
+          <button class="mbtn" onclick="sysSetLogLevel('WARNING')" style="font-size:11px">WARNING</button>
+          <button class="mbtn" onclick="sysSetLogLevel('ERROR')"   style="font-size:11px">ERROR</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Force Signal Scan -->
+    <div class="card fi" style="margin-bottom:18px">
+      <div class="ch" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span class="ct">Force Signal Scan</span>
+          <span class="cb">Run a read-only scan across all active profiles — no trades executed</span>
+        </div>
+        <button class="mbtn a" id="sys-scan-btn" onclick="sysScanAll()" style="flex-shrink:0">&#9654; Scan All Profiles</button>
+      </div>
+      <div id="sys-scan-results" style="padding:0 20px 18px;display:none">
+        <div id="sys-scan-summary" style="font-size:11px;color:var(--txd);margin-bottom:10px"></div>
+        <div id="sys-scan-body"></div>
+      </div>
+    </div>
+
+    <!-- Settings Editor -->
+    <div class="card fi">
+      <div class="ch" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span class="ct">Settings Table</span>
+          <span class="cb">Edit application settings — changes refresh the settings cache immediately</span>
+        </div>
+        <button class="mbtn a" onclick="sysLoadSettings()" style="flex-shrink:0">&#8635; Reload</button>
+      </div>
+      <div style="padding:18px 20px">
+
+        <!-- Filter + Add row -->
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <select id="sys-profile-filter" onchange="sysFilterSettings()" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace">
+            <option value="">All profiles</option>
+          </select>
+          <input id="sys-search" type="text" placeholder="Search name…" oninput="sysFilterSettings()" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:160px">
+          <button class="mbtn a" onclick="sysOpenAddSetting()">+ Add Setting</button>
+        </div>
+
+        <!-- Add/Edit form (hidden by default) -->
+        <div id="sys-edit-form" style="display:none;background:var(--bg2,var(--bg));border:1px solid var(--brd);padding:14px 16px;border-radius:4px;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:700;color:var(--txd);letter-spacing:.1em;margin-bottom:10px" id="sys-form-title">ADD SETTING</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:10px;color:var(--txd)">PROFILE (0 = global)</label>
+              <input id="sys-form-profile" type="text" value="0" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:120px">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:10px;color:var(--txd)">SETTING NAME</label>
+              <input id="sys-form-name" type="text" placeholder="e.g. cooldown_seconds" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:200px">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:10px;color:var(--txd)">VALUE</label>
+              <input id="sys-form-value" type="text" placeholder="value" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:180px">
+            </div>
+            <button class="mbtn a" onclick="sysSaveSetting()">Save</button>
+            <button class="mbtn" onclick="document.getElementById('sys-edit-form').style.display='none'">Cancel</button>
+          </div>
+          <div id="sys-form-err" style="color:#e55;font-size:11px;margin-top:8px"></div>
+        </div>
+
+        <div id="sys-settings-msg" style="font-size:11px;color:var(--txd);margin-bottom:8px"></div>
+        <div style="overflow-x:auto">
+          <table class="tbl" id="sys-settings-tbl" style="width:100%">
+            <thead><tr>
+              <th>Profile</th>
+              <th>Setting</th>
+              <th>Value</th>
+              <th>Updated</th>
+              <th style="width:90px"></th>
+            </tr></thead>
+            <tbody id="sys-settings-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /p-system -->
 
   </main>
 
@@ -2494,8 +2610,270 @@ document.addEventListener('DOMContentLoaded', () => {
     const onclick = nt.getAttribute('onclick') || '';
     if (onclick.includes("'prompts'"))  setTimeout(loadPrompts,   50);
     if (onclick.includes("'auditlog'")) setTimeout(loadAuditLog,  50);
+    if (onclick.includes("'system'"))   setTimeout(sysInit,       50);
   });
 });
+
+// ── System Panel ─────────────────────────────────────────────────────────────
+
+let _sysAllSettings = {};  // {profile_name: [{setting_name, value, updated_at}]}
+
+async function sysInit() {
+  await Promise.all([sysLoadSettings(), sysLoadCacheStatus(), sysLoadLogLevel()]);
+}
+
+async function sysLoadSettings() {
+  document.getElementById('sys-settings-msg').textContent = 'Loading…';
+  try {
+    const data = await api('/admin/settings');
+    _sysAllSettings = data;
+    // Rebuild profile filter
+    const sel = document.getElementById('sys-profile-filter');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">All profiles</option>';
+    Object.keys(data).sort().forEach(p => {
+      const o = document.createElement('option');
+      o.value = p; o.textContent = p === '0' ? '0 (global)' : p;
+      sel.appendChild(o);
+    });
+    if (prev) sel.value = prev;
+    document.getElementById('sys-settings-msg').textContent = '';
+    sysFilterSettings();
+  } catch(e) {
+    document.getElementById('sys-settings-msg').textContent = 'Error: ' + e.message;
+  }
+}
+
+function sysFilterSettings() {
+  const profileFilter = document.getElementById('sys-profile-filter').value;
+  const search = document.getElementById('sys-search').value.toLowerCase();
+  const tbody = document.getElementById('sys-settings-body');
+  tbody.innerHTML = '';
+
+  let rows = [];
+  Object.entries(_sysAllSettings).forEach(([profile, settings]) => {
+    if (profileFilter && profile !== profileFilter) return;
+    settings.forEach(s => {
+      if (search && !s.setting_name.toLowerCase().includes(search)) return;
+      rows.push({profile, ...s});
+    });
+  });
+
+  rows.sort((a,b) => a.profile.localeCompare(b.profile) || a.setting_name.localeCompare(b.setting_name));
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--txd);text-align:center;padding:16px">No settings found</td></tr>';
+    return;
+  }
+
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-size:11px;color:var(--txd)">${escHtml(r.profile === '0' ? '0 (global)' : r.profile)}</td>
+      <td style="font-size:11px;font-family:'Space Mono',monospace">${escHtml(r.setting_name)}</td>
+      <td><input class="sys-val-inp" data-profile="${escHtml(r.profile)}" data-name="${escHtml(r.setting_name)}"
+           value="${escHtml(r.value)}"
+           style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:3px 6px;font-size:11px;font-family:'Space Mono',monospace;width:100%;min-width:120px"></td>
+      <td style="font-size:10px;color:var(--txd)">${r.updated_at ? r.updated_at.replace('T',' ').slice(0,19) : '—'}</td>
+      <td style="display:flex;gap:6px">
+        <button class="mbtn a" style="padding:3px 8px;font-size:10px" onclick="sysSaveRow(this,'${escHtml(r.profile)}','${escHtml(r.setting_name)}')">Save</button>
+        <button class="mbtn dng" style="padding:3px 8px;font-size:10px" onclick="sysDeleteRow('${escHtml(r.profile)}','${escHtml(r.setting_name)}')">Del</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function sysSaveRow(btn, profile, name) {
+  const row = btn.closest('tr');
+  const inp = row.querySelector('.sys-val-inp');
+  const value = inp.value;
+  try {
+    btn.disabled = true; btn.textContent = '…';
+    await api(`/admin/settings/${encodeURIComponent(profile)}/${encodeURIComponent(name)}`, {
+      method: 'PUT', body: JSON.stringify({value})
+    });
+    showToast(`Saved ${name}`);
+    await sysLoadSettings();
+  } catch(e) {
+    showToast('Error: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function sysDeleteRow(profile, name) {
+  if (!confirm(`Delete setting "${name}" (profile: ${profile})?`)) return;
+  try {
+    await api(`/admin/settings/${encodeURIComponent(profile)}/${encodeURIComponent(name)}`, {method:'DELETE'});
+    showToast(`Deleted ${name}`);
+    await sysLoadSettings();
+  } catch(e) {
+    showToast('Error: ' + e.message, true);
+  }
+}
+
+function sysOpenAddSetting() {
+  const form = document.getElementById('sys-edit-form');
+  document.getElementById('sys-form-title').textContent = 'ADD SETTING';
+  document.getElementById('sys-form-profile').value = document.getElementById('sys-profile-filter').value || '0';
+  document.getElementById('sys-form-name').value = '';
+  document.getElementById('sys-form-value').value = '';
+  document.getElementById('sys-form-err').textContent = '';
+  document.getElementById('sys-form-profile').disabled = false;
+  document.getElementById('sys-form-name').disabled = false;
+  form.style.display = '';
+}
+
+async function sysSaveSetting() {
+  const profile = document.getElementById('sys-form-profile').value.trim() || '0';
+  const name    = document.getElementById('sys-form-name').value.trim();
+  const value   = document.getElementById('sys-form-value').value;
+  const errEl   = document.getElementById('sys-form-err');
+  if (!name) { errEl.textContent = 'Setting name is required'; return; }
+  errEl.textContent = '';
+  try {
+    await api(`/admin/settings/${encodeURIComponent(profile)}/${encodeURIComponent(name)}`, {
+      method: 'PUT', body: JSON.stringify({value})
+    });
+    showToast(`Saved ${name}`);
+    document.getElementById('sys-edit-form').style.display = 'none';
+    await sysLoadSettings();
+  } catch(e) {
+    errEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function sysRefreshCache(name) {
+  const statusEl = document.getElementById('sys-cache-status');
+  statusEl.textContent = `Refreshing ${name}…`;
+  try {
+    const data = await api(`/admin/cache/refresh/${name}`, {method:'POST'});
+    showToast(`${name} cache refreshed`);
+    statusEl.textContent = `✓ ${name} refreshed — ${new Date().toISOString().slice(11,19)} UTC`;
+    if (name === 'settings') await sysLoadSettings();
+    await sysLoadCacheStatus();
+  } catch(e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    showToast('Error: ' + e.message, true);
+  }
+}
+
+async function sysLoadCacheStatus() {
+  try {
+    const data = await api('/admin/cache/status');
+    const infoEl = document.getElementById('sys-cache-info');
+    infoEl.style.display = '';
+    infoEl.textContent = JSON.stringify(data, null, 2);
+  } catch(e) {
+    // non-critical
+  }
+}
+
+// ── Log Level ─────────────────────────────────────────────────────────────────
+
+const _LOG_COLORS = {DEBUG:'#888', INFO:'#4af', WARNING:'#fa4', ERROR:'#e55', CRITICAL:'#e55'};
+
+async function sysLoadLogLevel() {
+  try {
+    const data = await api('/admin/log-level');
+    if (data) _sysRenderLogLevel(data.level);
+  } catch(e) { /* non-critical */ }
+}
+
+function _sysRenderLogLevel(level) {
+  const el = document.getElementById('sys-log-current');
+  el.textContent = level;
+  el.style.color = _LOG_COLORS[level] || 'var(--tx)';
+  document.querySelectorAll('#sys-log-btns .mbtn').forEach(btn => {
+    btn.classList.toggle('a', btn.textContent === level);
+  });
+}
+
+async function sysSetLogLevel(level) {
+  try {
+    const data = await api('/admin/log-level', {
+      method: 'PUT', body: JSON.stringify({level})
+    });
+    if (!data) { showToast('Request failed — check console', true); return; }
+    _sysRenderLogLevel(data.level);
+    showToast(`Log level set to ${data.level}`);
+  } catch(e) {
+    showToast('Error: ' + e.message, true);
+  }
+}
+
+// ── Force Signal Scan ─────────────────────────────────────────────────────────
+
+async function sysScanAll() {
+  const btn = document.getElementById('sys-scan-btn');
+  const resultsEl = document.getElementById('sys-scan-results');
+  const summaryEl = document.getElementById('sys-scan-summary');
+  const bodyEl    = document.getElementById('sys-scan-body');
+
+  btn.disabled = true; btn.textContent = '⏳ Scanning…';
+  resultsEl.style.display = '';
+  summaryEl.textContent = 'Running scan…';
+  bodyEl.innerHTML = '';
+
+  try {
+    const data = await api('/admin/signals/scan-all', {method:'POST'});
+    const totalSignals = data.results.reduce((s,r) => s + r.signals_found, 0);
+    summaryEl.textContent =
+      `${data.profiles_scanned} profiles · ${data.symbols.length} symbols · ${totalSignals} signal(s) found`;
+
+    data.results.forEach(r => {
+      const section = document.createElement('div');
+      section.style.cssText = 'margin-bottom:12px;border:1px solid var(--brd);border-radius:4px;overflow:hidden';
+
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;justify-content:space-between;padding:8px 12px;background:var(--bg2,var(--bg));cursor:pointer;font-size:11px';
+      header.innerHTML = `
+        <span style="font-family:'Space Mono',monospace;font-weight:700">${escHtml(r.profile)}</span>
+        <span style="color:${r.error ? '#e55' : r.signals_found ? '#4f4' : 'var(--txd)'}">
+          ${r.error ? '✗ error' : r.signals_found ? `${r.signals_found} signal(s)` : 'no signals'}
+        </span>`;
+
+      const body = document.createElement('div');
+      body.style.cssText = 'display:none;padding:8px 12px;font-size:11px;font-family:"Space Mono",monospace';
+
+      if (r.error) {
+        body.innerHTML = `<span style="color:#e55">${escHtml(r.error)}</span>`;
+      } else if (!r.signals.length) {
+        body.innerHTML = '<span style="color:var(--txd)">No signals generated</span>';
+      } else {
+        body.innerHTML = r.signals.map(s => {
+          const dir = s.direction || s.side || '';
+          const sym = s.symbol || '';
+          const conf = s.confidence != null ? ` · conf ${s.confidence}` : '';
+          return `<div style="padding:3px 0;border-bottom:1px solid var(--brd)">`+
+            `<span style="color:${dir==='LONG'?'#4f4':dir==='SHORT'?'#e55':'var(--tx)'}">${escHtml(dir||'?')}</span> `+
+            `${escHtml(sym)}${escHtml(conf)}</div>`;
+        }).join('');
+      }
+
+      header.addEventListener('click', () => {
+        body.style.display = body.style.display === 'none' ? '' : 'none';
+      });
+
+      // auto-expand if signals or error
+      if (r.signals_found || r.error) body.style.display = '';
+
+      section.appendChild(header);
+      section.appendChild(body);
+      bodyEl.appendChild(section);
+    });
+  } catch(e) {
+    summaryEl.textContent = 'Error: ' + e.message;
+    summaryEl.style.color = '#e55';
+    showToast('Scan failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '▶ Scan All Profiles';
+  }
+}
 </script>
 </body>
 </html>
