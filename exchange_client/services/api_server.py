@@ -3519,6 +3519,19 @@ async def admin_cache_status():
     return out
 
 
+@app.post("/admin/dust/convert", dependencies=[Depends(require_admin_permission)])
+async def admin_convert_dust():
+    """Manually trigger dust conversion for all active Backpack accounts."""
+    service = get_monitoring_service()
+    if service is None:
+        raise HTTPException(status_code=503, detail="Monitoring service not initialised")
+    try:
+        service._convert_dust()
+        return {"ok": True, "detail": "Dust conversion triggered"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 app.include_router(auth_router)
 
 # Mount static files directory

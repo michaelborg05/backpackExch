@@ -667,6 +667,7 @@
           <button class="mbtn" onclick="sysRefreshCache('circuit_breaker')">Refresh Circuit Breaker Cache</button>
           <button class="mbtn" onclick="sysRefreshCache('signal_generators')">Invalidate Signal Generators</button>
           <button class="mbtn a" onclick="sysLoadCacheStatus()">&#8635; Status</button>
+          <button class="mbtn" onclick="sysConvertDust()" style="border-color:#f59e0b;color:#f59e0b">&#10022; Convert Dust</button>
         </div>
         <div id="sys-cache-info" style="font-size:11px;font-family:'Space Mono',monospace;color:var(--tx);white-space:pre-wrap;background:var(--bg);border:1px solid var(--brd);padding:10px 12px;display:none;border-radius:4px"></div>
       </div>
@@ -2770,6 +2771,19 @@ async function sysLoadCacheStatus() {
     infoEl.textContent = JSON.stringify(data, null, 2);
   } catch(e) {
     // non-critical
+  }
+}
+
+async function sysConvertDust() {
+  const statusEl = document.getElementById('sys-cache-status');
+  statusEl.textContent = 'Triggering dust conversion…';
+  try {
+    await api('/admin/dust/convert', {method:'POST'});
+    showToast('Dust conversion triggered');
+    statusEl.textContent = `✓ Dust conversion triggered — ${new Date().toISOString().slice(11,19)} UTC`;
+  } catch(e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    showToast('Error: ' + e.message, true);
   }
 }
 
