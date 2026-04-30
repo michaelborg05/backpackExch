@@ -1689,7 +1689,6 @@ def _ind_profile_or_404(db, profile_name: str):
     from db.models import TradingProfileDB
     prof = db.query(TradingProfileDB).filter(
         TradingProfileDB.name == profile_name,
-        TradingProfileDB.is_active == True
     ).first()
     if not prof:
         raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
@@ -3064,6 +3063,38 @@ async def deactivate_profile_endpoint(profile_name: str):
         refresh_profiles_from_db()
 
         return {"message": f"Profile '{profile_name}' deactivated"}
+
+
+# ---------------------------------------------------------------------------
+# POST /profiles/{profile_name}/activate  — re-activate a deactivated profile
+# ---------------------------------------------------------------------------
+@app.post("/profiles/{profile_name}/activate", dependencies=[Depends(require_admin_permission)])
+async def activate_profile_endpoint(profile_name: str):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB
+    from services.audit import write_audit
+    from services.profile_manager import refresh_profiles_from_db
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+        if p.is_active:
+            return {"message": f"Profile '{profile_name}' is already active"}
+
+        before = {"is_active": p.is_active}
+        p.is_active = True
+
+        write_audit(
+            db=db, type="profile", subtype="activate", action="update",
+            entity_id=p.id, entity_name=p.name,
+            before=before, after={"is_active": True},
+        )
+        db.commit()
+
+        refresh_profiles_from_db()
+
+        return {"message": f"Profile '{profile_name}' activated"}
 
 
 # ---------------------------------------------------------------------------

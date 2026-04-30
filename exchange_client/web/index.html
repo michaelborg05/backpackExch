@@ -350,7 +350,7 @@
             <div class="key-hint" id="key-hint">—</div>
             <div class="ph-actions">
               <button class="btn-cred" onclick="openCredsModal()">🔑 Change Credentials</button>
-              <button class="btn-danger" onclick="deactivateProfile()">Deactivate</button>
+              <button id="btn-toggle-active" class="btn-danger" onclick="toggleProfileActive()">Deactivate</button>
             </div>
           </div>
 
@@ -1792,6 +1792,14 @@ function showProfileDetail() {
     `<span class="pi-badge pb-off" style="margin-left:4px${(p.strategy_type || '').startsWith('short_') ? ';color:#f87171' : ''}">${(p.strategy_type || '').replaceAll('_', ' ')}</span>` +
     (p.market_type && p.market_type !== 'SPOT' ? `<span class="pi-badge pb-shadow" style="margin-left:4px">${p.market_type}</span>` : '') +
     (!p.is_active ? '<span class="pi-badge pb-off" style="margin-left:4px">inactive</span>' : '');
+  const toggleBtn = document.getElementById('btn-toggle-active');
+  if (p.is_active) {
+    toggleBtn.textContent = 'Deactivate';
+    toggleBtn.className = 'btn-danger';
+  } else {
+    toggleBtn.textContent = 'Activate';
+    toggleBtn.className = 'btn-success';
+  }
   fillSettings(p);
   fillCB(p.circuit_breaker);
   loadCBSummary(p.name);
@@ -2151,18 +2159,31 @@ async function saveCredentials() {
   }
 }
 
-async function deactivateProfile() {
+async function toggleProfileActive() {
   if (!_currentProfile) return;
-  if (!confirm(`Deactivate profile "${_currentProfile.display_name}"?\n\nThis will stop all signal generation. You can re-activate via the DB if needed.`)) return;
-  try {
-    await api('/profiles/' + _currentProfile.name, { method: 'DELETE' });
-    showToast('Profile deactivated');
-    _currentProfile = null;
-    document.getElementById('profile-detail').style.display = 'none';
-    document.getElementById('empty-state').style.display = 'flex';
-    await loadProfiles();
-  } catch (e) {
-    showToast(e.message, true);
+  const isActive = _currentProfile.is_active;
+  if (isActive) {
+    if (!confirm(`Deactivate profile "${_currentProfile.display_name}"?\n\nThis will stop all signal generation. You can re-activate it from the UI at any time.`)) return;
+    try {
+      await api('/profiles/' + _currentProfile.name, { method: 'DELETE' });
+      showToast('Profile deactivated');
+      _currentProfile = await api('/profiles/' + _currentProfile.name);
+      renderSidebar();
+      showProfileDetail();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  } else {
+    if (!confirm(`Activate profile "${_currentProfile.display_name}"?\n\nThis will resume signal generation for this profile.`)) return;
+    try {
+      await api('/profiles/' + _currentProfile.name + '/activate', { method: 'POST' });
+      showToast('Profile activated');
+      _currentProfile = await api('/profiles/' + _currentProfile.name);
+      renderSidebar();
+      showProfileDetail();
+    } catch (e) {
+      showToast(e.message, true);
+    }
   }
 }
 

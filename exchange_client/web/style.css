@@ -311,6 +311,8 @@ main{padding:20px 24px;position:relative;z-index:1;flex:1;display:flex;flex-dire
 .ph-actions{display:flex;gap:8px;margin-left:auto}
 .btn-danger{background:transparent;border:1px solid var(--red);color:var(--red);padding:6px 14px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .2s}
 .btn-danger:hover{background:var(--red);color:#fff}
+.btn-success{background:transparent;border:1px solid var(--grn);color:var(--grn);padding:6px 14px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .2s}
+.btn-success:hover{background:var(--grn);color:var(--bg)}
 .btn-cred{background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 14px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;cursor:pointer;transition:all .2s}
 .btn-cred:hover{background:var(--warn);color:var(--bg)}
 .key-hint{font-size:10px;color:var(--txd);padding:4px 10px;border:1px solid var(--brd);letter-spacing:.1em}
