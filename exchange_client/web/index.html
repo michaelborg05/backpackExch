@@ -1740,7 +1740,7 @@ function renderSidebar() {
     return;
   }
   el.innerHTML = _allProfiles.map(p => {
-    const tradingBadge = tradingTypeBadge(p.trading_type, p.enable_signal_generation);
+    const tradingBadge = p.is_active ? tradingTypeBadge(p.trading_type, p.enable_signal_generation) : '';
     const isShort = (p.strategy_type || '').startsWith('short_');
     const stratColor = isShort ? 'color:#f87171' : '';
     const stratBadge = `<span class="pi-badge pb-off" style="${stratColor}">${(p.strategy_type || '').replaceAll('_', ' ')}</span>`;
@@ -1788,7 +1788,7 @@ function showProfileDetail() {
   document.getElementById('creds-modal-profile').textContent = p.name;
   document.getElementById('sym-p-label').textContent = p.name;
   document.getElementById('ph-badges').innerHTML =
-    tradingTypeBadge(p.trading_type, p.enable_signal_generation) +
+    (p.is_active ? tradingTypeBadge(p.trading_type, p.enable_signal_generation) : '') +
     `<span class="pi-badge pb-off" style="margin-left:4px${(p.strategy_type || '').startsWith('short_') ? ';color:#f87171' : ''}">${(p.strategy_type || '').replaceAll('_', ' ')}</span>` +
     (p.market_type && p.market_type !== 'SPOT' ? `<span class="pi-badge pb-shadow" style="margin-left:4px">${p.market_type}</span>` : '') +
     (!p.is_active ? '<span class="pi-badge pb-off" style="margin-left:4px">inactive</span>' : '');

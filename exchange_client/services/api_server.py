@@ -1573,11 +1573,12 @@ async def get_all_symbol_configs(profile_name: str):
     """Get all symbol configurations for a profile"""
     from db.utils import get_db_session
     from db.crud import get_all_symbol_configs
-    
-    # Validate profile exists
-    profile_manager = get_profile_manager()
-    if not profile_manager.has_profile(profile_name):
-        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+    from db.models import TradingProfileDB
+
+    # Validate profile exists (active or inactive)
+    with get_db_session() as _db:
+        if not _db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first():
+            raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
     
     try:
         with get_db_session() as db:
