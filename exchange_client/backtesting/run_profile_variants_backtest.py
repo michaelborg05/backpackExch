@@ -16,7 +16,7 @@ parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
 parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=True,
+parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
 parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
 #parser.add_argument("--csv",     default="c:\\temp\\backtestresults.csv",
@@ -34,7 +34,7 @@ VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC","BTC_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","SUI_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
-    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"] ),
+    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC", "SUI_USDC"] ),
     "mr_short":    (MEAN_REV_SHORT_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"]),
 
 }

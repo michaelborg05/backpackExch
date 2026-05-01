@@ -59,6 +59,10 @@ class TradingProfileDB(Base):
     trend_invalidation_indicators = Column(String(24),  nullable=False, server_default=text("'entry'"))
     min_position_age_for_trend_check = Column(Integer, nullable=True)
 
+    # Indicator group configs: {"group_id": {"require_all": bool, "hard_stop": bool}}
+    trend_indicator_groups = Column(JSONB, nullable=True)
+    entry_indicator_groups = Column(JSONB, nullable=True)
+
     # Relationship to Indicators
     indicators = relationship("IndicatorDB", back_populates="profile", cascade="all, delete-orphan")
     # Metadata
@@ -88,6 +92,7 @@ class IndicatorDB(Base):
     
     is_hard_stop = Column(Boolean, default=True)
     enabled = Column(Boolean, default=True)
+    indicator_group = Column(String(64), nullable=True)
     
     profile = relationship("TradingProfileDB", back_populates="indicators")
 

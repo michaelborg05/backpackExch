@@ -38,12 +38,14 @@ class TradingProfile(BaseModel):
     trend_timeframe: str = "1h"  # Which timeframe to check trend on
     trend_indicators: Optional[List[Dict[str, Any]]] = None  # List of indicator configs
     min_indicators_required: int = Field(default=2, ge=1)  # Minimum that must be bullish
-    
+    trend_indicator_groups: Optional[Dict[str, Any]] = None  # Group configs: {group_id: {require_all, hard_stop}}
+
     # NEW: Entry Filter Configuration (Execution Timeframe)
     use_entry_filter: bool = False
     entry_timeframe: str = "15m"  # Which timeframe to check entry on
     entry_indicators: Optional[List[Dict[str, Any]]] = None  # List of entry indicator configs
     min_entry_indicators_required: int = Field(default=2, ge=1)  # Minimum entry indicators required
+    entry_indicator_groups: Optional[Dict[str, Any]] = None  # Group configs: {group_id: {require_all, hard_stop}}
 
     # ATR Filters
     use_atr_filter: bool = False
@@ -164,6 +166,10 @@ class ProfileCreateRequest(BaseModel):
     min_indicators_required: Optional[int] = 2
     min_entry_indicators_required: Optional[int] = 2
 
+    # Indicator group configs
+    trend_indicator_groups: Optional[Dict[str, Any]] = None
+    entry_indicator_groups: Optional[Dict[str, Any]] = None
+
     # Exit logic
     use_trend_invalidation_exit: Optional[bool] = False
     trend_invalidation_indicators: Optional[str] = "entry"
@@ -213,6 +219,9 @@ class ProfileUpdateRequest(BaseModel):
 
     min_indicators_required: Optional[int] = None
     min_entry_indicators_required: Optional[int] = None
+
+    trend_indicator_groups: Optional[Dict[str, Any]] = None
+    entry_indicator_groups: Optional[Dict[str, Any]] = None
 
     use_trend_invalidation_exit: Optional[bool] = None
     trend_invalidation_indicators: Optional[str] = None

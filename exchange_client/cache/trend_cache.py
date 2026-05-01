@@ -473,7 +473,8 @@ class TrendCache:
         timeframe: str,
         indicators_config: List[Dict] = None,
         min_indicators_required: int = 2,
-        use_hard_stops: bool = True
+        use_hard_stops: bool = True,
+        groups_config: dict = None,
     ) -> Tuple[bool, str]:
         """Check if trend is bullish for a single timeframe. Returns (is_bullish, reason)."""
         trend = self.get(symbol, timeframe)
@@ -489,7 +490,8 @@ class TrendCache:
             ]
 
         return self._validate_timeframe_indicators(
-            symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops
+            symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops,
+            groups_config=groups_config,
         )
 
     
@@ -568,7 +570,8 @@ class TrendCache:
         trend: TrendData,
         indicators: List[Dict],
         min_indicators_required: int,
-        use_hard_stops: bool = True
+        use_hard_stops: bool = True,
+        groups_config: dict = None,
     ) -> Tuple[bool, str]:
         """
         Validate multiple indicators for a single timeframe.
@@ -587,10 +590,13 @@ class TrendCache:
         price = price_cache.get_price(symbol)
         current_price = float(price) if price is not None else trend.price
 
+        indicator_groups_list = []  # parallel to results: indicator_group per indicator
+
         for indicator_config in indicators:
             indicator_type = indicator_config.get("type")
             params = indicator_config.get("params", {})
             hard_stop = params.get("hard_stop", False)
+            indicator_group = indicator_config.get("indicator_group")
             is_bullish = False
             msg = ""
 
@@ -1939,7 +1945,10 @@ class TrendCache:
                         )
                         
             results.append((is_bullish, msg))
-            if hard_stop and not is_bullish:
+            indicator_groups_list.append(indicator_group)
+            # Only ungrouped hard stops trigger an immediate fail here;
+            # grouped indicators have their hard_stop evaluated at group level below.
+            if hard_stop and not is_bullish and indicator_group is None:
                 hard_stop_failures.append(msg)
 
         if use_hard_stops and hard_stop_failures:
@@ -1947,14 +1956,41 @@ class TrendCache:
             failed_indicators = "; ".join(hard_stop_failures)
             return False, f"🚫 HARD STOP: {failed_indicators} ({details})"
 
-        bullish_count = sum(1 for is_b, _ in results if is_b)
-        total_count = len(results)
+        # ── Group evaluation ─────────────────────────────────────────────────
+        groups_config = groups_config or {}
+        grouped: dict = {}  # group_id -> [(is_bull, msg)]
+        ungrouped_results = []  # (is_bull, msg)
+
+        for (is_bull, msg), grp in zip(results, indicator_groups_list):
+            if grp:
+                grouped.setdefault(grp, []).append((is_bull, msg))
+            else:
+                ungrouped_results.append((is_bull, msg))
+
         details = ", ".join(msg for _, msg in results)
 
-        if bullish_count >= min_indicators_required:
-            return True, f"{bullish_count}/{total_count} bullish ({details})"
+        group_pass_results = []
+        for group_id, members in grouped.items():
+            cfg = groups_config.get(group_id, {"require_all": False, "hard_stop": False})
+            group_passed = (
+                all(is_bull for is_bull, _ in members)
+                if cfg.get("require_all", False)
+                else any(is_bull for is_bull, _ in members)
+            )
+            if use_hard_stops and cfg.get("hard_stop", False) and not group_passed:
+                member_msgs = "; ".join(msg for _, msg in members)
+                return False, f"🚫 GROUP HARD STOP [{group_id}]: {member_msgs} ({details})"
+            group_pass_results.append(group_passed)
+
+        ungrouped_pass_count = sum(1 for is_bull, _ in ungrouped_results if is_bull)
+        group_pass_count = sum(1 for p in group_pass_results if p)
+        total_passes = ungrouped_pass_count + group_pass_count
+        total_units = len(ungrouped_results) + len(group_pass_results)
+
+        if total_passes >= min_indicators_required:
+            return True, f"{total_passes}/{total_units} bullish ({details})"
         else:
-            return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
+            return False, f"Only {total_passes}/{total_units} bullish, need {min_indicators_required} ({details})"
     
     def get_cache_info(self) -> dict:
         """Get cache status with statistics including DB persistence stats"""

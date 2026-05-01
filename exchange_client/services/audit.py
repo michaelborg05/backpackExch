@@ -85,13 +85,14 @@ def write_audit(
 def snapshot_indicator(ind) -> dict:
     """Serialise an IndicatorDB row to a plain dict for audit storage."""
     return {
-        "id":             ind.id,
-        "profile_id":     ind.profile_id,
-        "category":       ind.category,
-        "indicator_type": ind.indicator_type,
-        "params":         ind.params,
-        "is_hard_stop":   ind.is_hard_stop,
-        "enabled":        ind.enabled,
+        "id":               ind.id,
+        "profile_id":       ind.profile_id,
+        "category":         ind.category,
+        "indicator_type":   ind.indicator_type,
+        "params":           ind.params,
+        "is_hard_stop":     ind.is_hard_stop,
+        "enabled":          ind.enabled,
+        "indicator_group":  ind.indicator_group,
     }
 
 

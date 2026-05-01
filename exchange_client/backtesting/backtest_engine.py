@@ -174,6 +174,7 @@ class ReplayTrendCache:
         indicators_config=None,
         min_indicators_required: int = 2,
         use_hard_stops: bool = True,
+        groups_config: dict = None,
     ) -> tuple:
         """Delegates to _validate_timeframe_indicators exactly as TrendCache does."""
         trend = self.get(symbol, timeframe)
@@ -188,7 +189,8 @@ class ReplayTrendCache:
             ]
 
         return self._validate_timeframe_indicators(
-            symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops
+            symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops,
+            groups_config=groups_config,
         )
 
     # ------------------------------------------------------------------
@@ -343,6 +345,7 @@ class ReplayTrendCache:
         indicators: list,
         min_indicators_required: int,
         use_hard_stops: bool = True,
+        groups_config: dict = None,
     ):
         """
         Full copy of TrendCache._validate_timeframe_indicators — all indicator
@@ -351,6 +354,7 @@ class ReplayTrendCache:
         """
         results = []
         hard_stop_failures = []
+        indicator_groups_list = []  # parallel to results: indicator_group per indicator
 
         # Use the candle close as current price in replay (no live price cache)
         current_price = trend.price
@@ -359,6 +363,7 @@ class ReplayTrendCache:
             indicator_type = indicator_config.get("type")
             params         = indicator_config.get("params", {})
             hard_stop      = params.get("hard_stop", False)
+            indicator_group = indicator_config.get("indicator_group")
             is_bull        = False
             msg            = ""
 
@@ -1273,21 +1278,51 @@ class ReplayTrendCache:
                 msg = f"Unknown indicator type: {indicator_type}"
 
             results.append((is_bull, msg))
-            if hard_stop and not is_bull:
+            indicator_groups_list.append(indicator_group)
+            # Only ungrouped hard stops trigger an immediate fail here;
+            # grouped indicators have their hard_stop evaluated at group level below.
+            if hard_stop and not is_bull and indicator_group is None:
                 hard_stop_failures.append(msg)
 
         if use_hard_stops and hard_stop_failures:
             details = ", ".join(msg for _, msg in results)
             return False, f"HARD STOP: {'; '.join(hard_stop_failures)} ({details})"
 
-        bullish_count = sum(1 for is_b, _ in results if is_b)
-        total_count   = len(results)
-        details       = ", ".join(msg for _, msg in results)
+        # ── Group evaluation ─────────────────────────────────────────────────
+        groups_config = groups_config or {}
+        grouped: dict = {}  # group_id -> [(is_bull, msg)]
+        ungrouped_results = []  # (is_bull, msg)
 
-        if bullish_count >= min_indicators_required:
-            return True, f"{bullish_count}/{total_count} bullish ({details})"
+        for (is_bull, msg), grp in zip(results, indicator_groups_list):
+            if grp:
+                grouped.setdefault(grp, []).append((is_bull, msg))
+            else:
+                ungrouped_results.append((is_bull, msg))
+
+        details = ", ".join(msg for _, msg in results)
+
+        group_pass_results = []
+        for group_id, members in grouped.items():
+            cfg = groups_config.get(group_id, {"require_all": False, "hard_stop": False})
+            group_passed = (
+                all(is_bull for is_bull, _ in members)
+                if cfg.get("require_all", False)
+                else any(is_bull for is_bull, _ in members)
+            )
+            if use_hard_stops and cfg.get("hard_stop", False) and not group_passed:
+                member_msgs = "; ".join(msg for _, msg in members)
+                return False, f"GROUP HARD STOP [{group_id}]: {member_msgs} ({details})"
+            group_pass_results.append(group_passed)
+
+        ungrouped_pass_count = sum(1 for is_bull, _ in ungrouped_results if is_bull)
+        group_pass_count = sum(1 for p in group_pass_results if p)
+        total_passes = ungrouped_pass_count + group_pass_count
+        total_units = len(ungrouped_results) + len(group_pass_results)
+
+        if total_passes >= min_indicators_required:
+            return True, f"{total_passes}/{total_units} bullish ({details})"
         else:
-            return False, f"Only {bullish_count}/{total_count} bullish, need {min_indicators_required} ({details})"
+            return False, f"Only {total_passes}/{total_units} bullish, need {min_indicators_required} ({details})"
 
 
 # ===========================================================================
@@ -1534,6 +1569,8 @@ class BacktestProfile:
         "use_trailing_stop":          True,
         "trend_indicators":           [],
         "entry_indicators":           [],
+        "trend_indicator_groups":     None,
+        "entry_indicator_groups":     None,
     }
 
     def __init__(self, name: str, config: dict):
@@ -2025,6 +2062,7 @@ class BacktestEngine:
                     self.profile.trend_timeframe,
                     indicators_config=self.profile.trend_indicators,
                     min_indicators_required=self.profile.min_indicators_required,
+                    groups_config=getattr(self.profile, "trend_indicator_groups", None),
                 )
                 if not trend_ok:
                     if self.verbose:
@@ -2038,6 +2076,7 @@ class BacktestEngine:
                     self.profile.entry_timeframe,
                     indicators_config=self.profile.entry_indicators,
                     min_indicators_required=self.profile.min_entry_indicators_required,
+                    groups_config=getattr(self.profile, "entry_indicator_groups", None),
                 )
                 if not entry_ok:
                     if self.verbose:

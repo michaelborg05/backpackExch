@@ -654,18 +654,21 @@ class SignalGenerator:
         
         indicators_config = getattr(self.profile, 'trend_indicators', None)
         min_required = getattr(self.profile, 'min_indicators_required', 2)
+        groups_config = getattr(self.profile, 'trend_indicator_groups', None)
 
         return self.trend_cache.is_bullish(
             symbol=symbol,
             timeframe=timeframe,
             indicators_config=indicators_config,
             min_indicators_required=min_required,
+            groups_config=groups_config,
         )
 
     def _check_entry_filter(self, symbol: str, timeframe: str) -> Tuple[bool, str]:
         """Check entry conditions using YAML-configured entry_indicators"""
         indicators_config = getattr(self.profile, 'entry_indicators', None)
         min_required = getattr(self.profile, 'min_entry_indicators_required', 2)
+        groups_config = getattr(self.profile, 'entry_indicator_groups', None)
 
         if indicators_config is None:
             return False, "No entry filter configured"
@@ -675,6 +678,7 @@ class SignalGenerator:
             timeframe=timeframe,
             indicators_config=indicators_config,
             min_indicators_required=min_required,
+            groups_config=groups_config,
         )
 
     def _check_volume(self, symbol: str, timeframe: str) -> Tuple[dict, str]:

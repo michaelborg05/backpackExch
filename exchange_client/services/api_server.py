@@ -1747,6 +1747,7 @@ async def create_indicator(profile_name: str, body: IndicatorCreate):
                 params=body.params,
                 is_hard_stop=body.is_hard_stop,
                 enabled=body.enabled,
+                indicator_group=body.indicator_group or None,
             )
             db.add(ind)
             
@@ -1794,11 +1795,12 @@ async def update_indicator(profile_name: str, indicator_id: int, body: Indicator
             from services.audit import write_audit, snapshot_indicator
             before_snap = snapshot_indicator(ind)
 
-            ind.category       = body.category
-            ind.indicator_type = body.indicator_type
-            ind.params         = body.params
-            ind.is_hard_stop   = body.is_hard_stop
-            ind.enabled        = body.enabled
+            ind.category        = body.category
+            ind.indicator_type  = body.indicator_type
+            ind.params          = body.params
+            ind.is_hard_stop    = body.is_hard_stop
+            ind.enabled         = body.enabled
+            ind.indicator_group = body.indicator_group or None
 
             write_audit(
                 db=db,
@@ -2940,6 +2942,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "use_market_regime_filter", "use_trend_filter",
         "use_entry_filter", "use_atr_filter", "enable_signal_generation",
         "min_indicators_required", "min_entry_indicators_required",
+        "trend_indicator_groups", "entry_indicator_groups",
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
         "min_position_age_for_trend_check", "max_position_hours",
         "market_type", "leverage_multiplier",
@@ -2954,9 +2957,15 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         before = {k: _safe_val(getattr(p, k, None)) for k in _EDITABLE}
         changes = {}
 
+        _DICT_FIELDS = {"trend_indicator_groups", "entry_indicator_groups"}
         for field in _EDITABLE:
             val = getattr(body, field, None)
-            if val is not None:
+            # Dict fields: apply if explicitly set (even empty dict clears groups)
+            if field in _DICT_FIELDS:
+                if val is not None:
+                    setattr(p, field, val or None)
+                    changes[field] = val
+            elif val is not None:
                 setattr(p, field, val)
                 changes[field] = val
 
@@ -3240,6 +3249,10 @@ def _serialize_profile(p, cb=None) -> dict:
         # Indicator thresholds
         "min_indicators_required":     p.min_indicators_required,
         "min_entry_indicators_required": p.min_entry_indicators_required,
+
+        # Indicator group configs
+        "trend_indicator_groups":      p.trend_indicator_groups or None,
+        "entry_indicator_groups":      p.entry_indicator_groups or None,
 
         # Exit logic
         "use_trend_invalidation_exit":          bool(p.use_trend_invalidation_exit) if p.use_trend_invalidation_exit is not None else False,

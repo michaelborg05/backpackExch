@@ -92,6 +92,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
     trend_timeframe = cfg.get("trend_timeframe", "1h")
     trend_indicators = cfg.get("trend_indicators", None)
     min_indicators_required = cfg.get("min_indicators_required", 2)
+    trend_indicator_groups = cfg.get("trend_indicator_groups", None)
 
     if use_trend_filter and trend_indicators:
         trend_indicators, min_indicators_required = _validate_indicators(
@@ -105,6 +106,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
     entry_timeframe = cfg.get("entry_timeframe", "15m")
     entry_indicators = cfg.get("entry_indicators", None)
     min_entry_indicators_required = cfg.get("min_entry_indicators_required", 2)
+    entry_indicator_groups = cfg.get("entry_indicator_groups", None)
 
     if use_entry_filter and entry_indicators:
         entry_indicators, min_entry_indicators_required = _validate_indicators(
@@ -147,11 +149,13 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         trend_timeframe=trend_timeframe,
         trend_indicators=trend_indicators,
         min_indicators_required=min_indicators_required,
+        trend_indicator_groups=trend_indicator_groups,
         # Entry filter
         use_entry_filter=use_entry_filter,
         entry_timeframe=entry_timeframe,
         entry_indicators=entry_indicators,
         min_entry_indicators_required=min_entry_indicators_required,
+        entry_indicator_groups=entry_indicator_groups,
         # ATR filter
         use_atr_filter=use_atr_filter,
         atr_timeframe=atr_timeframe,
@@ -294,6 +298,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             indicator_cfg = {
                 "type": ind.indicator_type,
                 "params": params,
+                "indicator_group": ind.indicator_group,
             }
 
             if ind.category == "trend":
@@ -328,11 +333,13 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "trend_timeframe": row.trend_timeframe or "60",
             "trend_indicators": trend_indicators or None,
             "min_indicators_required": row.min_indicators_required or 2,
+            "trend_indicator_groups": row.trend_indicator_groups or None,
             # Entry filter
             "use_entry_filter": bool(row.use_entry_filter),
             "entry_timeframe": row.entry_timeframe or "15",
             "entry_indicators": entry_indicators or None,
             "min_entry_indicators_required": row.min_entry_indicators_required or 2,
+            "entry_indicator_groups": row.entry_indicator_groups or None,
             # ATR filter
             "use_atr_filter": bool(row.use_atr_filter),
             # Signal generation

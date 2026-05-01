@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Any
+from typing import Any, Optional
 
 class IndicatorCreate(BaseModel):
     category: str           # 'trend' | 'entry' | 'exit'
@@ -7,6 +7,7 @@ class IndicatorCreate(BaseModel):
     params: dict[str, Any]
     is_hard_stop: bool = True
     enabled: bool = True
+    indicator_group: Optional[str] = None
 
 class IndicatorUpdate(BaseModel):
     """Full replace — all fields required (id/profile_id are path params)."""
@@ -15,6 +16,7 @@ class IndicatorUpdate(BaseModel):
     params: dict[str, Any]
     is_hard_stop: bool
     enabled: bool
+    indicator_group: Optional[str] = None
 
 class IndicatorOut(BaseModel):
     id: int
@@ -24,6 +26,7 @@ class IndicatorOut(BaseModel):
     params: dict[str, Any]
     is_hard_stop: bool
     enabled: bool
+    indicator_group: Optional[str] = None
 
     class Config:
         from_attributes = True
