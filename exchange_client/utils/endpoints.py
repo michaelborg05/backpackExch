@@ -77,6 +77,20 @@ class BackpackEndpoints:
     def convert_dust(cls) -> str:
         return f"{cls.BASE}/api/v1/account/convertDust"
 
+    @classmethod
+    def deposit_history(cls, limit: int = 20, from_time: int = None) -> str:
+        url = f"{cls.BASE}/wapi/v1/capital/deposits?limit={limit}"
+        if from_time:
+            url += f"&from={from_time}"
+        return url
+
+    @classmethod
+    def withdrawal_history(cls, limit: int = 20, from_time: int = None) -> str:
+        url = f"{cls.BASE}/wapi/v1/capital/withdrawals?limit={limit}"
+        if from_time:
+            url += f"&from={from_time}"
+        return url
+
     # ── Legacy aliases (old callers used backpack_* names) ──────────────────
     @classmethod
     def backpack_ticker(cls, ticker: str = "SOL_USDC", interval: str = "1d") -> str:
@@ -250,6 +264,20 @@ class BulletEndpoints:
     @classmethod
     def server_time(cls) -> str:
         return f"{cls.BASE}/fapi/v1/time"
+
+    @classmethod
+    def deposit_history(cls, address: str, limit: int = 20, from_time: int = None) -> str:
+        url = f"{cls.BASE}/fapi/v3/depositHistory?address={address}&limit={limit}"
+        if from_time:
+            url += f"&startTime={from_time}"
+        return url
+
+    @classmethod
+    def withdrawal_history(cls, address: str, limit: int = 20, from_time: int = None) -> str:
+        url = f"{cls.BASE}/fapi/v3/withdrawalHistory?address={address}&limit={limit}"
+        if from_time:
+            url += f"&startTime={from_time}"
+        return url
 
     # Klines intentionally omitted — Bullet has no candle endpoint.
     # Use CoinGecko or derive from trades for ATR calculations.

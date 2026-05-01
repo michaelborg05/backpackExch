@@ -744,6 +744,24 @@ def update_daily_snapshot(
     return snapshot
 
 
+def adjust_snapshot_for_transfer(
+    db: Session,
+    snapshot_id: int,
+    new_starting_balance: Decimal,
+    new_highest_balance: Decimal,
+    new_cb_baseline: Optional[Decimal],
+) -> None:
+    """Shift snapshot baselines after a detected deposit or withdrawal."""
+    snapshot = db.query(DailyBalanceSnapshot).filter(
+        DailyBalanceSnapshot.id == snapshot_id
+    ).first()
+    if snapshot:
+        snapshot.starting_balance = new_starting_balance
+        snapshot.highest_balance = new_highest_balance
+        snapshot.circuit_breaker_baseline = new_cb_baseline
+        db.commit()
+
+
 def finalize_daily_snapshot(
     db: Session,
     snapshot_id: int,

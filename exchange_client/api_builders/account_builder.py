@@ -134,3 +134,66 @@ def _get_all_profile_balances(
 
 def _convert_balance_reader_to_dict(balance_reader: BalanceReader) -> Dict[str, Dict]:
     return balance_reader.to_dict()
+
+
+def get_recent_transfers(
+    profile: TradingProfile,
+    lookback_seconds: int = 300,
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch recent deposits and withdrawals from the exchange for the given profile.
+
+    Returns {"deposits": [...], "withdrawals": [...]} or None if both API calls fail.
+    An empty list for a key means the call succeeded but found no transfers.
+    """
+    import time
+    from_ms = int((time.time() - lookback_seconds) * 1000)
+
+    exchange_type = getattr(profile, "exchange_type", "backpack") or "backpack"
+
+    results: Dict[str, Any] = {}
+
+    if exchange_type == "backpack":
+        for kind, instruction, url_fn in [
+            ("deposits", "depositQueryAll", APIEndpoints.deposit_history),
+            ("withdrawals", "withdrawalQueryAll", APIEndpoints.withdrawal_history),
+        ]:
+            try:
+                url = url_fn(limit=20, from_time=from_ms)
+                headers = data_converters.build_authorisation_header(
+                    api_key=profile.api_key,
+                    secret=profile.secret,
+                    query_params={"limit": 20, "from": from_ms},
+                    body=None,
+                    instruction=instruction,
+                    window=60000,
+                )
+                data = api_request(url, headers)
+                results[kind] = data if isinstance(data, list) else []
+            except Exception:
+                results[kind] = None
+
+    elif exchange_type == "bullet":
+        from utils.endpoints import BulletEndpoints
+        address = profile.api_key
+        for kind, url_fn in [
+            ("deposits", BulletEndpoints.deposit_history),
+            ("withdrawals", BulletEndpoints.withdrawal_history),
+        ]:
+            try:
+                url = url_fn(address=address, limit=20, from_time=from_ms)
+                data = api_request(url)
+                results[kind] = data if isinstance(data, list) else []
+            except Exception:
+                results[kind] = None
+
+    else:
+        return None
+
+    if results.get("deposits") is None and results.get("withdrawals") is None:
+        return None
+
+    return {
+        "deposits": results.get("deposits") or [],
+        "withdrawals": results.get("withdrawals") or [],
+    }

@@ -18,6 +18,7 @@ from db.crud import (
     update_daily_snapshot,
     finalize_daily_snapshot,
     reset_circuit_breaker_baseline,
+    adjust_snapshot_for_transfer,
 )
 from models.circuit_breaker import (
     CachedCircuitBreakerConfig,
@@ -424,6 +425,116 @@ class CircuitBreakerService:
         )
         self._clear_breaker(event, profile_name, account_id, manually_reset=False)
 
+    def _adjust_snapshot_for_transfer(
+        self,
+        profile_name: str,
+        account_id: Optional[int],
+        snapshot: CachedDailySnapshot,
+        transfer_amount: Decimal,
+    ) -> None:
+        direction = "DEPOSIT" if transfer_amount > 0 else "WITHDRAWAL"
+        snapshot.starting_balance += transfer_amount
+        snapshot.highest_balance = max(
+            snapshot.highest_balance + transfer_amount,
+            snapshot.starting_balance,
+        )
+        if snapshot.circuit_breaker_baseline is not None:
+            snapshot.circuit_breaker_baseline += transfer_amount
+
+        with get_db_session() as db:
+            adjust_snapshot_for_transfer(
+                db,
+                snapshot.id,
+                snapshot.starting_balance,
+                snapshot.highest_balance,
+                snapshot.circuit_breaker_baseline,
+            )
+
+        self.logger.info(
+            f"[{profile_name}] {direction} detected (${abs(float(transfer_amount)):.2f}) — "
+            f"CB baselines adjusted. starting=${snapshot.starting_balance:.2f}, "
+            f"cb_baseline=${snapshot.circuit_breaker_baseline:.2f}"
+        )
+        self._send_telegram(
+            f"Transfer Detected [{profile_name}]\n"
+            f"Type: {direction}\n"
+            f"Amount: ${abs(float(transfer_amount)):.2f}\n"
+            f"CB baselines adjusted — no circuit breaker triggered\n"
+            f"New starting balance: ${snapshot.starting_balance:.2f}"
+        )
+
+    def _check_transfer_explains_change(
+        self,
+        profile_name: str,
+        account_id: Optional[int],
+        snapshot: CachedDailySnapshot,
+        balance_change: Decimal,
+        config: CachedCircuitBreakerConfig,
+    ) -> bool:
+        """
+        Returns True if a recent deposit/withdrawal explains the balance change
+        and snapshot baselines have been adjusted. Fail-safe: any error returns False.
+        """
+        cb_baseline = snapshot.circuit_breaker_baseline or snapshot.starting_balance
+        if not cb_baseline or cb_baseline <= 0:
+            return False
+
+        threshold_pct = 2 * max(
+            float(config.max_daily_profit_pct),
+            float(config.max_daily_loss_pct),
+        )
+        change_pct = abs(float(balance_change / cb_baseline * 100))
+        if change_pct < threshold_pct:
+            return False
+
+        from services.profile_manager import get_profile_manager
+        from api_builders.account_builder import get_recent_transfers
+        pm = get_profile_manager()
+        profile = pm.get_profile(profile_name) if pm else None
+        if not profile:
+            return False
+
+        try:
+            transfers = get_recent_transfers(profile, lookback_seconds=300)
+        except Exception as e:
+            self.logger.warning(f"[{profile_name}] Transfer check failed: {e} — proceeding with CB trigger")
+            return False
+
+        if transfers is None:
+            self.logger.warning(
+                f"[{profile_name}] Transfer check API unavailable — proceeding with CB trigger"
+            )
+            return False
+
+        net_transfer = Decimal(0)
+        confirmed_statuses = {"confirmed", "complete", "completed", "success"}
+        for deposit in transfers.get("deposits", []):
+            if str(deposit.get("status", "")).lower() in confirmed_statuses:
+                try:
+                    net_transfer += Decimal(str(deposit.get("quantity", 0)))
+                except Exception:
+                    pass
+        for withdrawal in transfers.get("withdrawals", []):
+            if str(withdrawal.get("status", "")).lower() in confirmed_statuses:
+                try:
+                    net_transfer -= Decimal(str(withdrawal.get("quantity", 0)))
+                except Exception:
+                    pass
+
+        if net_transfer == 0:
+            self.logger.info(
+                f"[{profile_name}] Suspicious balance change ({change_pct:.1f}%), "
+                f"no confirming transfer found — proceeding with CB trigger"
+            )
+            return False
+
+        tolerance = abs(float(balance_change)) * 0.05
+        if abs(float(balance_change) - float(net_transfer)) <= tolerance:
+            self._adjust_snapshot_for_transfer(profile_name, account_id, snapshot, net_transfer)
+            return True
+
+        return False
+
     def _check_daily_pnl_limits(
         self,
         profile_name: str,
@@ -488,6 +599,15 @@ class CircuitBreakerService:
 
             # ── Profit limit ──────────────────────────────────────────────────
             if cb_pnl_pct >= float(config.max_daily_profit_pct):
+                balance_change = current_value - snapshot.starting_balance
+                if self._check_transfer_explains_change(
+                    profile_name, account_id, snapshot, balance_change, config
+                ):
+                    self.logger.info(
+                        f"[{profile_name}] Profit limit apparent breach suppressed — "
+                        f"deposit detected and baselines adjusted"
+                    )
+                    return False, None
                 reason = (
                     f"Daily profit limit reached: "
                     f"+{cb_pnl_pct:.2f}% "
@@ -523,6 +643,15 @@ class CircuitBreakerService:
             drawdown_pnl_pct = (drawdown_pnl / snapshot.highest_balance) * 100
 
             if drawdown_pnl_pct <= -float(config.max_daily_loss_pct):
+                balance_change = current_value - snapshot.highest_balance
+                if self._check_transfer_explains_change(
+                    profile_name, account_id, snapshot, balance_change, config
+                ):
+                    self.logger.info(
+                        f"[{profile_name}] Loss limit apparent breach suppressed — "
+                        f"withdrawal detected and baselines adjusted"
+                    )
+                    return False, None
                 reason = (
                     f"Daily loss limit reached: "
                     f"{drawdown_pnl_pct:.2f}% "
