@@ -10,16 +10,16 @@ from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREN
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 7,
+parser.add_argument("--days",    type=int, default= 28,
                     help="Lookback window in days (default: 7)")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
 parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=False,
+parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
-#parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
-parser.add_argument("--csv",     default="c:\\temp\\backtestresults.csv",
+parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
+#parser.add_argument("--csv",     default="c:\\temp\\backtestresults.csv",
 #parser.add_argument("--csv",     default="",
                     help="Export all trades to CSV. Filename is auto-suffixed per set/symbol.")
 parser.add_argument("--verbose", action="store_true",
@@ -32,9 +32,9 @@ print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H
 
 VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC","BTC_USDC"]),
-    "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"]),
+    "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","SUI_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
-    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC"] ),
+    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"] ),
     "mr_short":    (MEAN_REV_SHORT_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC"]),
 
 }

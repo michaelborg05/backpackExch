@@ -752,16 +752,6 @@ class ReplayTrendCache:
                         )
                     else:
                         total, body, l_wick, u_wick, is_bull = _candle_metrics(pc_o, pc_h, pc_l, pc_c)
-                        values.update({
-                            "candle_open":  pc_o, "candle_high": pc_h,
-                            "candle_low":   pc_l, "candle_close": pc_c,
-                            "total_range":  round(total, 6),
-                            "body_size":    round(body, 6),
-                            "lower_wick":   round(l_wick, 6),
-                            "upper_wick":   round(u_wick, 6),
-                            "is_bull_candle": is_bull,
-                        })
-
                         if total == 0:
                             is_bull = False
                             msg = f"Reversal candle ({pattern}): ✗ (zero-range candle)"
@@ -1677,6 +1667,7 @@ class BacktestTrade:
         return "✅" if self.won else "❌"
 
     def to_dict(self) -> dict:
+        d = self.entry_details
         return {
             "entry_time":   self.entry_time.isoformat() if self.entry_time else None,
             "entry_price":  self.entry_price,
@@ -1686,9 +1677,18 @@ class BacktestTrade:
             "pnl_pct":      round(self.pnl_pct, 4),
             "hold_minutes": round(self.hold_minutes, 1) if self.hold_minutes is not None else None,
             "won":          self.won,
-            "confidence":   self.entry_details.get("confidence"),
-            "volume_ratio": self.entry_details.get("volume_ratio"),
-            "rsi_at_entry": self.entry_details.get("rsi"),
+            "confidence":   d.get("confidence"),
+            "volume_ratio": d.get("volume_ratio"),
+            "rsi":          d.get("rsi"),
+            "ema20":        d.get("ema20"),
+            "ema50":        d.get("ema50"),
+            "adx":          d.get("adx"),
+            "vwap":         d.get("vwap"),
+            "bb_pct_b":     d.get("bb_pct_b"),
+            "htf_rsi":      d.get("htf_rsi"),
+            "htf_ema20":    d.get("htf_ema20"),
+            "htf_ema50":    d.get("htf_ema50"),
+            "htf_adx":      d.get("htf_adx"),
         }
 
 
@@ -2062,6 +2062,7 @@ class BacktestEngine:
 
             # Safety: RSI overbought check
             cached_trend = cache.get(symbol, self.profile.entry_timeframe)
+            cached_htf   = cache.get(symbol, self.profile.trend_timeframe)
             if cached_trend and cached_trend.rsi < 65:
                 score += safety_weight
             elif cached_trend and cached_trend.rsi > 80:
@@ -2078,15 +2079,33 @@ class BacktestEngine:
             result.signals_fired += 1
             entry_price = float(row.close)
 
+            _bb_pct_b = None
+            if cached_trend and cached_trend.bb is not None:
+                _bb = cached_trend.bb
+                if _bb.bb_upper is not None and _bb.bb_lower is not None:
+                    _bw = _bb.bb_upper - _bb.bb_lower
+                    if _bw > 0:
+                        _bb_pct_b = (entry_price - _bb.bb_lower) / _bw
             trade = BacktestTrade(
                 symbol=symbol,
                 entry_time=row_time,
                 entry_price=entry_price,
                 entry_details={
-                    "confidence": round(confidence_pct, 2),
-                    "volume_ratio": volume_ratio,
-                    "rsi": cached_trend.rsi if cached_trend else None,
-                    "reason": entry_reason,
+                    "confidence":    round(confidence_pct, 2),
+                    "volume_ratio":  volume_ratio,
+                    "reason":        entry_reason,
+                    # Entry TF indicators
+                    "rsi":           cached_trend.rsi   if cached_trend else None,
+                    "ema20":         cached_trend.ema20  if cached_trend else None,
+                    "ema50":         cached_trend.ema50  if cached_trend else None,
+                    "adx":           cached_trend.adx    if cached_trend else None,
+                    "vwap":          cached_trend.vwap   if cached_trend else None,
+                    "bb_pct_b":      round(_bb_pct_b, 3) if _bb_pct_b is not None else None,
+                    # Trend TF (HTF) indicators
+                    "htf_rsi":       cached_htf.rsi    if cached_htf else None,
+                    "htf_ema20":     cached_htf.ema20   if cached_htf else None,
+                    "htf_ema50":     cached_htf.ema50   if cached_htf else None,
+                    "htf_adx":       cached_htf.adx     if cached_htf else None,
                 },
             )
             result.trades.append(trade)

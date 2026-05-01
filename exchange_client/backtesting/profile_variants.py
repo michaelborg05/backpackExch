@@ -106,20 +106,25 @@ def run_all_variants(
             "variant", "symbol", "trade_num", "outcome",
             "entry_time", "exit_time", "hold_minutes",
             "entry_price", "exit_price", "pnl_pct",
-            "exit_reason", "confidence", "volume_ratio", "rsi_at_entry",
+            "exit_reason", "confidence", "volume_ratio",
+            # Entry TF indicators at trigger
+            "rsi", "ema20", "ema50", "adx", "vwap", "bb_pct_b",
+            # Trend TF (HTF) indicators at trigger
+            "htf_rsi", "htf_ema20", "htf_ema50", "htf_adx",
         ]
-        
+
         file_exists = os.path.isfile(export_csv) and os.path.getsize(export_csv) > 0
-        
+
         # Open with 'a' (append) instead of 'w' (write/overwrite)
         with open(export_csv, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fields)
-            
+
             if not file_exists:
                 writer.writeheader()
-                
+
             for r in results:
                 for i, t in enumerate(r.trades, 1):
+                    d = t.entry_details
                     writer.writerow({
                         "variant":      r.profile_name,
                         "symbol":       r.symbol,
@@ -132,9 +137,18 @@ def run_all_variants(
                         "exit_price":   t.exit_price or "",
                         "pnl_pct":      round(t.pnl_pct, 4),
                         "exit_reason":  t.exit_reason,
-                        "confidence":   t.entry_details.get("confidence", ""),
-                        "volume_ratio": t.entry_details.get("volume_ratio", ""),
-                        "rsi_at_entry": t.entry_details.get("rsi", ""),
+                        "confidence":   d.get("confidence", ""),
+                        "volume_ratio": d.get("volume_ratio", ""),
+                        "rsi":          d.get("rsi", ""),
+                        "ema20":        d.get("ema20", ""),
+                        "ema50":        d.get("ema50", ""),
+                        "adx":          d.get("adx", ""),
+                        "vwap":         d.get("vwap", ""),
+                        "bb_pct_b":     d.get("bb_pct_b", ""),
+                        "htf_rsi":      d.get("htf_rsi", ""),
+                        "htf_ema20":    d.get("htf_ema20", ""),
+                        "htf_ema50":    d.get("htf_ema50", ""),
+                        "htf_adx":      d.get("htf_adx", ""),
                     })
         print(f"\n[CSV] Trade log exported -> {export_csv}")
     return results
