@@ -2326,6 +2326,22 @@ async function loadIndicatorsP() {
   _indDataP = await api('/indicators/' + _currentProfile.name).catch(() => []) ?? [];
   _trendGroups = _currentProfile.trend_indicator_groups ? JSON.parse(JSON.stringify(_currentProfile.trend_indicator_groups)) : {};
   _entryGroups = _currentProfile.entry_indicator_groups ? JSON.parse(JSON.stringify(_currentProfile.entry_indicator_groups)) : {};
+
+  // Auto-enable advanced mode if this profile already has groups configured.
+  const hasGroups = _indDataP.some(i => i.indicator_group) ||
+                    Object.keys(_trendGroups).length > 0 ||
+                    Object.keys(_entryGroups).length > 0;
+  if (hasGroups !== _advancedMode) {
+    _advancedMode = hasGroups;
+    const btn = document.getElementById('adv-mode-btn');
+    if (btn) {
+      btn.style.color = _advancedMode ? 'var(--acc)' : 'var(--txd)';
+      btn.style.borderColor = _advancedMode ? 'var(--acc)' : 'var(--brd)';
+    }
+    const panel = document.getElementById('ind-groups-panel');
+    if (panel) panel.style.display = _advancedMode ? 'block' : 'none';
+  }
+
   renderIndGridP();
   renderGroupsPanel();
 }
