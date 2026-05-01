@@ -269,12 +269,18 @@ class BulletAdapter(ExchangeAdapter):
     def order_sell(self, symbol: str, quantity: str, price: str = "0",
                    source: str = "MANUAL", position_id: str = None,
                    **kwargs) -> Optional[Any]:
-        """Place a market-equivalent SELL/CLOSE on Bullet (IOC ask at -2% slippage)."""
+        """Place a market-equivalent SELL/CLOSE on Bullet (IOC ask at -2% slippage).
+
+        When position_id is provided the order is a long-close (reduce_only=True, no TP/SL).
+        Otherwise it opens a short and attaches on-chain TP/SL from the profile.
+        """
+        is_close = position_id is not None
         bullet_symbol = _to_bullet_symbol(symbol)
         tick_size, step_size, _ = self._get_market_filters(bullet_symbol)
         entry_price = self._get_aggressive_price(symbol, side="ASK")
         rounded_price = self._round_price(entry_price, tick_size)
         rounded_qty   = self._round_quantity(float(quantity), step_size)
+        tpsl = None if is_close else self._build_tpsl(float(rounded_price), side="ASK", tick_size=tick_size)
 
         from types import SimpleNamespace
         order_ns = SimpleNamespace(
@@ -283,7 +289,8 @@ class BulletAdapter(ExchangeAdapter):
             orderType="IOC",
             quantity=rounded_qty,
             price=rounded_price,
-            reduce_only=position_id is not None,
+            reduce_only=is_close,
+            pending_tpsl_pair=tpsl,
         )
         return self._submit_market_order(
             order_ns=order_ns,
