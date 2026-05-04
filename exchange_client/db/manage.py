@@ -516,7 +516,6 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                 skipped += 1
                 # Still attempt to migrate indicators in case they're missing
                 existing.strategy_type = str(cfg.get("strategy_type","trend_following"))
-                existing.signal_timeframe = str(cfg.get("signal_timeframe",15))
                 existing.signal_cooldown_seconds = int(cfg.get("signal_cooldown_seconds",900))
                 existing.min_signal_confidence = Decimal(cfg.get("min_signal_confidence",70))
                 existing.min_volume_ratio = Decimal(cfg.get("min_volume_ratio",1))
@@ -547,7 +546,6 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                     use_trailing_stop=bool(cfg.get("use_trailing_stop", False)),  # direct bool, not bool(str())
 
                     # Risk / sizing
-                    max_risk_pct=Decimal(str(cfg.get("max_risk_pct", 0.25))),
                     default_order_size_usdc=Decimal(str(cfg.get("default_order_size_usdc", 100))),
                     max_position_size_pct=Decimal(str(cfg.get("max_position_size_pct", 40))),
                     max_open_positions=int(cfg.get("max_open_positions", 1)),
@@ -557,7 +555,6 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                     strategy_type=cfg.get("strategy_type", "trend_following"),
 
                     # Signal generation
-                    signal_timeframe=str(cfg.get("signal_timeframe", "15")),
                     signal_cooldown_seconds=int(cfg.get("signal_cooldown_seconds", 900)),
                     min_signal_confidence=float(cfg.get("min_signal_confidence", 72.0)),
                     min_volume_ratio=float(cfg.get("min_volume_ratio", 1.0)),
@@ -919,7 +916,6 @@ def add_new_profile():
             use_trailing_stop=True,
 
             # Risk / sizing
-            max_risk_pct=0.25,
             default_order_size_usdc=100,
             max_position_size_pct=40,
             max_open_positions=1,
@@ -929,7 +925,6 @@ def add_new_profile():
             strategy_type= "trend_following",
 
             # Signal generation
-            signal_timeframe=15,
             signal_cooldown_seconds=900,
             min_signal_confidence=72,
             min_volume_ratio=1.0,

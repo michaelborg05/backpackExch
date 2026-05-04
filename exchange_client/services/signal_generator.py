@@ -50,14 +50,12 @@ class SignalGenerator:
         self.strategy_type = getattr(profile, 'strategy_type', StrategyType.TREND_FOLLOWING)
         self.trading_type = getattr(profile, 'trading_type', TradingType.RULES_LIVE)
 
-        # Signal generation settings from profile
-        self.trading_timeframe = getattr(profile, 'signal_timeframe', '15')
         self.trend_timeframe = getattr(profile, 'trend_timeframe', '60')
-        
+
         # Entry filter settings (for multi-TF validation)
         self.use_trend_filter = getattr(profile, 'use_trend_filter', False)
         self.use_entry_filter = getattr(profile, 'use_entry_filter', False)
-        self.entry_timeframe = getattr(profile, 'entry_timeframe', self.trading_timeframe)
+        self.entry_timeframe = getattr(profile, 'entry_timeframe', '15')
         
         # Determine regime filter timeframes based on strategy
         if self.strategy_type in (StrategyType.MEAN_REVERSION, StrategyType.SHORT_MEAN_REVERSION):
@@ -91,7 +89,7 @@ class SignalGenerator:
         
         log_msg = (
             f"✨ Initialized SignalGenerator [{self.strategy_type.value}]: "
-            f"trading_tf={self.trading_timeframe}m, "
+            f"entry_tf={self.entry_timeframe}m, "
             f"trend_tf={self.trend_timeframe}m"
         )
         
@@ -173,13 +171,13 @@ class SignalGenerator:
         from services.reentry_manager import get_reentry_manager
     
         reentry_mgr = get_reentry_manager()
-        trend = self.trend_cache.get(symbol, self.trading_timeframe)
+        trend = self.trend_cache.get(symbol, self.entry_timeframe)
 
         if trend:
             can_enter, reentry_reason = reentry_mgr.can_reenter(
                 symbol=symbol,
                 profile_name=self.profile.name,
-                timeframe=self.trading_timeframe,
+                timeframe=self.entry_timeframe,
                 current_trend=trend,
                 strategy_type=self.strategy_type
             )
@@ -254,7 +252,7 @@ class SignalGenerator:
             confidence_score += self.entry_weight
         
         # 6. VOLUME CONFIRMATION
-        volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
+        volume_check, volume_reason = self._check_volume(symbol, self.entry_timeframe)
         indicators['volume'] = volume_check
 
         if volume_check['has_volume']:
@@ -274,7 +272,7 @@ class SignalGenerator:
 
         # 8. RSI SAFETY CHECK (direction-aware)
         if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
-            overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
+            overbought_check, ob_reason = self._check_not_overbought(symbol, self.entry_timeframe)
             indicators['overbought'] = overbought_check
             if not overbought_check['is_valid']:
                 reasons.append(f"⚠️  RSI: {ob_reason}")
@@ -286,7 +284,7 @@ class SignalGenerator:
                 reasons.append(f"✅ RSI: {ob_reason}")
                 confidence_score += self.safety_weight
         elif self.strategy_type == StrategyType.SHORT_TREND_FOLLOWING:
-            trend = self.trend_cache.get(symbol, self.trading_timeframe)
+            trend = self.trend_cache.get(symbol, self.entry_timeframe)
             rsi = float(trend.rsi) if trend else 50.0
             oversold = rsi < 35
             indicators['oversold'] = {"rsi": rsi, "is_valid": not oversold}
@@ -384,7 +382,7 @@ class SignalGenerator:
             strength=strength,
             source=trade_source,
             confidence=confidence_pct,
-            timeframe=self.trading_timeframe,
+            timeframe=self.entry_timeframe,
             trend_timeframe=self.trend_timeframe,
             indicators=indicators,
             timestamp=time.time(),
@@ -505,7 +503,7 @@ class SignalGenerator:
             live_decision = rules_would_enter
 
             if rules_would_enter:
-                volume_check, volume_reason = self._check_volume(symbol, self.trading_timeframe)
+                volume_check, volume_reason = self._check_volume(symbol, self.entry_timeframe)
                 indicators['volume'] = volume_check
                 if volume_check['has_volume']:
                     reasons.append(f"✅ Volume: {volume_reason}")
@@ -522,7 +520,7 @@ class SignalGenerator:
                     reasons.append(f"✅ ATR: {atr_reason}")
 
                 if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
-                    overbought_check, ob_reason = self._check_not_overbought(symbol, self.trading_timeframe)
+                    overbought_check, ob_reason = self._check_not_overbought(symbol, self.entry_timeframe)
                     indicators['overbought'] = overbought_check
                     if not overbought_check['is_valid']:
                         reasons.append(f"⚠️  RSI: {ob_reason}")
@@ -630,7 +628,7 @@ class SignalGenerator:
             strength=strength,
             source=trade_source,
             confidence=confidence_pct,
-            timeframe=self.trading_timeframe,
+            timeframe=self.entry_timeframe,
             trend_timeframe=self.trend_timeframe,
             indicators=indicators,
             timestamp=time.time(),

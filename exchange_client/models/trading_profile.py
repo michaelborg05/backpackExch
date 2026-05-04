@@ -26,8 +26,6 @@ class TradingProfile(BaseModel):
     trailing_stop_pct: Optional[Decimal] = Field(None, description="Trailing stop percentage (e.g., 1.5 for 1.5%)")
     use_trailing_stop: bool = False
     
-    # Risk management
-    max_risk_pct: Decimal = Field(Decimal("0.25"), description="Max risk per trade as % of portfolio")
     max_position_size: Optional[Decimal] = None
  
     # Market Regime Filter
@@ -54,7 +52,6 @@ class TradingProfile(BaseModel):
     atr_filter_mode: str = "require_high"
 
     enable_signal_generation: bool = False          # Enable automated signal generation
-    signal_timeframe: str = "15m"                   # Timeframe for entry signals
     signal_cooldown_seconds: Optional[int] = 900    # Wait 5min between signals for same symbol
     min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
     min_volume_ratio: float = 1.5                   # Require 50% above average volume
@@ -147,7 +144,6 @@ class ProfileCreateRequest(BaseModel):
     leverage_multiplier: Optional[float] = 1.0
 
     # Signal generation
-    signal_timeframe: Optional[str] = "15"
     signal_cooldown_seconds: Optional[int] = 900
     min_signal_confidence: Optional[float] = 72.0
     min_volume_ratio: Optional[float] = 1.0
@@ -203,7 +199,6 @@ class ProfileUpdateRequest(BaseModel):
     max_portfolio_exposure_pct: Optional[float] = None
     leverage_multiplier: Optional[float] = None
 
-    signal_timeframe: Optional[str] = None
     signal_cooldown_seconds: Optional[int] = None
     min_signal_confidence: Optional[float] = None
     min_volume_ratio: Optional[float] = None

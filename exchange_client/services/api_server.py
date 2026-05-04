@@ -566,8 +566,7 @@ async def tradingview_webhook(
                 
                 profile = profile_manager.get(profile_name)
                 adapter = get_adapter(profile)
-                trading_timeframe = getattr(profile, 'signal_timeframe', '15')
-                trend_timeframe = getattr(profile, 'trend_timeframe', '60')  # Higher TF for trend
+                trend_timeframe = getattr(profile, 'trend_timeframe', '60')
 
                 #2. Market Regime filter
                 if profile.use_market_regime_filter:
@@ -576,8 +575,8 @@ async def tradingview_webhook(
                     can_trade, regime_reason = regime_filter.can_trade(
                         symbol=alert.symbol,
                         profile_name=profile.name,
-                    primary_timeframe=trend_timeframe,  # Uses your 60m timeframe
-                    confirm_timeframe=trading_timeframe,  # Uses your 15m timeframe
+                    primary_timeframe=trend_timeframe,
+                    confirm_timeframe=getattr(profile, 'entry_timeframe', '15'),
                     strategy_type=profile.strategy_type
                     )
                 
@@ -2848,7 +2847,6 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             max_position_size_pct=body.max_position_size_pct,
             max_open_positions=body.max_open_positions,
             max_portfolio_exposure_pct=body.max_portfolio_exposure_pct,
-            signal_timeframe=body.signal_timeframe,
             signal_cooldown_seconds=body.signal_cooldown_seconds,
             min_signal_confidence=body.min_signal_confidence,
             min_volume_ratio=body.min_volume_ratio,
@@ -2936,7 +2934,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "arm_trailing_stop_pct", "use_trailing_stop",
         "default_order_size_usdc", "max_position_size_pct",
         "max_open_positions", "max_portfolio_exposure_pct",
-        "signal_timeframe", "signal_cooldown_seconds",
+        "signal_cooldown_seconds",
         "min_signal_confidence", "min_volume_ratio",
         "trend_timeframe", "entry_timeframe",
         "use_market_regime_filter", "use_trend_filter",
@@ -3230,7 +3228,6 @@ def _serialize_profile(p, cb=None) -> dict:
         "max_portfolio_exposure_pct":  float(p.max_portfolio_exposure_pct)  if p.max_portfolio_exposure_pct  else 80.0,
 
         # Signal
-        "signal_timeframe":            p.signal_timeframe,
         "signal_cooldown_seconds":     p.signal_cooldown_seconds,
         "min_signal_confidence":       float(p.min_signal_confidence) if p.min_signal_confidence else 72.0,
         "min_volume_ratio":            float(p.min_volume_ratio)      if p.min_volume_ratio      else 1.0,

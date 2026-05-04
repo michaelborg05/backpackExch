@@ -163,7 +163,6 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         atr_filter_mode=atr_filter_mode,
         # Signal generation
         enable_signal_generation=cfg.get("enable_signal_generation", False),
-        signal_timeframe=cfg.get("signal_timeframe", "15m"),
         signal_cooldown_seconds=cfg.get("signal_cooldown_seconds", 900),
         min_signal_confidence=cfg.get("min_signal_confidence", 75),
         min_volume_ratio=cfg.get("min_volume_ratio", 1.5),
@@ -344,7 +343,6 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "use_atr_filter": bool(row.use_atr_filter),
             # Signal generation
             "enable_signal_generation": bool(row.enable_signal_generation),
-            "signal_timeframe": row.signal_timeframe or "15m",
             "signal_cooldown_seconds": row.signal_cooldown_seconds or 900,
             "min_signal_confidence": row.min_signal_confidence or 75,
             "min_volume_ratio": row.min_volume_ratio or 1.5,

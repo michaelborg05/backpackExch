@@ -408,7 +408,6 @@
             <div class="form-section">
               <div class="section-title">Signal Generation</div>
               <div class="form-grid">
-                <div class="field"><label>Signal Timeframe (min)</label><input id="f-signal_timeframe" type="text" placeholder="15"></div>
                 <div class="field"><label>Trend Timeframe (min)</label><input id="f-trend_timeframe" type="text" placeholder="60"></div>
                 <div class="field"><label>Entry Timeframe (min)</label><input id="f-entry_timeframe" type="text" placeholder="15"></div>
                 <div class="field"><label>Cooldown (seconds)</label><input id="f-signal_cooldown_seconds" type="number" step="60" placeholder="900"></div>
@@ -1850,7 +1849,6 @@ function fillSettings(p) {
   set('f-max_portfolio_exposure_pct', p.max_portfolio_exposure_pct);
   set('f-leverage_multiplier', p.leverage_multiplier ?? 1.0);
   updateLeverageField(p.market_type);
-  set('f-signal_timeframe', p.signal_timeframe);
   set('f-trend_timeframe', p.trend_timeframe);
   set('f-entry_timeframe', p.entry_timeframe);
   set('f-signal_cooldown_seconds', p.signal_cooldown_seconds);
@@ -2005,7 +2003,6 @@ async function saveSettings() {
     max_open_positions:             getInt('f-max_open_positions'),
     max_portfolio_exposure_pct:     getNum('f-max_portfolio_exposure_pct'),
     leverage_multiplier:            getNum('f-leverage_multiplier'),
-    signal_timeframe:               getStr('f-signal_timeframe'),
     trend_timeframe:                getStr('f-trend_timeframe'),
     entry_timeframe:                getStr('f-entry_timeframe'),
     signal_cooldown_seconds:        getInt('f-signal_cooldown_seconds'),

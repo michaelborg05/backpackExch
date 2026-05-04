@@ -24,7 +24,6 @@ class TradingProfileDB(Base):
     arm_trailing_stop_pct = Column(Numeric, nullable=True)
 
     # Risk management
-    max_risk_pct = Column(Numeric, default=0.25)
     default_order_size_usdc = Column(Numeric, default=50)
     max_position_size_pct = Column(Numeric, nullable=True)
     max_open_positions = Column(Numeric, nullable=True)
@@ -36,7 +35,6 @@ class TradingProfileDB(Base):
     market_type = Column(String, default="SPOT", server_default=text("'SPOT'"))  # "SPOT" | "PERP"
     
     # Timing & Signal Generation
-    signal_timeframe = Column(String, default="15")
     signal_cooldown_seconds = Column(Integer, default=900)
     min_signal_confidence = Column(Float, default=72.0)
     min_volume_ratio = Column(Float, default=1.0)

@@ -711,7 +711,7 @@ class MonitoringService:
             # Capture market state at close time for post-trade analysis
             from cache.trend_cache import get_trend_cache
             _tc = get_trend_cache()
-            _tf = getattr(profile, 'entry_timeframe', getattr(profile, 'signal_timeframe', '15'))
+            _tf = getattr(profile, 'entry_timeframe', '15')
             _t = _tc.get(symbol, _tf)
             _ema20_slope, _ema20_dir = _tc._get_ema_slope(symbol, _tf)
             _rsi_delta, _rsi_dir = _tc._get_rsi_momentum(symbol, _tf)
