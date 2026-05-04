@@ -11,8 +11,8 @@ from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEven
 
 def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", signal_snapshot=None, direction: str = None) -> Trade:
     """Save a trade to the database"""
-    from models.signal_snapshot import SignalSnapshot
-    if isinstance(signal_snapshot, SignalSnapshot):
+    from models.signal_snapshot import SignalSnapshot, TradeSignalSnapshot
+    if isinstance(signal_snapshot, (SignalSnapshot, TradeSignalSnapshot)):
         signal_snapshot = signal_snapshot.model_dump()
 
     if order.price is None or order.price == "0":

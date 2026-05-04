@@ -19,7 +19,7 @@ from cache.market_info_cache import get_market_info_cache
 from models.balance import BalanceReader
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal
-from models.signal_snapshot import SignalSnapshot
+from models.signal_snapshot import TradeSignalSnapshot
 from models.trade import OrderResponse
 from services.telegram_service import get_telegram
 from services.circuit_breaker import get_circuit_breaker
@@ -711,18 +711,15 @@ class MonitoringService:
             # Capture market state at close time for post-trade analysis
             from cache.trend_cache import get_trend_cache
             _tc = get_trend_cache()
-            _tf = getattr(profile, 'entry_timeframe', '15')
-            _t = _tc.get(symbol, _tf)
-            _ema20_slope, _ema20_dir = _tc._get_ema_slope(symbol, _tf)
-            _rsi_delta, _rsi_dir = _tc._get_rsi_momentum(symbol, _tf)
-            close_snapshot = SignalSnapshot.build(
-                trend=_t,
-                timeframe=_tf,
-                ema20_slope=_ema20_slope,
-                ema20_dir=_ema20_dir,
-                rsi_delta=_rsi_delta,
-                rsi_dir=_rsi_dir,
-                pct_b=_t.bb_pct_b if _t else None,
+            _entry_tf = getattr(profile, 'entry_timeframe', '15')
+            _trend_tf = getattr(profile, 'trend_timeframe', None)
+            _entry_t = _tc.get(symbol, _entry_tf)
+            close_snapshot = TradeSignalSnapshot.build(
+                trend_cache=_tc,
+                symbol=symbol,
+                entry_tf=_entry_tf,
+                trend_tf=_trend_tf,
+                pct_b=_entry_t.bb_pct_b if _entry_t else None,
             )
 
             close_kwargs = dict(

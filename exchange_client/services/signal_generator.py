@@ -10,7 +10,7 @@ from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
-from models.signal_snapshot import SignalSnapshot
+from models.signal_snapshot import TradeSignalSnapshot
 from api_builders.factory import get_adapter
 from cache.regime_filter import get_regime_filter
 from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
@@ -361,17 +361,12 @@ class SignalGenerator:
 
         trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
 
-        # Build flat indicator snapshot (in-memory lookups, no recalculation)
-        snapshot_trend = self.trend_cache.get(symbol, self.entry_timeframe)
-        ema20_slope, ema20_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
-        rsi_delta, rsi_dir = self.trend_cache._get_rsi_momentum(symbol, self.entry_timeframe)
-        signal_snapshot = SignalSnapshot.build(
-            trend=snapshot_trend,
-            timeframe=self.entry_timeframe,
-            ema20_slope=ema20_slope,
-            ema20_dir=ema20_dir,
-            rsi_delta=rsi_delta,
-            rsi_dir=rsi_dir,
+        # Build indicator snapshot capturing both entry (LTF) and trend (HTF) state
+        signal_snapshot = TradeSignalSnapshot.build(
+            trend_cache=self.trend_cache,
+            symbol=symbol,
+            entry_tf=self.entry_timeframe,
+            trend_tf=self.trend_timeframe,
             pct_b=pct_b,
             score=confidence_pct,
         )
@@ -608,16 +603,11 @@ class SignalGenerator:
         position_size_scalar = 1.0
         trade_source = TradeReason.AI_SIGNAL.value if self.trading_type == TradingType.AI_LIVE else TradeReason.RULES_SIGNAL.value
 
-        snapshot_trend = self.trend_cache.get(symbol, self.entry_timeframe)
-        ema20_slope, ema20_dir = self.trend_cache._get_ema_slope(symbol, self.entry_timeframe)
-        rsi_delta, rsi_dir = self.trend_cache._get_rsi_momentum(symbol, self.entry_timeframe)
-        signal_snapshot = SignalSnapshot.build(
-            trend=snapshot_trend,
-            timeframe=self.entry_timeframe,
-            ema20_slope=ema20_slope,
-            ema20_dir=ema20_dir,
-            rsi_delta=rsi_delta,
-            rsi_dir=rsi_dir,
+        signal_snapshot = TradeSignalSnapshot.build(
+            trend_cache=self.trend_cache,
+            symbol=symbol,
+            entry_tf=self.entry_timeframe,
+            trend_tf=self.trend_timeframe,
             pct_b=pct_b,
             score=confidence_pct,
         )

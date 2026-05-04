@@ -34,3 +34,41 @@ class SignalSnapshot(BaseModel):
             bb_pct_b=round(pct_b, 3) if pct_b is not None else None,
             score=round(score, 1) if score is not None else None,
         )
+
+
+class TradeSignalSnapshot(BaseModel):
+    entry: SignalSnapshot
+    trend: Optional[SignalSnapshot] = None
+
+    @classmethod
+    def build(cls, trend_cache, symbol: str, entry_tf: str, trend_tf: Optional[str], pct_b=None, score=None) -> "TradeSignalSnapshot":
+        entry_data = trend_cache.get(symbol, entry_tf)
+        entry_slope, entry_dir = trend_cache._get_ema_slope(symbol, entry_tf)
+        entry_rsi_delta, entry_rsi_dir = trend_cache._get_rsi_momentum(symbol, entry_tf)
+        entry_snapshot = SignalSnapshot.build(
+            trend=entry_data,
+            timeframe=entry_tf,
+            ema20_slope=entry_slope,
+            ema20_dir=entry_dir,
+            rsi_delta=entry_rsi_delta,
+            rsi_dir=entry_rsi_dir,
+            pct_b=pct_b,
+            score=score,
+        )
+
+        trend_snapshot = None
+        if trend_tf and trend_tf != entry_tf:
+            trend_data = trend_cache.get(symbol, trend_tf)
+            trend_slope, trend_dir = trend_cache._get_ema_slope(symbol, trend_tf)
+            trend_rsi_delta, trend_rsi_dir = trend_cache._get_rsi_momentum(symbol, trend_tf)
+            trend_snapshot = SignalSnapshot.build(
+                trend=trend_data,
+                timeframe=trend_tf,
+                ema20_slope=trend_slope,
+                ema20_dir=trend_dir,
+                rsi_delta=trend_rsi_delta,
+                rsi_dir=trend_rsi_dir,
+                pct_b=trend_data.bb_pct_b if trend_data else None,
+            )
+
+        return cls(entry=entry_snapshot, trend=trend_snapshot)
