@@ -1159,7 +1159,7 @@ function loadPanel(n){({overview:loadOv,profiles:loadProfiles,positions:()=>load
 function startAR(){
   if(_ar)clearInterval(_ar);
   setInterval(checkHealth,30000);
-  _ar=setInterval(()=>{const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api'};if(t&&m[t])loadPanel(m[t]);},20000);
+  _ar=setInterval(()=>{const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api'};if(t&&m[t])loadPanel(m[t]);},60000);
 }
 function refAll(){checkHealth();const t=document.querySelector('.nt.on')?.textContent?.toLowerCase().trim();const m={overview:'overview',positions:'positions',balances:'balances',market:'market','api explorer':'api'};if(m[t])loadPanel(m[t]);}
 
