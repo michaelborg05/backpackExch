@@ -516,7 +516,7 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                 skipped += 1
                 # Still attempt to migrate indicators in case they're missing
                 existing.strategy_type = str(cfg.get("strategy_type","trend_following"))
-                existing.signal_cooldown_seconds = int(cfg.get("signal_cooldown_seconds",900))
+                existing.signal_cooldown_minutes = int(cfg.get("signal_cooldown_minutes", 15))
                 existing.min_signal_confidence = Decimal(cfg.get("min_signal_confidence",70))
                 existing.min_volume_ratio = Decimal(cfg.get("min_volume_ratio",1))
                 existing.use_market_regime_filter = bool(cfg.get("use_market_regime_filter", False))
@@ -555,7 +555,7 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                     strategy_type=cfg.get("strategy_type", "trend_following"),
 
                     # Signal generation
-                    signal_cooldown_seconds=int(cfg.get("signal_cooldown_seconds", 900)),
+                    signal_cooldown_minutes=int(cfg.get("signal_cooldown_minutes", 15)),
                     min_signal_confidence=float(cfg.get("min_signal_confidence", 72.0)),
                     min_volume_ratio=float(cfg.get("min_volume_ratio", 1.0)),
 
@@ -925,7 +925,7 @@ def add_new_profile():
             strategy_type= "trend_following",
 
             # Signal generation
-            signal_cooldown_seconds=900,
+            signal_cooldown_minutes=15,
             min_signal_confidence=72,
             min_volume_ratio=1.0,
 
@@ -1051,7 +1051,7 @@ def populate_default_settings():
             """
             profile_settings = {
                 'signal_check_interval': '5',  # Override for specific profile
-                'signal_cooldown_seconds': '180',  # 3 minutes for this profile
+                'signal_cooldown_minutes': '3',  # 3 minutes for this profile
             }
             bulk_upsert_settings(db, profile_settings, profile_name='your_profile_name')
             logger.info("✅ Successfully added profile-specific settings")

@@ -179,7 +179,9 @@ class SignalGenerator:
                 profile_name=self.profile.name,
                 timeframe=self.entry_timeframe,
                 current_trend=trend,
-                strategy_type=self.strategy_type
+                strategy_type=self.strategy_type,
+                sl_cooldown_minutes=self.profile.sl_cooldown_minutes,
+                tp_cooldown_minutes=self.profile.tp_cooldown_minutes,
             )
             
             if not can_enter:

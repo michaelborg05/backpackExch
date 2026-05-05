@@ -2847,7 +2847,9 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             max_position_size_pct=body.max_position_size_pct,
             max_open_positions=body.max_open_positions,
             max_portfolio_exposure_pct=body.max_portfolio_exposure_pct,
-            signal_cooldown_seconds=body.signal_cooldown_seconds,
+            signal_cooldown_minutes=body.signal_cooldown_minutes,
+            sl_cooldown_minutes=body.sl_cooldown_minutes,
+            tp_cooldown_minutes=body.tp_cooldown_minutes,
             min_signal_confidence=body.min_signal_confidence,
             min_volume_ratio=body.min_volume_ratio,
             trend_timeframe=body.trend_timeframe,
@@ -2934,7 +2936,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "arm_trailing_stop_pct", "use_trailing_stop",
         "default_order_size_usdc", "max_position_size_pct",
         "max_open_positions", "max_portfolio_exposure_pct",
-        "signal_cooldown_seconds",
+        "signal_cooldown_minutes", "sl_cooldown_minutes", "tp_cooldown_minutes",
         "min_signal_confidence", "min_volume_ratio",
         "trend_timeframe", "entry_timeframe",
         "use_market_regime_filter", "use_trend_filter",
@@ -3228,7 +3230,9 @@ def _serialize_profile(p, cb=None) -> dict:
         "max_portfolio_exposure_pct":  float(p.max_portfolio_exposure_pct)  if p.max_portfolio_exposure_pct  else 80.0,
 
         # Signal
-        "signal_cooldown_seconds":     p.signal_cooldown_seconds,
+        "signal_cooldown_minutes":     p.signal_cooldown_minutes,
+        "sl_cooldown_minutes":         p.sl_cooldown_minutes,
+        "tp_cooldown_minutes":         p.tp_cooldown_minutes,
         "min_signal_confidence":       float(p.min_signal_confidence) if p.min_signal_confidence else 72.0,
         "min_volume_ratio":            float(p.min_volume_ratio)      if p.min_volume_ratio      else 1.0,
 

@@ -35,7 +35,9 @@ class TradingProfileDB(Base):
     market_type = Column(String, default="SPOT", server_default=text("'SPOT'"))  # "SPOT" | "PERP"
     
     # Timing & Signal Generation
-    signal_cooldown_seconds = Column(Integer, default=900)
+    signal_cooldown_minutes = Column(Integer, default=15)
+    sl_cooldown_minutes = Column(Integer, nullable=True)   # per-profile override; None = use global setting
+    tp_cooldown_minutes = Column(Integer, nullable=True)   # per-profile override; None = use global setting
     min_signal_confidence = Column(Float, default=72.0)
     min_volume_ratio = Column(Float, default=1.0)
     

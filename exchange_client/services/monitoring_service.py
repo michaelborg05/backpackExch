@@ -1083,7 +1083,7 @@ class MonitoringService:
             # Check cooldown (don't signal same symbol too frequently)
             cooldown_key = f"{profile.name}_{ticker}"
             last_signal_time = self._last_signals.get(cooldown_key, 0)
-            cooldown_seconds = getattr(profile, 'signal_cooldown_seconds', 300)  # 5 min default
+            cooldown_seconds = getattr(profile, 'signal_cooldown_minutes', 15) * 60
             
             if time.time() - last_signal_time < cooldown_seconds:
                 remaining = cooldown_seconds - (time.time() - last_signal_time)

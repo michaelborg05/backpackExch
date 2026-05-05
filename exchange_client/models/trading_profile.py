@@ -52,7 +52,9 @@ class TradingProfile(BaseModel):
     atr_filter_mode: str = "require_high"
 
     enable_signal_generation: bool = False          # Enable automated signal generation
-    signal_cooldown_seconds: Optional[int] = 900    # Wait 5min between signals for same symbol
+    signal_cooldown_minutes: Optional[int] = 15     # Scan throttle: min minutes between signal evaluations for same symbol
+    sl_cooldown_minutes: Optional[int] = None       # Post-SL re-entry pause (None = use global setting)
+    tp_cooldown_minutes: Optional[int] = None       # Post-TP re-entry pause (None = use global setting)
     min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
     min_volume_ratio: float = 1.5                   # Require 50% above average volume
 
@@ -144,7 +146,9 @@ class ProfileCreateRequest(BaseModel):
     leverage_multiplier: Optional[float] = 1.0
 
     # Signal generation
-    signal_cooldown_seconds: Optional[int] = 900
+    signal_cooldown_minutes: Optional[int] = 15
+    sl_cooldown_minutes: Optional[int] = None
+    tp_cooldown_minutes: Optional[int] = None
     min_signal_confidence: Optional[float] = 72.0
     min_volume_ratio: Optional[float] = 1.0
 
@@ -199,7 +203,9 @@ class ProfileUpdateRequest(BaseModel):
     max_portfolio_exposure_pct: Optional[float] = None
     leverage_multiplier: Optional[float] = None
 
-    signal_cooldown_seconds: Optional[int] = None
+    signal_cooldown_minutes: Optional[int] = None
+    sl_cooldown_minutes: Optional[int] = None
+    tp_cooldown_minutes: Optional[int] = None
     min_signal_confidence: Optional[float] = None
     min_volume_ratio: Optional[float] = None
 

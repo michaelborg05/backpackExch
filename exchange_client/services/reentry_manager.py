@@ -28,7 +28,9 @@ class ReEntryManager:
         profile_name: str,
         timeframe: str,     #Uses Trading timeframe
         current_trend: TrendData,  # Your TrendData from trend_cache - Trading timeframe
-        strategy_type: StrategyType
+        strategy_type: StrategyType,
+        sl_cooldown_minutes: Optional[int] = None,  # Per-profile override; None = use global setting
+        tp_cooldown_minutes: Optional[int] = None,  # Per-profile override; None = use global setting
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if re-entry is allowed based on recent DB exits
@@ -58,10 +60,13 @@ class ReEntryManager:
             close_reason = recent_exit.close_reason
             
             # Get cooldown period based on last exit - convert minutes to seconds
+            # Per-profile overrides take priority over global settings
             if close_reason == PositionCloseReason.TAKE_PROFIT:
-                cooldown = self.settings.cooldown_take_profit_mins * 60
+                mins = tp_cooldown_minutes if tp_cooldown_minutes is not None else self.settings.cooldown_take_profit_mins
+                cooldown = mins * 60
             elif close_reason == PositionCloseReason.STOP_LOSS:
-                cooldown = self.settings.cooldown_stop_loss_mins * 60
+                mins = sl_cooldown_minutes if sl_cooldown_minutes is not None else self.settings.cooldown_stop_loss_mins
+                cooldown = mins * 60
             else:
                 cooldown = self.settings.cooldown_default_mins * 60
             
