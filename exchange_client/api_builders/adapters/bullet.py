@@ -655,6 +655,7 @@ class BulletAdapter(ExchangeAdapter):
                     profile_name=self.profile.name,
                     symbol=original_symbol or order_ns.symbol,
                     sell_trade=saved_trade,
+                    reason=source,
                 )
                 if closed:
                     self.logger.info(
