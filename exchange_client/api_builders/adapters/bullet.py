@@ -603,6 +603,22 @@ class BulletAdapter(ExchangeAdapter):
                 )
             return None
 
+        # 3b. The IOC limit price (aggressive +/-0.5%) is not the fill price.
+        # Fetch the actual execution price from userTrades and override before persisting.
+        actual_fill = self._lookup_fill_price(
+            symbol=original_symbol or order_ns.symbol,
+            side=order_ns.side,
+        )
+        if actual_fill:
+            self.logger.info(
+                f"[Bullet] Overriding order price {order_response.price} → {actual_fill} "
+                f"(actual fill from userTrades)"
+            )
+            order_response.price = str(actual_fill)
+            order_response.executed_quote_quantity = str(
+                float(order_response.executed_quantity) * actual_fill
+            )
+
         # 4. Persist to DB (same path as ProcessMarketOrder)
         db = None
         try:
@@ -1000,6 +1016,26 @@ class BulletAdapter(ExchangeAdapter):
         rounded = (q // s) * s
         places = max(0, -s.as_tuple().exponent)
         return f"{rounded:.{places}f}"
+
+    def _lookup_fill_price(self, symbol: str, side: str) -> Optional[float]:
+        """Return the actual fill price of the most recent trade matching symbol/side.
+
+        Called after a successful tx submission to correct the IOC limit price
+        (which is the aggressive +/-0.5% price, not what the exchange actually executed at).
+        """
+        try:
+            trades = self.get_user_trades(symbol, limit=5)
+            side_lower = side.lower()
+            for trade in trades:
+                t_side = str(trade.get("side", "")).lower()
+                if t_side not in (side_lower, "buy" if side_lower == "bid" else "sell"):
+                    continue
+                price = trade.get("price") or trade.get("avgPrice") or trade.get("fillPrice")
+                if price:
+                    return float(price)
+        except Exception as e:
+            self.logger.warning(f"[Bullet] _lookup_fill_price failed: {e}")
+        return None
 
     def _get_next_nonce(self) -> int:
         """Return a monotonically increasing nonce based on current timestamp (ms)."""
