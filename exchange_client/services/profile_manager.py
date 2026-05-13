@@ -358,6 +358,8 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "min_position_age_for_trend_check": row.min_position_age_for_trend_check or 120,
             # Market type & direction
             "market_type": row.market_type or "SPOT",
+            # Leverage (perps only)
+            "leverage_multiplier": float(row.leverage_multiplier or 1.0),
         }
         from utils.db_secrets import resolve_secret
         # Resolve API credentials from linked ExchangeAccount
