@@ -36,7 +36,11 @@ def get_adapter(profile: TradingProfile) -> ExchangeAdapter:
         from api_builders.adapters.bullet import BulletAdapter
         return BulletAdapter(profile)
 
+    if exchange_type == "binance":
+        from api_builders.adapters.binance import BinanceAdapter
+        return BinanceAdapter(profile)
+
     raise ValueError(
         f"Unknown exchange_type {exchange_type!r} on profile {profile.name!r}. "
-        f"Valid options: 'backpack', 'bullet'"
+        f"Valid options: 'backpack', 'bullet', 'binance'"
     )

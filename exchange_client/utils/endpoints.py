@@ -259,6 +259,73 @@ class BulletEndpoints:
         return f"{cls.COINGECKO_BASE}/coins/{coin_id}/ohlc?vs_currency=usd&days={days}"
 
 
+class BinanceEndpoints:
+    """Binance Spot exchange endpoint definitions.
+
+    Authentication:
+      - All signed endpoints require: timestamp (ms), signature (HMAC-SHA256 of query string)
+      - Header: X-MBX-APIKEY: <api_key>
+
+    Symbol format: "SOLUSDT", "BTCUSDT" (concatenated, no separator).
+    The adapter converts "SOL_USDC" → "SOLUSDT" automatically.
+    """
+    BASE = "https://api.binance.com"
+
+    @classmethod
+    def ticker(cls, symbol: str) -> str:
+        return f"{cls.BASE}/api/v3/ticker/price?symbol={symbol}"
+
+    @classmethod
+    def depth(cls, symbol: str, limit: int = 20) -> str:
+        return f"{cls.BASE}/api/v3/depth?symbol={symbol}&limit={limit}"
+
+    @classmethod
+    def klines(cls, symbol: str, interval: str = "1h",
+               start_time_ms: int = None, limit: int = 100) -> str:
+        url = f"{cls.BASE}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        if start_time_ms:
+            url += f"&startTime={start_time_ms}"
+        return url
+
+    @classmethod
+    def exchange_info(cls, symbol: str = None) -> str:
+        if symbol:
+            return f"{cls.BASE}/api/v3/exchangeInfo?symbol={symbol}"
+        return f"{cls.BASE}/api/v3/exchangeInfo"
+
+    @classmethod
+    def account(cls) -> str:
+        """Authenticated — requires timestamp + signature in query string."""
+        return f"{cls.BASE}/api/v3/account"
+
+    @classmethod
+    def order(cls) -> str:
+        """POST (place) or DELETE (cancel) — requires timestamp + signature."""
+        return f"{cls.BASE}/api/v3/order"
+
+    @classmethod
+    def open_orders(cls, symbol: str = None) -> str:
+        """Authenticated — requires timestamp + signature."""
+        base = f"{cls.BASE}/api/v3/openOrders"
+        if symbol:
+            return f"{base}?symbol={symbol}"
+        return base
+
+    @classmethod
+    def all_orders(cls, symbol: str) -> str:
+        """Authenticated — requires timestamp + signature."""
+        return f"{cls.BASE}/api/v3/allOrders?symbol={symbol}"
+
+    @classmethod
+    def my_trades(cls, symbol: str) -> str:
+        """Authenticated — requires timestamp + signature."""
+        return f"{cls.BASE}/api/v3/myTrades?symbol={symbol}"
+
+    @classmethod
+    def server_time(cls) -> str:
+        return f"{cls.BASE}/api/v3/time"
+
+
 # ── Backward-compatibility alias ─────────────────────────────────────────────
 # All existing callers that do `from utils.endpoints import APIEndpoints` continue
 # to work without any changes. New code should use get_endpoints() or the class directly.
@@ -269,6 +336,7 @@ APIEndpoints = BackpackEndpoints
 _REGISTRY = {
     "backpack": BackpackEndpoints,
     "bullet": BulletEndpoints,
+    "binance": BinanceEndpoints,
 }
 
 
@@ -276,10 +344,10 @@ def get_endpoints(exchange_type: str):
     """Return the endpoint class for the given exchange type.
 
     Args:
-        exchange_type: "backpack" or "bullet"
+        exchange_type: "backpack", "bullet", or "binance"
 
     Returns:
-        BackpackEndpoints or BulletEndpoints (the class itself, not an instance)
+        The endpoint class (not an instance)
 
     Raises:
         ValueError: if exchange_type is unknown

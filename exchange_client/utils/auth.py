@@ -45,8 +45,10 @@ def build_auth_headers(
         )
     if exchange_type == "bullet":
         return {}  # Bullet reads: no auth headers — wallet address goes in the URL
+    if exchange_type == "binance":
+        return {"X-MBX-APIKEY": profile.api_key}
     raise ValueError(
-        f"Unknown exchange type: {exchange_type!r}. Valid: 'backpack', 'bullet'"
+        f"Unknown exchange type: {exchange_type!r}. Valid: 'backpack', 'bullet', 'binance'"
     )
 
 
@@ -483,3 +485,42 @@ def _backpack_headers(
         instruction=instruction,
         window=window,
     )
+
+
+# ── Binance ───────────────────────────────────────────────────────────────────
+
+def build_binance_signed_request(
+    base_url: str,
+    params: Dict[str, Any],
+    api_key: str,
+    secret: str,
+) -> tuple:
+    """Return (signed_url, headers) for an authenticated Binance REST request.
+
+    Appends `timestamp` and `signature` to *params*, then URL-encodes the full
+    query string.  The HMAC-SHA256 signature covers every parameter (including
+    timestamp) so callers must not modify *params* after calling this function.
+
+    Args:
+        base_url: Endpoint URL without query string (e.g. "https://api.binance.com/api/v3/account").
+        params:   Dict of query parameters (mutated in-place to add timestamp).
+        api_key:  Binance API key (sent as X-MBX-APIKEY header).
+        secret:   Binance secret key (used for HMAC-SHA256 signing).
+
+    Returns:
+        (signed_url, headers) where headers = {"X-MBX-APIKEY": api_key}.
+    """
+    import hmac
+    import hashlib
+    import urllib.parse
+
+    params["timestamp"] = int(time.time() * 1000)
+    query_string = urllib.parse.urlencode(params)
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        query_string.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    signed_url = f"{base_url}?{query_string}&signature={signature}"
+    headers = {"X-MBX-APIKEY": api_key}
+    return signed_url, headers
