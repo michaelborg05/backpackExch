@@ -108,6 +108,26 @@
         <table class="dt"><thead><tr><th>Symbol</th><th>ATR</th><th>ATR %</th><th>Trend</th></tr></thead>
         <tbody id="atb"><tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody></table></div>
       </div>
+      <div class="card fi" style="margin-top:16px">
+        <div class="ch"><span class="ct">Monitored Symbols</span><span style="color:var(--txd);font-size:11px" id="ms-count"></span><button class="btn-new" style="margin-left:auto" onclick="openAddMonitoredSymbol()">+ Add Symbol</button></div>
+        <table class="dt"><thead><tr><th>Symbol</th><th>Status</th><th>Added</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody id="ms-tbody"><tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <!-- ── Add Monitored Symbol Modal ──────────────────────────────────────── -->
+    <div class="modal-overlay" id="ms-add-modal" style="display:none" onclick="if(event.target===this)closeMsModal()">
+      <div class="modal-box" style="max-width:360px">
+        <div class="modal-header"><span class="modal-title">Add Monitored Symbol</span><button class="modal-close" onclick="closeMsModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-row"><label>Symbol</label><input type="text" id="ms-symbol-input" placeholder="e.g. SOL_USDC" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
+          <div class="form-err" id="ms-err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="mbtn sec" onclick="closeMsModal()">Cancel</button>
+          <button class="mbtn" onclick="saveMonitoredSymbol()">Add</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel" id="p-api">
@@ -586,7 +606,7 @@
       <div class="modal-box" style="max-width:420px">
         <div class="modal-header"><span class="modal-title" id="sym-modal-title-p">Add Symbol Config</span><button class="modal-close" onclick="closeSymModalP()">×</button></div>
         <div class="modal-body">
-          <div class="form-row"><label>Symbol</label><input type="text" id="smp-symbol" placeholder="e.g. SOL_USDC" style="text-transform:uppercase"></div>
+          <div class="form-row"><label>Symbol</label><select id="smp-symbol" style="width:100%;background:var(--bg3);border:1px solid var(--brd);color:var(--tx);padding:6px 10px;font-family:'Space Mono';font-size:12px;outline:none"><option value="">— select symbol —</option></select></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div class="form-row" style="margin-bottom:0"><label>Order Size (USDC)</label><input type="number" step="0.01" id="smp-size" placeholder="150"></div>
             <div class="form-row" style="margin-bottom:0"><label>Max Position %</label><input type="number" step="0.1" id="smp-maxpos" placeholder="40"></div>
@@ -1120,6 +1140,82 @@ async function loadMkt(){
   const mon=await api('/monitoring/status');
   const atb=document.getElementById('atb');
   if(mon&&atb){const atrs=mon.atr_data??mon.atr??[];atb.innerHTML=Array.isArray(atrs)&&atrs.length?atrs.map(a=>'<tr><td class="ts">'+a.symbol+'</td><td class="tm">'+fpr(a.atr??0)+'</td><td class="tm">'+((a.atr_pct??0).toFixed(2))+'%</td><td class="tm '+((a.trend??'').toUpperCase()==='BULL'?'tg':'tr2')+'">'+a.trend+'</td></tr>').join(''):'<tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">No ATR data</td></tr>';}
+  loadMonitoredSymbols();
+}
+
+// ── Monitored Symbols management ─────────────────────────────────────────────
+let _msData = [];
+
+async function loadMonitoredSymbols() {
+  const tbody = document.getElementById('ms-tbody');
+  const countEl = document.getElementById('ms-count');
+  try {
+    const data = await api('/monitored-symbols');
+    _msData = data?.symbols ?? [];
+    if (countEl) countEl.textContent = _msData.length + ' symbol(s)';
+    if (!_msData.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">No monitored symbols — add one to start receiving trend data</td></tr>';
+      return;
+    }
+    tbody.innerHTML = _msData.map(s => {
+      const en = !!s.enabled;
+      const added = s.created_at ? new Date(s.created_at).toLocaleDateString() : '—';
+      return '<tr><td style="color:var(--txb);font-weight:700">'+s.symbol+'</td>'
+        +'<td><span class="bs '+(en?'bl2':'bsh')+'">'+(en?'ACTIVE':'DISABLED')+'</span></td>'
+        +'<td style="color:var(--txd);font-size:11px">'+added+'</td>'
+        +'<td style="text-align:right"><button class="btn-new" style="font-size:10px;margin-right:6px" onclick="toggleMonitoredSymbol(\''+s.symbol+'\','+(en?'false':'true')+')">'+(en?'Disable':'Enable')+'</button>'
+        +'<button class="btn-new" style="font-size:10px;border-color:var(--red)" onclick="deleteMonitoredSymbol(\''+s.symbol+'\')">Delete</button></td></tr>';
+    }).join('');
+  } catch(e) {
+    if(tbody) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--red);padding:24px">Error loading symbols</td></tr>';
+  }
+}
+
+function openAddMonitoredSymbol() {
+  document.getElementById('ms-symbol-input').value = '';
+  document.getElementById('ms-err').textContent = '';
+  document.getElementById('ms-add-modal').style.display = 'flex';
+}
+function closeMsModal() { document.getElementById('ms-add-modal').style.display = 'none'; }
+
+async function saveMonitoredSymbol() {
+  const symbol = document.getElementById('ms-symbol-input').value.trim().toUpperCase();
+  if (!symbol) { document.getElementById('ms-err').textContent = 'Symbol required'; return; }
+  try {
+    await api('/monitored-symbols', { method: 'POST', body: JSON.stringify({ symbol }) });
+    closeMsModal();
+    loadMonitoredSymbols();
+    showToast('Symbol added: ' + symbol);
+  } catch(e) { document.getElementById('ms-err').textContent = e.message; }
+}
+
+async function toggleMonitoredSymbol(symbol, enabled) {
+  try {
+    await api('/monitored-symbols/' + symbol, { method: 'PATCH', body: JSON.stringify({ enabled: enabled === true || enabled === 'true' }) });
+    loadMkt();
+    showToast(symbol + ((enabled === true || enabled === 'true') ? ' enabled' : ' disabled'));
+  } catch(e) { showToast('Error: ' + e.message, true); }
+}
+
+async function deleteMonitoredSymbol(symbol) {
+  const msg = 'Delete ' + symbol + ' from monitored symbols?\n\nThis will:\n• Remove it from all profile symbol configs\n• Delete all trend data history for this symbol\n• Stop processing future trend webhooks for it\n\nThis cannot be undone.';
+  if (!confirm(msg)) return;
+  try {
+    const result = await api('/monitored-symbols/' + symbol, { method: 'DELETE' });
+    loadMkt();
+    showToast('Deleted ' + symbol + ' — ' + result.symbol_configs_removed + ' profile config(s) and ' + result.trend_rows_removed + ' trend rows removed');
+  } catch(e) { showToast('Error: ' + e.message, true); }
+}
+
+async function populateSymbolDropdown(selectEl, currentValue) {
+  try {
+    const data = await api('/monitored-symbols');
+    const symbols = (data?.symbols ?? []).filter(s => s.enabled).map(s => s.symbol);
+    selectEl.innerHTML = '<option value="">— select symbol —</option>'
+      + symbols.map(s => '<option value="'+s+'"'+(s===currentValue?' selected':'')+'>'+s+'</option>').join('');
+  } catch(e) {
+    selectEl.innerHTML = '<option value="">Error loading symbols</option>';
+  }
 }
 
 let EPS=[];
@@ -2251,8 +2347,9 @@ function renderSymTableP() {
 function openAddSymbol() {
   _symEditId = null;
   document.getElementById('sym-modal-title-p').textContent = 'Add Symbol Config';
-  document.getElementById('smp-symbol').value = '';
-  document.getElementById('smp-symbol').disabled = false;
+  const sel = document.getElementById('smp-symbol');
+  sel.disabled = false;
+  populateSymbolDropdown(sel, '');
   document.getElementById('smp-size').value = '';
   document.getElementById('smp-maxpos').value = '';
   document.getElementById('smp-enabled').checked = true;
@@ -2264,8 +2361,9 @@ function openAddSymbol() {
 function openEditSymP(sym) {
   _symEditId = sym.symbol;
   document.getElementById('sym-modal-title-p').textContent = 'Edit Symbol Config';
-  document.getElementById('smp-symbol').value = sym.symbol;
-  document.getElementById('smp-symbol').disabled = true;
+  const sel = document.getElementById('smp-symbol');
+  sel.disabled = true;
+  populateSymbolDropdown(sel, sym.symbol);
   document.getElementById('smp-size').value = sym.order_size_usdc != null ? parseFloat(sym.order_size_usdc) : '';
   document.getElementById('smp-maxpos').value = sym.max_position_size_pct != null ? parseFloat(sym.max_position_size_pct) : '';
   document.getElementById('smp-enabled').checked = !!sym.enabled;

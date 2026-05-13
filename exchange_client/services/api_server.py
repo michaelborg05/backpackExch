@@ -1111,8 +1111,20 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert, background_tasks: B
         raise HTTPException(status_code=500, detail=str(e))
 
 def sync_trend_updates(trends):
+    from db.utils import get_db_session
+    from db.crud_monitored_symbols import get_enabled_symbols_set
+    try:
+        with get_db_session() as db:
+            allowed = get_enabled_symbols_set(db)
+    except Exception as e:
+        apiserver_logger.warning(f"Could not load monitored symbols, allowing all: {e}")
+        allowed = None
+
     trend_cache = get_trend_cache()
     for trend_data in trends:
+        if allowed is not None and trend_data.symbol not in allowed:
+            apiserver_logger.debug(f"Ignoring trend data for unmonitored symbol: {trend_data.symbol}")
+            continue
         trend_cache.update(trend_data)
 
 @app.get("/trend/{symbol}/{timeframe}")
@@ -1631,6 +1643,66 @@ async def delete_symbol_config_endpoint(profile_name: str, symbol: str):
     except Exception as e:
         apiserver_logger.error(f"Error deleting symbol config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/monitored-symbols", dependencies=[Depends(require_read_permission)])
+async def list_monitored_symbols():
+    """List all monitored symbols (the global allowlist for trend data)."""
+    from db.utils import get_db_session
+    from db.crud_monitored_symbols import get_all_monitored_symbols
+    with get_db_session() as db:
+        rows = get_all_monitored_symbols(db)
+        return {"symbols": [
+            {"symbol": r.symbol, "enabled": r.enabled,
+             "created_at": r.created_at.isoformat() if r.created_at else None,
+             "updated_at": r.updated_at.isoformat() if r.updated_at else None}
+            for r in rows
+        ]}
+
+
+@app.post("/monitored-symbols", dependencies=[Depends(require_admin_permission)])
+async def add_monitored_symbol(body: dict):
+    """Add a symbol to the monitored allowlist."""
+    from db.utils import get_db_session
+    from db.crud_monitored_symbols import add_monitored_symbol as _add
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol required")
+    with get_db_session() as db:
+        row = _add(db, symbol, enabled=body.get("enabled", True))
+        return {"symbol": row.symbol, "enabled": row.enabled}
+
+
+@app.patch("/monitored-symbols/{symbol}", dependencies=[Depends(require_admin_permission)])
+async def toggle_monitored_symbol(symbol: str, body: dict):
+    """Enable or disable a monitored symbol."""
+    from db.utils import get_db_session
+    from db.crud_monitored_symbols import set_monitored_symbol_enabled
+    if "enabled" not in body:
+        raise HTTPException(status_code=400, detail="enabled field required")
+    with get_db_session() as db:
+        row = set_monitored_symbol_enabled(db, symbol.upper(), bool(body["enabled"]))
+        if not row:
+            raise HTTPException(status_code=404, detail=f"{symbol} not found")
+        return {"symbol": row.symbol, "enabled": row.enabled}
+
+
+@app.delete("/monitored-symbols/{symbol}", dependencies=[Depends(require_admin_permission)])
+async def delete_monitored_symbol(symbol: str):
+    """
+    Remove a symbol from the monitored allowlist.
+    Cascades: removes from all profile symbol_configs, deletes trend_analysis_log rows,
+    and evicts from TrendCache.
+    """
+    from db.utils import get_db_session
+    from db.crud_monitored_symbols import delete_monitored_symbol as _delete
+    from cache.symbol_cache import get_symbol_cache
+    with get_db_session() as db:
+        result = _delete(db, symbol.upper())
+        if not result["deleted"]:
+            raise HTTPException(status_code=404, detail=f"{symbol} not found")
+        get_symbol_cache().refresh(db)
+    return result
 
 
 @app.post("/config/symbol/{profile_name}/{symbol}/test", dependencies=[Depends(require_read_permission)])

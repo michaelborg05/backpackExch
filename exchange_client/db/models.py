@@ -777,6 +777,17 @@ class ConfigAuditLog(Base):
             f"at={self.changed_at}>"
         )
 
+class MonitoredSymbol(Base):
+    """Global allowlist of symbols the system actively monitors for trend data."""
+    __tablename__ = "monitored_symbols"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, unique=True, nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ExchangeAccount(Base):
     __tablename__ = "exchange_accounts"
 

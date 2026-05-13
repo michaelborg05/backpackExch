@@ -226,10 +226,22 @@ class HealthAlertingService:
                 self.logger.debug("Trend cache is empty - skipping staleness check")
                 return
 
+            # Only alert on symbols that are actively monitored and enabled
+            try:
+                from db.utils import get_db_session
+                from db.crud_monitored_symbols import get_enabled_symbols_set
+                with get_db_session() as _db:
+                    monitored = get_enabled_symbols_set(_db)
+            except Exception:
+                monitored = None  # Fall back to checking all cached entries
+
             now = time.time()
             stale_entries = [
                 e for e in entries
                 if e.get("age_seconds", 0) > self.trend_max_age
+                and (monitored is None or any(
+                    e.get("key", "").startswith(sym + "_") for sym in monitored
+                ))
             ]
 
             if stale_entries:

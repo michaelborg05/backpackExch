@@ -160,6 +160,18 @@ class PriceCache:
                 "ttl_seconds": self.ttl_seconds
             }
     
+    def remove_ticker(self, symbol: str) -> bool:
+        """Remove a single ticker and its metadata from the cache."""
+        with self._lock:
+            removed = symbol in self._cache
+            self._cache.pop(symbol, None)
+            self._last_update.pop(symbol, None)
+            if hasattr(self, '_ticker_meta'):
+                self._ticker_meta.pop(symbol, None)
+            if removed:
+                self.logger.info(f"Removed ticker {symbol} from price cache")
+            return removed
+
     def clear(self):
         """Clear the cache"""
         with self._lock:

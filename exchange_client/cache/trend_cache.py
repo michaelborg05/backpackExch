@@ -1992,6 +1992,20 @@ class TrendCache:
         else:
             return False, f"Only {total_passes}/{total_units} bullish, need {min_indicators_required} ({details})"
     
+    def evict_symbol(self, symbol: str) -> int:
+        """Remove all cache entries for a symbol across all timeframes. Returns count removed."""
+        prefix = f"{symbol}_"
+        keys_to_remove = [k for k in self._cache if k.startswith(prefix)]
+        for key in keys_to_remove:
+            self._cache.pop(key, None)
+            self._rsi_history.pop(key, None)
+            self._ema_history.pop(key, None)
+            self._bb_history.pop(key, None)
+            self._candle_history.pop(key, None)
+        if keys_to_remove:
+            self.logger.info(f"Evicted {len(keys_to_remove)} cache entries for symbol {symbol}")
+        return len(keys_to_remove)
+
     def get_cache_info(self) -> dict:
         """Get cache status with statistics including DB persistence stats"""
         total = self._stats['total_updates']
