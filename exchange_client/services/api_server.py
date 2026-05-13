@@ -1984,12 +1984,14 @@ async def copy_indicators(
     source_profile: str,
     category: Optional[str] = None,   # "trend" | "entry" | None = both
     mode: str = "replace",             # "replace" | "add"
+    copy_profile_params: bool = False, # also copy timeframes, min_indicators, invalidation settings
 ):
     """Copy indicators from source_profile into target_profile.
 
     category: which indicators to copy — "trend", "entry", or omit for both.
     mode: "replace" deletes existing indicators in the chosen category first;
           "add" appends without removing anything.
+    copy_profile_params: also copy timeframes, min_indicators_required, and invalidation settings.
     """
     from db.utils import get_db_session
     from db.models import IndicatorDB
@@ -2025,7 +2027,7 @@ async def copy_indicators(
                     tgt_q = tgt_q.filter(IndicatorDB.category == category)
                 deleted_count = tgt_q.delete(synchronize_session=False)
 
-            # Insert copies
+            # Insert copies (including indicator_group for grouping logic)
             new_inds = []
             for src in source_inds:
                 new_ind = IndicatorDB(
@@ -2035,9 +2037,31 @@ async def copy_indicators(
                     params=dict(src.params) if src.params else {},
                     is_hard_stop=src.is_hard_stop,
                     enabled=src.enabled,
+                    indicator_group=src.indicator_group,
                 )
                 db.add(new_ind)
                 new_inds.append(new_ind)
+
+            import copy as _copy
+            # Copy profile-level group configs (deep copy so nested hard_stop/require_all are included)
+            if not category or category == "trend":
+                tgt_prof.trend_indicator_groups = _copy.deepcopy(src_prof.trend_indicator_groups) if src_prof.trend_indicator_groups else None
+            if not category or category == "entry":
+                tgt_prof.entry_indicator_groups = _copy.deepcopy(src_prof.entry_indicator_groups) if src_prof.entry_indicator_groups else None
+
+            # Optionally copy key profile params (timeframes, signal logic, invalidation)
+            if copy_profile_params:
+                if not category or category == "trend":
+                    tgt_prof.trend_timeframe = src_prof.trend_timeframe
+                    tgt_prof.min_indicators_required = src_prof.min_indicators_required
+                if not category or category == "entry":
+                    tgt_prof.entry_timeframe = src_prof.entry_timeframe
+                    tgt_prof.min_entry_indicators_required = src_prof.min_entry_indicators_required
+                if not category:
+                    tgt_prof.max_position_hours = src_prof.max_position_hours
+                    tgt_prof.use_trend_invalidation_exit = src_prof.use_trend_invalidation_exit
+                    tgt_prof.trend_invalidation_indicators = src_prof.trend_invalidation_indicators
+                    tgt_prof.min_position_age_for_trend_check = src_prof.min_position_age_for_trend_check
 
             db.commit()
             refresh_profiles_from_db()
@@ -2045,7 +2069,7 @@ async def copy_indicators(
             cat_label = f"`{category}`" if category else "all"
             apiserver_logger.info(
                 f"Copied {len(new_inds)} {cat_label} indicator(s) from '{source_profile}' "
-                f"to '{target_profile}' (mode={mode}, deleted={deleted_count})"
+                f"to '{target_profile}' (mode={mode}, deleted={deleted_count}, copy_profile_params={copy_profile_params})"
             )
             return {
                 "success": True,
@@ -2054,6 +2078,7 @@ async def copy_indicators(
                 "message": (
                     f"Copied {len(new_inds)} indicator(s) from '{source_profile}' "
                     f"({mode}, {deleted_count} removed)"
+                    + (" + profile params" if copy_profile_params else "")
                 ),
             }
     except HTTPException:

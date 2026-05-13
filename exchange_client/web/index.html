@@ -642,12 +642,18 @@
               <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="radio" name="copy-ind-cat" value="entry"> Entry only</label>
             </div>
           </div>
-          <div style="margin-bottom:18px">
+          <div style="margin-bottom:14px">
             <label style="font-size:11px;color:var(--txd);display:block;margin-bottom:6px">Mode</label>
             <div style="display:flex;gap:8px">
               <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="radio" name="copy-ind-mode" value="replace" checked> Replace (delete existing first)</label>
               <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="radio" name="copy-ind-mode" value="add"> Add (keep existing)</label>
             </div>
+          </div>
+          <div style="margin-bottom:18px">
+            <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="copy-ind-params">
+              <span>Also copy key profile params <span style="color:var(--txd)">(timeframes, min indicators required, invalidation settings)</span></span>
+            </label>
           </div>
           <div id="copy-ind-warning" style="display:none;background:rgba(220,80,80,0.12);border:1px solid rgba(220,80,80,0.35);border-radius:4px;padding:8px 10px;font-size:11px;color:#e07070;margin-bottom:14px"></div>
         </div>
@@ -2668,6 +2674,7 @@ function openCopyIndicatorsModal() {
   // Reset to defaults
   document.querySelector('input[name="copy-ind-cat"][value=""]').checked = true;
   document.querySelector('input[name="copy-ind-mode"][value="replace"]').checked = true;
+  document.getElementById('copy-ind-params').checked = false;
   document.getElementById('copy-ind-warning').style.display = 'none';
   // Wire change listeners once
   if (!_copyIndListenersWired) {
@@ -2701,6 +2708,7 @@ async function executeCopyIndicators() {
   const source = document.getElementById('copy-ind-source').value;
   const cat = document.querySelector('input[name="copy-ind-cat"]:checked')?.value ?? '';
   const mode = document.querySelector('input[name="copy-ind-mode"]:checked')?.value ?? 'replace';
+  const copyParams = document.getElementById('copy-ind-params').checked;
   const target = _currentProfile?.name;
   if (!source || !target) return;
 
@@ -2710,6 +2718,7 @@ async function executeCopyIndicators() {
   try {
     let url = `/indicators/${target}/copy-from/${source}?mode=${mode}`;
     if (cat) url += `&category=${cat}`;
+    if (copyParams) url += `&copy_profile_params=true`;
     const result = await api(url, { method: 'POST' });
     closeCopyIndicatorsModal();
     await loadIndicatorsP();
