@@ -175,8 +175,16 @@ class ReplayTrendCache:
         min_indicators_required: int = 2,
         use_hard_stops: bool = True,
         groups_config: dict = None,
+        price_mode: str = "both",
     ) -> tuple:
-        """Delegates to _validate_timeframe_indicators exactly as TrendCache does."""
+        """Delegates to _validate_timeframe_indicators exactly as TrendCache does.
+
+        price_mode controls which candle price is used for live-price indicators:
+          "both"  — try candle low first, then high; return True if either passes (default, closest to live)
+          "low"   — candle low only (conservative long entry check)
+          "high"  — candle high only (conservative short entry check)
+          "close" — original behaviour (candle close only)
+        """
         trend = self.get(symbol, timeframe)
         if trend is None:
             return False, f"No trend data for {symbol} {timeframe}"
@@ -188,9 +196,21 @@ class ReplayTrendCache:
                 {"type": "price_vs_vwap",  "params": {}},
             ]
 
+        if price_mode == "both":
+            ok, msg = self._validate_timeframe_indicators(
+                symbol, timeframe, trend, indicators_config, min_indicators_required,
+                use_hard_stops, groups_config=groups_config, price_mode="low",
+            )
+            if ok:
+                return True, msg
+            return self._validate_timeframe_indicators(
+                symbol, timeframe, trend, indicators_config, min_indicators_required,
+                use_hard_stops, groups_config=groups_config, price_mode="high",
+            )
+
         return self._validate_timeframe_indicators(
             symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops,
-            groups_config=groups_config,
+            groups_config=groups_config, price_mode=price_mode,
         )
 
     # ------------------------------------------------------------------
@@ -346,6 +366,7 @@ class ReplayTrendCache:
         min_indicators_required: int,
         use_hard_stops: bool = True,
         groups_config: dict = None,
+        price_mode: str = "close",
     ):
         """
         Full copy of TrendCache._validate_timeframe_indicators — all indicator
@@ -356,8 +377,12 @@ class ReplayTrendCache:
         hard_stop_failures = []
         indicator_groups_list = []  # parallel to results: indicator_group per indicator
 
-        # Use the candle close as current price in replay (no live price cache)
-        current_price = trend.price
+        # price_mode controls which candle price is used for indicators that compare
+        # against live price (bollinger_bands, price_vs_vwap, price_vs_ema, etc.)
+        # "close" = original behaviour; "low"/"high" = candle extremes; "both" handled by is_bullish
+        _price_map = {"low": getattr(trend, "low", trend.price),
+                      "high": getattr(trend, "high", trend.price)}
+        current_price = _price_map.get(price_mode, trend.price)
 
         for indicator_config in indicators:
             indicator_type = indicator_config.get("type")
@@ -903,12 +928,6 @@ class ReplayTrendCache:
                                               and c2_body_hi >= c1_body_hi)
                             body_pct       = c2_body / c2_total if c2_total > 0 else 0
 
-                            values.update({
-                                "c1_open": c1["open"], "c1_close": c1["close"],
-                                "c2_open": c2["open"], "c2_close": c2["close"],
-                                "c1_bear": c1_bear,    "c2_bull":  c2_bull,
-                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
-                            })
 
                             is_bull = c2_bull and c1_bear and engulfs
                             msg = (
@@ -949,12 +968,6 @@ class ReplayTrendCache:
                             engulfs        = (c2_body_lo <= c1_body_lo
                                               and c2_body_hi >= c1_body_hi)
                             body_pct       = c2_body / c2_total if c2_total > 0 else 0
-                            values.update({
-                                "c1_open": c1["open"], "c1_close": c1["close"],
-                                "c2_open": c2["open"], "c2_close": c2["close"],
-                                "c1_bull": c1_bull,    "c2_bear":  c2_bear,
-                                "engulfs": engulfs,    "body_pct": round(body_pct, 4),
-                            })
                             is_bull = c2_bear and c1_bull and engulfs
                             msg = (
                                 f"Bearish engulfing: {'✓' if is_bull else '✗'} "
@@ -1551,7 +1564,6 @@ class BacktestProfile:
 
     DEFAULTS = {
         "strategy_type":              "trend_following",
-        "signal_timeframe":           "15",
         "trend_timeframe":            "60",
         "entry_timeframe":            "15",
         "use_trend_filter":           True,
@@ -1942,6 +1954,7 @@ class BacktestEngine:
         symbol: str,
         start: datetime,
         end: datetime,
+        price_mode: str = "both",
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
@@ -1954,11 +1967,9 @@ class BacktestEngine:
         )
 
         # Load all timeframes we need
-        needed_timeframes = {self.profile.signal_timeframe}
+        needed_timeframes = {self.profile.entry_timeframe}
         if self.profile.use_trend_filter:
             needed_timeframes.add(self.profile.trend_timeframe)
-        if self.profile.use_entry_filter:
-            needed_timeframes.add(self.profile.entry_timeframe)
 
         all_rows = (
             self.db.query(TrendAnalysisLog)
@@ -2036,7 +2047,7 @@ class BacktestEngine:
 
             # ---- Signal generation ----
             # Check cooldown
-            cooldown_sec = getattr(self.profile, "signal_cooldown_seconds", 900)
+            cooldown_sec = getattr(self.profile, "signal_cooldown_minutes", 15) * 60
             if cooldown_until and row_time < cooldown_until:
                 continue
 
@@ -2063,6 +2074,7 @@ class BacktestEngine:
                     indicators_config=self.profile.trend_indicators,
                     min_indicators_required=self.profile.min_indicators_required,
                     groups_config=getattr(self.profile, "trend_indicator_groups", None),
+                    price_mode=price_mode,
                 )
                 if not trend_ok:
                     if self.verbose:
@@ -2077,6 +2089,7 @@ class BacktestEngine:
                     indicators_config=self.profile.entry_indicators,
                     min_indicators_required=self.profile.min_entry_indicators_required,
                     groups_config=getattr(self.profile, "entry_indicator_groups", None),
+                    price_mode=price_mode,
                 )
                 if not entry_ok:
                     if self.verbose:

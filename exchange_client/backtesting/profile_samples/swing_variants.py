@@ -1,7 +1,6 @@
 
 _SWING_BASE = {
     "strategy_type": "trend_following",
-    "signal_timeframe": "60",
     "entry_timeframe": "60",
     "trend_timeframe": "240",
     "take_profit_pct": 3,
@@ -9,7 +8,7 @@ _SWING_BASE = {
     "trailing_stop_pct": 1.2,
     "arm_trailing_stop_pct": 1.2,
     "use_trailing_stop": True,
-    "signal_cooldown_seconds": 7500,
+    "signal_cooldown_minutes": 120,
     "min_signal_confidence": 74.0,
     "min_volume_ratio": 1.3,
     "use_trend_filter": True,
@@ -103,7 +102,7 @@ SWING_VARIANTS = {
         "use_trailing_stop":     True,
         "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
         "min_signal_confidence": 73.0,
-        "signal_cooldown_seconds": 3600,
+        "signal_cooldown_minutes": 60,
 
         # ── 4HR TREND FILTER ───────────────────────────────────────────────────────
         # Confirms the 4hr trend is in the bullish momentum zone (47-69 RSI)
@@ -216,7 +215,7 @@ SWING_VARIANTS = {
         "use_trailing_stop":     True,
         "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
         "min_signal_confidence": 73.0,
-        "signal_cooldown_seconds": 3600,
+        "signal_cooldown_minutes": 60,
     
         # ── 4HR TREND FILTER ───────────────────────────────────────────────────────
         # Confirms the 4hr trend is in the bullish momentum zone (47-69 RSI)
@@ -309,7 +308,7 @@ SWING_VARIANTS = {
         "use_trailing_stop":     True,
         "max_position_hours":    36,    # Tighter time limit — pullback bounces should resolve in 36hr
         "min_signal_confidence": 73.0,
-        "signal_cooldown_seconds": 3600,
+        "signal_cooldown_minutes": 60,
 
         # ── 4HR TREND FILTER ───────────────────────────────────────────────────────
         # Confirms the 4hr trend is in the bullish momentum zone (47-69 RSI)
