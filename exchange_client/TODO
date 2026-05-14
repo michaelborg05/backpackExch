@@ -15,8 +15,6 @@ TO DO
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
 # check in Circuit breaker deposit code
 # Add option to remove/close circuit breaker cleanly
-# when copying indicators, also copy grouping logic
-# when copying indicators, add option to also copy key params like timeframes, how many indicators need to pass, invalidation times, etc
 
 No need
  # split into separate modules so i can migrate to Azure
@@ -126,3 +124,5 @@ Improvement: The "Mean Reversion" Check
 # clean up the trend cache to remove the unused reasons summaries. Add it to the validation and remove the column from trades table
 # Add option to remove trend data for a coin no longer in use (Maybe in market page)
 # All close_reasons for perps is MANUAL , not stop or TP
+# when copying indicators, also copy grouping logic
+# when copying indicators, add option to also copy key params like timeframes, how many indicators need to pass, invalidation times, etc

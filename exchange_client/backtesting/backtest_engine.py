@@ -469,6 +469,9 @@ class ReplayTrendCache:
                     elif req_dir == "not_falling":
                         is_bull   = slope_pct >= -min_slope
                         direction = "rising/flat" if is_bull else "falling"
+                    elif req_dir == "not_rising":
+                        is_bull   = slope_pct <= max_slope if max_slope is not None else slope_pct <= min_slope
+                        direction = "flat/falling" if is_bull else "rising"
                     else:
                         is_bull   = abs(slope_pct) <= min_slope
                         direction = "flat"
@@ -1958,6 +1961,8 @@ class BacktestEngine:
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
+        is_short = "short" in getattr(self.profile, "strategy_type", "")
+
         result = BacktestResult(
             profile_name=self.profile.name,
             symbol=symbol,
@@ -2027,7 +2032,10 @@ class BacktestEngine:
             if open_pos is not None:
                 exit_result = self._check_exit(open_pos, row)
                 if exit_result:
-                    pnl = (exit_result["price"] - open_pos["entry_price"]) / open_pos["entry_price"] * 100
+                    if is_short:
+                        pnl = (open_pos["entry_price"] - exit_result["price"]) / open_pos["entry_price"] * 100
+                    else:
+                        pnl = (exit_result["price"] - open_pos["entry_price"]) / open_pos["entry_price"] * 100
                     open_pos["trade"].exit_price  = exit_result["price"]
                     open_pos["trade"].exit_time   = row_time
                     open_pos["trade"].exit_reason = exit_result["reason"]
@@ -2035,14 +2043,21 @@ class BacktestEngine:
                     open_pos["trade"].won         = pnl > 0
                     open_pos = None
                 else:
-                    # Update trailing stop high-water mark
+                    # Update trailing stop water mark
                     if self.profile.use_trailing_stop:
-                        if row.high > open_pos["highest_price"]:
-                            open_pos["highest_price"] = float(row.high)
-                            arm_pct = float(self.profile.arm_trailing_stop_pct) / 100
-                            if not open_pos["trailing_armed"]:
-                                if open_pos["highest_price"] >= open_pos["entry_price"] * (1 + arm_pct):
-                                    open_pos["trailing_armed"] = True
+                        arm_pct = float(self.profile.arm_trailing_stop_pct) / 100
+                        if is_short:
+                            if float(row.low) < open_pos["lowest_price"]:
+                                open_pos["lowest_price"] = float(row.low)
+                                if not open_pos["trailing_armed"]:
+                                    if open_pos["lowest_price"] <= open_pos["entry_price"] * (1 - arm_pct):
+                                        open_pos["trailing_armed"] = True
+                        else:
+                            if row.high > open_pos["highest_price"]:
+                                open_pos["highest_price"] = float(row.high)
+                                if not open_pos["trailing_armed"]:
+                                    if open_pos["highest_price"] >= open_pos["entry_price"] * (1 + arm_pct):
+                                        open_pos["trailing_armed"] = True
                     continue  # still in trade — skip signal logic
 
             # ---- Signal generation ----
@@ -2112,13 +2127,20 @@ class BacktestEngine:
 
             score = trend_weight + entry_weight + (volume_weight * vol_score)
 
-            # Safety: RSI overbought check
+            # Safety: RSI check (direction-aware)
             cached_trend = cache.get(symbol, self.profile.entry_timeframe)
             cached_htf   = cache.get(symbol, self.profile.trend_timeframe)
-            if cached_trend and cached_trend.rsi < 65:
-                score += safety_weight
-            elif cached_trend and cached_trend.rsi > 80:
-                score -= 30
+            if is_short:
+                # For shorts: elevated RSI is confirmation; very low RSI is a warning
+                if cached_trend and cached_trend.rsi > 55:
+                    score += safety_weight
+                elif cached_trend and cached_trend.rsi < 35:
+                    score -= 30
+            else:
+                if cached_trend and cached_trend.rsi < 65:
+                    score += safety_weight
+                elif cached_trend and cached_trend.rsi > 80:
+                    score -= 30
 
             confidence_pct = max(0.0, (score / max_conf) * 100) if max_conf > 0 else 0.0
 
@@ -2162,8 +2184,12 @@ class BacktestEngine:
             )
             result.trades.append(trade)
 
-            tp_price = entry_price * (1 + float(self.profile.take_profit_pct) / 100)
-            sl_price = entry_price * (1 - float(self.profile.stop_loss_pct)   / 100)
+            if is_short:
+                tp_price = entry_price * (1 - float(self.profile.take_profit_pct) / 100)
+                sl_price = entry_price * (1 + float(self.profile.stop_loss_pct)   / 100)
+            else:
+                tp_price = entry_price * (1 + float(self.profile.take_profit_pct) / 100)
+                sl_price = entry_price * (1 - float(self.profile.stop_loss_pct)   / 100)
 
             open_pos = {
                 "trade":           trade,
@@ -2171,8 +2197,10 @@ class BacktestEngine:
                 "tp_price":        tp_price,
                 "sl_price":        sl_price,
                 "trailing_armed":  False,
-                "highest_price":   entry_price,
+                "highest_price":   entry_price,  # long trailing high-water mark
+                "lowest_price":    entry_price,  # short trailing low-water mark
                 "entry_time":      row_time,
+                "is_short":        is_short,
             }
             
             from datetime import timedelta
@@ -2190,7 +2218,10 @@ class BacktestEngine:
             last_price = float(last_row.close)
             last_time  = last_row.timestamp.replace(tzinfo=timezone.utc) \
                          if last_row.timestamp.tzinfo is None else last_row.timestamp
-            pnl = (last_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
+            if is_short:
+                pnl = (open_pos["entry_price"] - last_price) / open_pos["entry_price"] * 100
+            else:
+                pnl = (last_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
             open_pos["trade"].exit_price  = last_price
             open_pos["trade"].exit_time   = last_time
             open_pos["trade"].exit_reason = "end_of_window"
@@ -2206,21 +2237,34 @@ class BacktestEngine:
         high  = float(row.high)
         low   = float(row.low)
         close = float(row.close)
+        is_short = pos.get("is_short", False)
 
-        # Stop loss check (uses candle low)
-        if low <= pos["sl_price"]:
-            return {"price": pos["sl_price"], "reason": "stop_loss", "candle_price": low}
-
-        # Take profit check (uses candle high)
-        if high >= pos["tp_price"]:
-            return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": high}
-
-        # Trailing stop
-        if self.profile.use_trailing_stop and pos["trailing_armed"]:
-            trail_pct  = float(self.profile.trailing_stop_pct) / 100
-            trail_sl   = pos["highest_price"] * (1 - trail_pct)
-            if low <= trail_sl:
-                return {"price": trail_sl, "reason": "trailing_stop", "candle_price": low}
+        if is_short:
+            # Stop loss: price rose above SL
+            if high >= pos["sl_price"]:
+                return {"price": pos["sl_price"], "reason": "stop_loss", "candle_price": high}
+            # Take profit: price fell to TP
+            if low <= pos["tp_price"]:
+                return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": low}
+            # Trailing stop: trail above the lowest seen price
+            if self.profile.use_trailing_stop and pos["trailing_armed"]:
+                trail_pct = float(self.profile.trailing_stop_pct) / 100
+                trail_sl  = pos["lowest_price"] * (1 + trail_pct)
+                if high >= trail_sl:
+                    return {"price": trail_sl, "reason": "trailing_stop", "candle_price": high}
+        else:
+            # Stop loss: price fell below SL
+            if low <= pos["sl_price"]:
+                return {"price": pos["sl_price"], "reason": "stop_loss", "candle_price": low}
+            # Take profit: price rose to TP
+            if high >= pos["tp_price"]:
+                return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": high}
+            # Trailing stop: trail below the highest seen price
+            if self.profile.use_trailing_stop and pos["trailing_armed"]:
+                trail_pct = float(self.profile.trailing_stop_pct) / 100
+                trail_sl  = pos["highest_price"] * (1 - trail_pct)
+                if low <= trail_sl:
+                    return {"price": trail_sl, "reason": "trailing_stop", "candle_price": low}
 
         # Max position age (hours)
         max_hours = getattr(self.profile, "max_position_hours", None)
