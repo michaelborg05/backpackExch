@@ -629,6 +629,7 @@ class TelegramService:
 
             profiles = self.profile_manager.get_all_profiles()
             balance_text = ""
+            grand_total = Decimal("0")
             seen_accounts: set = set()
 
             for profile in profiles:
@@ -692,6 +693,10 @@ class TelegramService:
                     header = f"\n💰 <b>{label}\nTotal: ${round(total_value, 2)}</b>\n"
 
                 balance_text += header + "\n".join(asset_lines) + "\n"
+                grand_total += total_value
+
+            if len(seen_accounts) > 1:
+                balance_text += f"\n<b>━━━━━━━━━━━━━━━━━━━━\nAll Accounts: ${round(grand_total, 2)}</b>\n"
 
         except Exception as e:
             balance_text = f"❌ Error fetching balances: {str(e)}"
