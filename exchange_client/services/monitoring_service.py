@@ -105,8 +105,8 @@ class MonitoringService:
         from sqlalchemy import func
         from datetime import datetime, timezone, timedelta
 
-        # Look back far enough to cover any reasonable cooldown setting (max 2 hours)
-        lookback_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+        # Look back far enough to cover any reasonable cooldown setting (max 6 hours)
+        lookback_cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
         signal_reasons = [TradeReason.RULES_SIGNAL.value, TradeReason.AI_SIGNAL.value]
 
         rows = (
