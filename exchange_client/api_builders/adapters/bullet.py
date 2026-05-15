@@ -248,7 +248,7 @@ class BulletAdapter(ExchangeAdapter):
         rounded_qty   = self._round_quantity(float(quantity), step_size)
         # TP/SL must be based on the current market price, not the aggressive IOC limit price,
         # so on-chain levels match what the monitoring loop records in the DB.
-        market_price = self._get_raw_market_price(symbol) or float(rounded_price)
+        market_price = float(self._get_raw_market_price(symbol) or rounded_price)
         tpsl = None if is_close else self._build_tpsl(market_price, side="BID", tick_size=tick_size)
 
         from types import SimpleNamespace
@@ -283,7 +283,7 @@ class BulletAdapter(ExchangeAdapter):
         entry_price = self._get_aggressive_price(symbol, side="ASK")
         rounded_price = self._round_price(entry_price, tick_size)
         rounded_qty   = self._round_quantity(float(quantity), step_size)
-        market_price = self._get_raw_market_price(symbol) or float(rounded_price)
+        market_price = float(self._get_raw_market_price(symbol) or rounded_price)
         tpsl = None if is_close else self._build_tpsl(market_price, side="ASK", tick_size=tick_size)
 
         from types import SimpleNamespace
