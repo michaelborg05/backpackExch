@@ -45,8 +45,14 @@ class ReEntryManager:
             (can_enter, reason) tuple
         """
         with get_db_session() as db:
+            # Lookback must cover the longest possible cooldown so we don't miss a recent exit
+            sl_mins = sl_cooldown_minutes if sl_cooldown_minutes is not None else self.settings.cooldown_stop_loss_mins
+            tp_mins = tp_cooldown_minutes if tp_cooldown_minutes is not None else self.settings.cooldown_take_profit_mins
+            max_cooldown_mins = max(sl_mins, tp_mins, self.settings.cooldown_default_mins)
+            lookback_hours = max(2, -(-max_cooldown_mins // 60) + 1)  # ceil(mins/60) + 1hr buffer
+
             # Get most recent closed position for this symbol/profile
-            recent_exit = self._get_most_recent_exit(db, profile_name, symbol)
+            recent_exit = self._get_most_recent_exit(db, profile_name, symbol, lookback_hours=lookback_hours)
             
             # No recent exit = free to enter
             if recent_exit is None:
@@ -113,16 +119,16 @@ class ReEntryManager:
         db: Session,
         profile_name: str,
         symbol: str,
-        lookback_hours: int = 2  # Only check last 2 hours
+        lookback_hours: int = 2
     ) -> Optional[Position]:
         """
         Get the most recent closed position for a symbol
-        
+
         Args:
             db: Database session
             profile_name: Profile name
             symbol: Symbol
-            lookback_hours: How far back to look (default 6 hours)
+            lookback_hours: How far back to look — caller must pass a value that covers the full cooldown window
             
         Returns:
             Most recent Position or None
