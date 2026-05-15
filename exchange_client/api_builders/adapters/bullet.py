@@ -246,7 +246,10 @@ class BulletAdapter(ExchangeAdapter):
         entry_price = self._get_aggressive_price(symbol, side="BID")
         rounded_price = self._round_price(entry_price, tick_size)
         rounded_qty   = self._round_quantity(float(quantity), step_size)
-        tpsl = None if is_close else self._build_tpsl(float(rounded_price), side="BID", tick_size=tick_size)
+        # TP/SL must be based on the current market price, not the aggressive IOC limit price,
+        # so on-chain levels match what the monitoring loop records in the DB.
+        market_price = self._get_raw_market_price(symbol) or float(rounded_price)
+        tpsl = None if is_close else self._build_tpsl(market_price, side="BID", tick_size=tick_size)
 
         from types import SimpleNamespace
         order_ns = SimpleNamespace(
@@ -280,7 +283,8 @@ class BulletAdapter(ExchangeAdapter):
         entry_price = self._get_aggressive_price(symbol, side="ASK")
         rounded_price = self._round_price(entry_price, tick_size)
         rounded_qty   = self._round_quantity(float(quantity), step_size)
-        tpsl = None if is_close else self._build_tpsl(float(rounded_price), side="ASK", tick_size=tick_size)
+        market_price = self._get_raw_market_price(symbol) or float(rounded_price)
+        tpsl = None if is_close else self._build_tpsl(market_price, side="ASK", tick_size=tick_size)
 
         from types import SimpleNamespace
         order_ns = SimpleNamespace(
@@ -571,6 +575,8 @@ class BulletAdapter(ExchangeAdapter):
         try:
             url = BulletEndpoints.submit_tx()
             raw = api_request(url, body={"body": tx_b64}, requestType=HttpMethod.POST)
+            if raw:
+                self.logger.debug(f"[Bullet] /tx/submit response for {order_ns.symbol}: {raw}")
         except Exception as e:
             err_str = str(e)
             if "size_must_be_positive" in err_str or "size must be greater than zero" in err_str.lower():
@@ -874,6 +880,13 @@ class BulletAdapter(ExchangeAdapter):
             "dynamic_size": False,
         }
 
+    def _get_raw_market_price(self, symbol: str) -> Optional[float]:
+        """Return the current market price from cache without slippage adjustment."""
+        from cache.price_cache import get_price_cache
+        cache = get_price_cache()
+        base = symbol.split("_")[0].split("-")[0]
+        return cache.get_price(symbol) or cache.get_price(f"{base}_USDC") or cache.get_price(base)
+
     def _get_aggressive_price(self, symbol: str, side: str) -> float:
         """Return a price with 0.5% slippage for IOC market-equivalent orders.
 
@@ -1032,20 +1045,34 @@ class BulletAdapter(ExchangeAdapter):
         places = max(0, -s.as_tuple().exponent)
         return f"{rounded:.{places}f}"
 
+    def _normalize_ts_ms(self, ts) -> int:
+        """Normalize a Bullet trade timestamp to milliseconds regardless of source unit."""
+        v = int(ts)
+        if v > 1_000_000_000_000_000:   # nanoseconds → ms
+            return v // 1_000_000
+        if v > 1_000_000_000_000:       # microseconds → ms
+            return v // 1_000
+        if v < 10_000_000_000:          # seconds → ms
+            return v * 1_000
+        return v                        # already milliseconds
+
     def _lookup_fill_price(self, symbol: str, side: str, min_timestamp_ms: int = None) -> Optional[float]:
         """Return the actual fill price of the most recent trade matching symbol/side.
 
         Called after a successful tx submission to correct the IOC limit price.
-        Retries up to 3 times with a delay because userTrades indexing lags the tx.
+        Retries up to 4 times with increasing delays because userTrades indexing lags the tx.
         min_timestamp_ms filters out trades that predate the current order.
         """
         import time as _time
         side_lower = side.lower()
         match_sides = {side_lower, "buy" if side_lower == "bid" else "sell"}
 
-        for attempt in range(3):
+        # Give the API time to index the fill before the first check.
+        _time.sleep(5.0)
+
+        for attempt in range(4):
             if attempt > 0:
-                _time.sleep(1.5)
+                _time.sleep(2.0)
             try:
                 trades = self.get_user_trades(symbol, limit=10)
                 for trade in trades:
@@ -1053,11 +1080,12 @@ class BulletAdapter(ExchangeAdapter):
                     if t_side not in match_sides:
                         continue
                     if min_timestamp_ms:
-                        trade_time = (
+                        trade_time_raw = (
                             trade.get("time") or trade.get("timestamp")
                             or trade.get("tradeTime") or 0
                         )
-                        if int(trade_time) < min_timestamp_ms:
+                        trade_time_ms = self._normalize_ts_ms(trade_time_raw)
+                        if trade_time_ms < min_timestamp_ms:
                             continue
                     price = trade.get("price") or trade.get("avgPrice") or trade.get("fillPrice")
                     if price:
