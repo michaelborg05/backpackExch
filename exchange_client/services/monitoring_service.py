@@ -53,6 +53,7 @@ class MonitoringService:
         self.settings = get_settings_helper()
         #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
         self._symbol_cache = get_symbol_cache()
+        self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
 
         with get_db_session() as db:
                 self._symbol_cache.refresh(db)
@@ -63,7 +64,11 @@ class MonitoringService:
                     self.logger.info(f"Cache warmed up: {stats['symbols_loaded']} symbols, "
                             f"{stats['total_snapshots_replayed']} snapshots")
                 except Exception as e:
-                    self.logger.error(f"Error warming up cache: {e}")   
+                    self.logger.error(f"Error warming up cache: {e}")
+                try:
+                    self._load_cooldown_cache_from_db(db)
+                except Exception as e:
+                    self.logger.error(f"Error loading cooldown cache from DB: {e}")
 
         self.is_running = False
         self.thread = None
@@ -86,14 +91,40 @@ class MonitoringService:
 
         self._signal_check_counter = 0
 
-        self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
-
         self._trend_invalidation_counter = 0
         self.position_validation_counter = 0
         self._profile_refresh_counter = 0
         self._retention_check_counter = 0
         from datetime import datetime, timezone
         self._last_retention_date = datetime.now(timezone.utc).date()
+
+    def _load_cooldown_cache_from_db(self, db):
+        """Restore _last_signals from recent trade history so cooldowns survive restarts."""
+        from db.models import Trade
+        from utils.constants import TradeReason
+        from sqlalchemy import func
+        from datetime import datetime, timezone, timedelta
+
+        # Look back far enough to cover any reasonable cooldown setting (max 6 hours)
+        lookback_cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        signal_reasons = [TradeReason.RULES_SIGNAL.value, TradeReason.AI_SIGNAL.value]
+
+        rows = (
+            db.query(Trade.profile_name, Trade.symbol, func.max(Trade.created_at).label("last_trade"))
+            .filter(
+                Trade.reason.in_(signal_reasons),
+                Trade.created_at >= lookback_cutoff,
+            )
+            .group_by(Trade.profile_name, Trade.symbol)
+            .all()
+        )
+
+        for row in rows:
+            cooldown_key = f"{row.profile_name}_{row.symbol}"
+            self._last_signals[cooldown_key] = row.last_trade.timestamp()
+
+        if rows:
+            self.logger.info(f"Cooldown cache restored: {len(rows)} profile+symbol pair(s) from DB")
 
     @property
     def tickers(self) -> list:
