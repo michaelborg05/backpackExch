@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BorgBot Mobile</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* ── Variables ──────────────────────────────────────────────────── */
+:root {
+  --bg:#080b10; --bg2:#0d1117; --bg3:#111820;
+  --brd:#1e2a38; --bb:#2a3f55;
+  --acc:#00d4ff; --grn:#00ff9d; --red:#ff3c5a; --warn:#ffcc00;
+  --tx:#c8d8e8; --txd:#5a7a96; --txb:#e8f4ff;
+  --hdr:52px; --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:'Space Mono',monospace;font-size:13px}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(rgba(0,212,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.018) 1px,transparent 1px);
+  background-size:40px 40px}
+
+/* ── LOGIN ──────────────────────────────────────────────────────── */
+#ls{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.lb{width:100%;max-width:360px;padding:0 20px;animation:lin .5s ease forwards;opacity:0}
+@keyframes lin{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.ll{font-family:'Syne',sans-serif;font-weight:800;font-size:26px;letter-spacing:.18em;color:var(--acc);
+  text-shadow:0 0 28px rgba(0,212,255,.4);text-align:center;margin-bottom:3px}
+.ll span{color:var(--txd)}
+.lsub{text-align:center;font-size:10px;letter-spacing:.18em;color:var(--txd);margin-bottom:28px}
+.lcard{background:var(--bg2);border:1px solid var(--brd);padding:22px;position:relative}
+.lcard::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent)}
+.lf{margin-bottom:14px}
+.llab{display:block;font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txd);margin-bottom:5px}
+.lin{width:100%;background:var(--bg3);border:1px solid var(--brd);color:var(--txb);padding:11px 12px;
+  font-family:'Space Mono',monospace;font-size:14px;outline:none;transition:border-color .2s}
+.lin:focus{border-color:var(--acc)}
+.lerr{background:rgba(255,60,90,.08);border:1px solid rgba(255,60,90,.25);color:var(--red);
+  padding:9px 12px;font-size:11px;margin-bottom:12px;display:none}
+.lerr.on{display:block}
+.lbtn{width:100%;background:transparent;border:1px solid var(--acc);color:var(--acc);padding:13px;
+  font-family:'Syne',sans-serif;font-size:13px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;cursor:pointer;margin-top:4px;transition:background .2s}
+.lbtn:active{background:rgba(0,212,255,.1)}
+.lbtn:disabled{opacity:.5}
+.lfoo{text-align:center;margin-top:14px;font-size:10px;color:var(--txd)}
+
+/* ── APP ────────────────────────────────────────────────────────── */
+#app{display:none;height:100%;flex-direction:column;position:relative;z-index:1}
+#app.on{display:flex}
+
+/* ── HEADER ─────────────────────────────────────────────────────── */
+.hdr{
+  flex-shrink:0;height:var(--hdr);padding-top:var(--safe-t);
+  background:rgba(8,11,16,.97);border-bottom:1px solid var(--brd);
+  display:flex;align-items:center;padding-left:4px;padding-right:12px;gap:10px;
+  position:relative;z-index:100
+}
+.burger{background:transparent;border:none;color:var(--txd);font-size:22px;
+  padding:8px 10px;cursor:pointer;line-height:1;flex-shrink:0;transition:color .2s}
+.burger:active{color:var(--acc)}
+.hdr-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:15px;letter-spacing:.14em;
+  color:var(--acc);text-shadow:0 0 16px rgba(0,212,255,.4);flex:1}
+.hdr-logo span{color:var(--txd)}
+.hdr-dots{display:flex;gap:8px;align-items:center}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--grn);box-shadow:0 0 6px var(--grn);
+  animation:blink 2s infinite;flex-shrink:0}
+.dot.d{background:var(--red);box-shadow:none;animation:none}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.hdr-right{display:flex;align-items:center;gap:6px}
+.clk{font-size:10px;color:var(--txd);letter-spacing:.06em}
+.hbtn{background:transparent;border:1px solid var(--brd);color:var(--txd);padding:5px 9px;
+  font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;transition:all .15s}
+.hbtn.a{color:var(--acc);border-color:var(--acc)}
+.hbtn.dng{color:var(--red);border-color:var(--red)}
+.hbtn:active{opacity:.7}
+
+/* ── DRAWER ─────────────────────────────────────────────────────── */
+.drawer-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.65);
+  display:none;backdrop-filter:blur(3px)}
+.drawer-overlay.open{display:block}
+.drawer{position:fixed;top:0;left:0;bottom:0;z-index:201;width:260px;
+  background:var(--bg2);border-right:1px solid var(--brd);
+  display:flex;flex-direction:column;
+  transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+.drawer.open{transform:translateX(0)}
+.drawer-head{padding:20px 18px 16px;border-bottom:1px solid var(--brd)}
+.drawer-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:17px;letter-spacing:.14em;
+  color:var(--acc);text-shadow:0 0 14px rgba(0,212,255,.35)}
+.drawer-logo span{color:var(--txd)}
+.drawer-user{font-size:10px;color:var(--txd);margin-top:4px;letter-spacing:.05em}
+.drawer-nav{flex:1;padding:8px 0}
+.drawer-item{display:flex;align-items:center;gap:14px;padding:14px 18px;cursor:pointer;
+  color:var(--txd);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  border-left:2px solid transparent;transition:all .2s;user-select:none}
+.drawer-item:active{background:rgba(0,212,255,.04)}
+.drawer-item.on{color:var(--acc);border-left-color:var(--acc);background:rgba(0,212,255,.05)}
+.drawer-icon{font-size:17px;width:22px;text-align:center;flex-shrink:0}
+.drawer-divider{height:1px;background:var(--brd);margin:6px 0}
+.drawer-footer{padding:14px 18px;border-top:1px solid var(--brd)}
+.drawer-logout{width:100%;background:transparent;border:1px solid rgba(255,60,90,.3);
+  color:var(--red);padding:10px;font-family:'Space Mono',monospace;font-size:11px;
+  letter-spacing:.1em;cursor:pointer;transition:all .2s}
+.drawer-logout:active{background:rgba(255,60,90,.08)}
+
+/* ── SCROLL AREA ────────────────────────────────────────────────── */
+#scroll-area{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative;z-index:1}
+
+/* ── PANEL HEADER ───────────────────────────────────────────────── */
+.panel-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 14px 0;margin-bottom:12px
+}
+.panel-title{font-family:'Syne',sans-serif;font-size:14px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--txb)}
+.panel-badge{font-size:10px;color:var(--txd)}
+
+/* ── PANELS ─────────────────────────────────────────────────────── */
+.panel{display:none;padding:0 14px 20px}
+.panel.on{display:block}
+
+/* ── KPI GRID ───────────────────────────────────────────────────── */
+.kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.kpi{background:var(--bg2);border:1px solid var(--brd);padding:13px 12px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--acc),transparent);opacity:.4}
+.kpi-label{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--txd);margin-bottom:7px}
+.kpi-val{font-family:'Syne',sans-serif;font-weight:700;font-size:19px;color:var(--txb);line-height:1}
+.kpi-val.g{color:var(--grn)}.kpi-val.r{color:var(--red)}
+.kpi-sub{font-size:10px;color:var(--txd);margin-top:3px}
+
+/* ── CARD ───────────────────────────────────────────────────────── */
+.card{background:var(--bg2);border:1px solid var(--brd);margin-bottom:10px}
+.card-hdr{display:flex;align-items:center;justify-content:space-between;
+  padding:11px 13px;border-bottom:1px solid var(--brd)}
+.card-title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--txd)}
+.card-badge{font-size:11px;color:var(--acc)}
+.card-badge.g{color:var(--grn)}.card-badge.r{color:var(--red)}
+.card-body{padding:13px}
+
+/* ── POSITIONS ──────────────────────────────────────────────────── */
+.pos-card{background:var(--bg2);border:1px solid var(--brd);margin-bottom:10px;overflow:hidden}
+.pos-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;border-bottom:1px solid var(--brd)}
+.pos-sym{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:var(--txb)}
+.pos-prof{font-size:10px;color:var(--txd);margin-top:1px}
+.pos-side{font-size:10px;letter-spacing:.1em;font-weight:700;padding:3px 8px}
+.pos-side.long{background:rgba(0,255,157,.1);color:var(--grn);border:1px solid rgba(0,255,157,.28)}
+.pos-side.short{background:rgba(255,60,90,.1);color:var(--red);border:1px solid rgba(255,60,90,.28)}
+.pos-grid{display:grid;grid-template-columns:1fr 1fr;padding:11px 13px;gap:10px}
+.pf-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);margin-bottom:2px}
+.pf-val{font-size:13px;color:var(--tx)}
+.pf-pnl{font-weight:700}
+.pf-pnl.g{color:var(--grn)}.pf-pnl.r{color:var(--red)}
+.pos-footer{border-top:1px solid var(--brd);padding:9px 13px;display:flex;gap:16px;font-size:11px}
+.pos-tp{color:var(--grn)}.pos-sl{color:var(--red)}
+.empty{text-align:center;padding:48px 20px;color:var(--txd);font-size:12px}
+
+/* ── BALANCES ───────────────────────────────────────────────────── */
+.bal-table{width:100%;border-collapse:collapse}
+.bal-table th{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);
+  text-align:left;padding:6px 8px 8px;border-bottom:1px solid var(--brd)}
+.bal-table td{font-size:12px;padding:9px 8px;border-bottom:1px solid var(--brd);color:var(--tx)}
+.bal-table tr:last-child td{border-bottom:none}
+.bal-bar-wrap{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;margin-top:5px}
+.bal-bar{height:100%;background:var(--acc);border-radius:2px;min-width:2px}
+
+/* ── PROFILES ───────────────────────────────────────────────────── */
+.prof-sel-bar{background:var(--bg2);border:1px solid var(--brd);margin-bottom:10px;
+  padding:12px 13px;display:flex;align-items:center;gap:9px}
+.prof-select{flex:1;background:var(--bg3);border:1px solid var(--brd);color:var(--tx);
+  padding:9px 10px;font-family:'Space Mono',monospace;font-size:12px;outline:none;min-width:0}
+.prof-select:focus{border-color:var(--acc)}
+.status-pill{font-size:10px;letter-spacing:.08em;padding:4px 8px;font-weight:700;flex-shrink:0}
+.status-pill.active{background:rgba(0,255,157,.1);color:var(--grn);border:1px solid rgba(0,255,157,.28)}
+.status-pill.inactive{background:rgba(255,60,90,.07);color:var(--red);border:1px solid rgba(255,60,90,.22)}
+.act-btn{background:transparent;font-family:'Space Mono',monospace;font-size:10px;
+  padding:8px 11px;cursor:pointer;letter-spacing:.07em;flex-shrink:0;transition:all .18s}
+.act-btn.deactivate{border:1px solid rgba(255,60,90,.4);color:var(--red)}
+.act-btn.activate{border:1px solid rgba(0,255,157,.4);color:var(--grn)}
+.act-btn:active{opacity:.7}
+
+/* ── ACCORDION ──────────────────────────────────────────────────── */
+.acc{margin-bottom:8px}
+.acc-hdr{background:var(--bg2);border:1px solid var(--brd);padding:12px 13px;
+  display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.acc-hdr.open{border-bottom-color:transparent}
+.acc-hdr:active{opacity:.8}
+.acc-hdr-title{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx)}
+.acc-arrow{color:var(--txd);font-size:13px;transition:transform .2s;flex-shrink:0}
+.acc-arrow.open{transform:rotate(180deg)}
+.acc-body{background:var(--bg2);border:1px solid var(--brd);border-top:none;padding:13px;display:none}
+.acc-body.open{display:block}
+
+/* ── FORM ───────────────────────────────────────────────────────── */
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:11px}
+.frow.single{grid-template-columns:1fr}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:9px;letter-spacing:.11em;text-transform:uppercase;color:var(--txd)}
+.field input,.field select{background:var(--bg3);border:1px solid var(--brd);color:var(--tx);
+  padding:9px 10px;font-family:'Space Mono',monospace;font-size:12px;outline:none;width:100%}
+.field input:focus,.field select:focus{border-color:var(--acc)}
+.field input::placeholder{color:var(--txd)}
+
+/* ── TOGGLE ─────────────────────────────────────────────────────── */
+.tgl-list{display:flex;flex-direction:column}
+.tgl-row{display:flex;align-items:center;justify-content:space-between;
+  padding:11px 0;border-bottom:1px solid var(--brd)}
+.tgl-row:last-child{border-bottom:none}
+.tgl-info{flex:1}
+.tgl-name{font-size:12px;color:var(--tx)}
+.tgl-sub{font-size:10px;color:var(--txd);margin-top:2px}
+.tgl-sw{position:relative;flex-shrink:0;margin-left:12px}
+.tgl-sw input{opacity:0;width:0;height:0;position:absolute}
+.tgl-track{display:block;width:40px;height:22px;background:var(--bg3);border:1px solid var(--brd);
+  border-radius:11px;cursor:pointer;transition:all .18s;position:relative}
+.tgl-track::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;
+  border-radius:50%;background:var(--txd);transition:all .18s}
+.tgl-sw input:checked+.tgl-track{background:rgba(0,255,157,.12);border-color:var(--grn)}
+.tgl-sw input:checked+.tgl-track::after{left:19px;background:var(--grn)}
+
+/* ── SAVE BAR ───────────────────────────────────────────────────── */
+.save-bar{display:flex;gap:8px;margin:13px 0 4px}
+.btn-save{flex:1;background:transparent;border:1px solid var(--acc);color:var(--acc);padding:12px;
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:700;letter-spacing:.1em;cursor:pointer;transition:background .2s}
+.btn-save:active{background:rgba(0,212,255,.1)}
+.btn-save:disabled{opacity:.5}
+
+/* ── INDICATOR LIST ─────────────────────────────────────────────── */
+.ind-item{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--brd);gap:9px}
+.ind-item:last-child{border-bottom:none}
+.ind-info{flex:1;min-width:0}
+.ind-type{font-size:12px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ind-badges{display:flex;gap:4px;margin-top:3px;flex-wrap:wrap}
+.badge{font-size:9px;letter-spacing:.06em;padding:2px 5px}
+.badge.trend{background:rgba(0,212,255,.08);color:var(--acc);border:1px solid rgba(0,212,255,.2)}
+.badge.entry{background:rgba(255,204,0,.08);color:var(--warn);border:1px solid rgba(255,204,0,.2)}
+.badge.hard{background:rgba(255,60,90,.08);color:var(--red);border:1px solid rgba(255,60,90,.18)}
+.badge.off{background:rgba(90,122,150,.06);color:var(--txd);border:1px solid var(--brd)}
+.ind-edit-btn{background:transparent;border:1px solid var(--brd);color:var(--txd);
+  padding:6px 9px;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;flex-shrink:0;transition:all .18s}
+.ind-edit-btn:active{border-color:var(--acc);color:var(--acc)}
+.ind-add-btn{width:100%;background:transparent;border:1px solid var(--brd);color:var(--txd);
+  padding:10px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;margin-top:12px;transition:all .2s}
+.ind-add-btn:active{border-color:var(--acc);color:var(--acc)}
+
+/* ── BOTTOM SHEET ───────────────────────────────────────────────── */
+.sheet-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.65);display:none;backdrop-filter:blur(4px)}
+.sheet-overlay.open{display:block}
+.sheet{position:fixed;bottom:0;left:0;right:0;z-index:301;background:var(--bg2);
+  border-top:1px solid var(--brd);border-radius:12px 12px 0 0;
+  max-height:92vh;display:flex;flex-direction:column;
+  padding-bottom:calc(var(--safe-b) + 8px);
+  transform:translateY(100%);transition:transform .3s cubic-bezier(.32,1,.23,1)}
+.sheet.open{transform:translateY(0)}
+.sheet-handle{width:34px;height:4px;background:var(--brd);border-radius:2px;margin:10px auto 2px}
+.sheet-hdr{display:flex;align-items:center;justify-content:space-between;
+  padding:8px 15px 11px;border-bottom:1px solid var(--brd)}
+.sheet-title{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx)}
+.sheet-close{background:transparent;border:none;color:var(--txd);font-size:20px;cursor:pointer;padding:2px 6px;line-height:1}
+.sheet-body{flex:1;overflow-y:auto;padding:14px 15px}
+.sheet-footer{padding:11px 15px 0;border-top:1px solid var(--brd);display:flex;gap:8px}
+.sbtn{flex:1;background:transparent;border:1px solid var(--acc);color:var(--acc);
+  padding:11px;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  letter-spacing:.1em;cursor:pointer;transition:background .2s}
+.sbtn:active{background:rgba(0,212,255,.1)}
+.sbtn.sec{border-color:var(--brd);color:var(--txd)}
+.sbtn.dng{border-color:var(--red);color:var(--red)}
+
+/* ── PARAM FORM ─────────────────────────────────────────────────── */
+.param-section{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd);
+  margin:12px 0 8px}
+.param-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px}
+.pf{display:flex;flex-direction:column;gap:3px}
+.pf-lbl{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--txd)}
+.pf-inp{background:var(--bg3);border:1px solid var(--brd);color:var(--tx);
+  padding:8px 9px;font-family:'Space Mono',monospace;font-size:12px;outline:none;width:100%}
+.pf-inp:focus{border-color:var(--acc)}
+.pf-sel{background:var(--bg3);border:1px solid var(--brd);color:var(--tx);
+  padding:8px 9px;font-family:'Space Mono',monospace;font-size:12px;outline:none;width:100%}
+.ptgl-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0}
+.ptgl-name{font-size:12px;color:var(--tx)}
+
+/* ── REGIME ─────────────────────────────────────────────────────── */
+.regime-row{display:flex}
+.regime-item{flex:1;text-align:center;padding:10px 4px;border-right:1px solid var(--brd)}
+.regime-item:last-child{border-right:none}
+.regime-key{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--txd);margin-bottom:4px}
+.regime-val{font-size:12px;font-weight:700}
+
+/* ── PROFILE GRID ───────────────────────────────────────────────── */
+.prof-row{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--brd)}
+.prof-row:last-child{border-bottom:none}
+
+/* ── TOAST ──────────────────────────────────────────────────────── */
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:500;
+  padding:9px 16px;font-size:11px;white-space:nowrap;display:none;
+  max-width:calc(100vw - 28px);text-align:center}
+#toast.ok{background:rgba(0,255,157,.1);border:1px solid rgba(0,255,157,.35);color:var(--grn)}
+#toast.err{background:rgba(255,60,90,.1);border:1px solid rgba(255,60,90,.3);color:var(--red)}
+</style>
+</head>
+<body>
+
+<!-- ── LOGIN ─────────────────────────────────────────────────────── -->
+<div id="ls">
+  <div class="lb">
+    <div class="ll">BorgBot<span>/</span>TRADE</div>
+    <div class="lsub">Mobile Dashboard</div>
+    <div class="lcard">
+      <div class="lerr" id="lerr"></div>
+      <div class="lf">
+        <label class="llab" for="iu">Username</label>
+        <input class="lin" id="iu" type="text" autocomplete="username" placeholder="Enter username">
+      </div>
+      <div class="lf" style="margin-bottom:0">
+        <label class="llab" for="ip">Password</label>
+        <input class="lin" id="ip" type="password" autocomplete="current-password" placeholder="Enter password">
+      </div>
+      <button class="lbtn" id="lbtn" onclick="doLogin()" style="margin-top:16px">
+        <span id="lbtxt">ACCESS DASHBOARD</span>
+      </button>
+    </div>
+    <div class="lfoo">bcrypt &middot; JWT HttpOnly cookies &middot; TLS</div>
+  </div>
+</div>
+
+<!-- ── APP ───────────────────────────────────────────────────────── -->
+<div id="app">
+
+  <!-- Header -->
+  <div class="hdr">
+    <button class="burger" onclick="openDrawer()" aria-label="Menu">&#9776;</button>
+    <div class="hdr-logo">BorgBot<span>/</span>TRADE</div>
+    <div class="hdr-dots">
+      <div class="dot" id="adot"></div>
+      <div class="dot" id="tdot"></div>
+    </div>
+    <div class="hdr-right">
+      <span class="clk" id="clk">--:-- UTC</span>
+      <button class="hbtn a" onclick="refreshCurrent()">&#8635;</button>
+    </div>
+  </div>
+
+  <!-- Drawer overlay -->
+  <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+
+  <!-- Drawer -->
+  <div class="drawer" id="drawer">
+    <div class="drawer-head">
+      <div class="drawer-logo">BorgBot<span>/</span>TRADE</div>
+      <div class="drawer-user" id="drawer-user">—</div>
+    </div>
+    <div class="drawer-nav">
+      <div class="drawer-item on" id="nav-dash" onclick="navTo('dash')">
+        <span class="drawer-icon">&#9672;</span>Dashboard
+      </div>
+      <div class="drawer-item" id="nav-positions" onclick="navTo('positions')">
+        <span class="drawer-icon">&#11041;</span>Positions
+      </div>
+      <div class="drawer-item" id="nav-balances" onclick="navTo('balances')">
+        <span class="drawer-icon">&#9671;</span>Balances
+      </div>
+      <div class="drawer-divider"></div>
+      <div class="drawer-item" id="nav-profiles" onclick="navTo('profiles')">
+        <span class="drawer-icon">&#9670;</span>Profiles
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="drawer-logout" onclick="doLogout()">LOGOUT</button>
+    </div>
+  </div>
+
+  <!-- Scroll area -->
+  <div id="scroll-area">
+
+    <!-- ── DASHBOARD ─────────────────────────────────────────────── -->
+    <div class="panel on" id="p-dash">
+      <div class="panel-hdr">
+        <span class="panel-title">Dashboard</span>
+        <span class="panel-badge" id="dash-ts">—</span>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="kpi-label">Portfolio</div><div class="kpi-val" id="k-port">$—</div><div class="kpi-sub">All profiles</div></div>
+        <div class="kpi"><div class="kpi-label">Unrealised P&amp;L</div><div class="kpi-val" id="k-upnl">$—</div><div class="kpi-sub" id="k-upnl-sub">—</div></div>
+        <div class="kpi"><div class="kpi-label">Today's P&amp;L</div><div class="kpi-val" id="k-dpnl">$—</div><div class="kpi-sub" id="k-dpnl-sub">—</div></div>
+        <div class="kpi"><div class="kpi-label">Active Profiles</div><div class="kpi-val" id="k-profs">—</div><div class="kpi-sub" id="k-profs-sub">—</div></div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">Market Regime</span><span class="card-badge" id="regime-badge">—</span></div>
+        <div class="regime-row">
+          <div class="regime-item"><div class="regime-key">BTC</div><div class="regime-val" id="r-btc" style="color:var(--txd)">—</div></div>
+          <div class="regime-item"><div class="regime-key">ETH</div><div class="regime-val" id="r-eth" style="color:var(--txd)">—</div></div>
+          <div class="regime-item"><div class="regime-key">Mode</div><div class="regime-val" id="r-mode" style="color:var(--txd)">—</div></div>
+          <div class="regime-item"><div class="regime-key">Filter</div><div class="regime-val" id="r-pass" style="color:var(--txd)">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">Profile Breakdown</span><span class="card-badge" id="profgrid-badge">—</span></div>
+        <div id="profgrid" class="card-body"><div style="color:var(--txd);font-size:11px;text-align:center;padding:8px">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- ── POSITIONS ─────────────────────────────────────────────── -->
+    <div class="panel" id="p-positions">
+      <div class="panel-hdr">
+        <span class="panel-title">Positions</span>
+        <span class="panel-badge g" id="pos-count-badge">—</span>
+      </div>
+      <div id="pos-list"><div class="empty">Loading…</div></div>
+    </div>
+
+    <!-- ── BALANCES ──────────────────────────────────────────────── -->
+    <div class="panel" id="p-balances">
+      <div class="panel-hdr">
+        <span class="panel-title">Balances</span>
+        <span class="panel-badge" id="bal-total-badge">—</span>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="kpi-label">Total (USD)</div><div class="kpi-val" id="b-total">$—</div><div class="kpi-sub">All assets</div></div>
+        <div class="kpi"><div class="kpi-label">Free USDC</div><div class="kpi-val" id="b-free">$—</div><div class="kpi-sub">Ready to deploy</div></div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">Asset Breakdown</span></div>
+        <div class="card-body" id="bal-table-wrap"><div style="color:var(--txd);font-size:11px;text-align:center;padding:8px">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- ── PROFILES ──────────────────────────────────────────────── -->
+    <div class="panel" id="p-profiles">
+      <div class="panel-hdr" style="margin-bottom:8px">
+        <span class="panel-title">Profiles</span>
+      </div>
+
+      <!-- Profile selector -->
+      <div class="prof-sel-bar">
+        <select class="prof-select" id="prof-select" onchange="onProfChange()">
+          <option value="">Loading…</option>
+        </select>
+        <span class="status-pill inactive" id="prof-status"></span>
+        <button class="act-btn" id="prof-act-btn" onclick="toggleActive()"></button>
+      </div>
+
+      <!-- Risk accordion -->
+      <div class="acc">
+        <div class="acc-hdr open" onclick="toggleAcc('risk')">
+          <span class="acc-hdr-title">Risk Management</span>
+          <span class="acc-arrow open" id="arr-risk">&#8964;</span>
+        </div>
+        <div class="acc-body open" id="body-risk">
+          <div class="frow">
+            <div class="field"><label>Take Profit %</label><input id="f-tp" type="number" step="0.1" placeholder="e.g. 2.5"></div>
+            <div class="field"><label>Stop Loss %</label><input id="f-sl" type="number" step="0.1" placeholder="e.g. 1.5"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Trailing Stop %</label><input id="f-ts" type="number" step="0.1" placeholder="e.g. 1.0"></div>
+            <div class="field"><label>Arm Trailing %</label><input id="f-arm" type="number" step="0.1" placeholder="e.g. 1.0"></div>
+          </div>
+          <div class="tgl-list">
+            <div class="tgl-row">
+              <div class="tgl-info"><div class="tgl-name">Use Trailing Stop</div></div>
+              <label class="tgl-sw"><input type="checkbox" id="f-use-ts"><span class="tgl-track"></span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Signals accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('signals')">
+          <span class="acc-hdr-title">Signal Generation</span>
+          <span class="acc-arrow" id="arr-signals">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-signals">
+          <div class="frow">
+            <div class="field"><label>Min Confidence %</label><input id="f-conf" type="number" step="0.5" placeholder="72"></div>
+            <div class="field"><label>Scan Cooldown (min)</label><input id="f-scancd" type="number" step="1" placeholder="15"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Post-SL Cooldown (min)</label><input id="f-slcd" type="number" step="5" placeholder="Global"></div>
+            <div class="field"><label>Post-TP Cooldown (min)</label><input id="f-tpcd" type="number" step="5" placeholder="Global"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Default Order (USDC)</label><input id="f-ordsize" type="number" step="1" placeholder="100"></div>
+            <div class="field"><label>Max Open Positions</label><input id="f-maxpos" type="number" step="1" placeholder="5"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('filters')">
+          <span class="acc-hdr-title">Filter Toggles</span>
+          <span class="acc-arrow" id="arr-filters">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-filters">
+          <div class="tgl-list">
+            <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Signal Generation</div><div class="tgl-sub">Enable automated scanning</div></div><label class="tgl-sw"><input type="checkbox" id="f-sig-gen"><span class="tgl-track"></span></label></div>
+            <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Market Regime Filter</div><div class="tgl-sub">Block trades in choppy conditions</div></div><label class="tgl-sw"><input type="checkbox" id="f-regime"><span class="tgl-track"></span></label></div>
+            <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Trend Filter (HTF)</div><div class="tgl-sub">Require bullish trend before entry</div></div><label class="tgl-sw"><input type="checkbox" id="f-trend"><span class="tgl-track"></span></label></div>
+            <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Entry Filter (LTF)</div><div class="tgl-sub">Require entry indicators on signal TF</div></div><label class="tgl-sw"><input type="checkbox" id="f-entry"><span class="tgl-track"></span></label></div>
+            <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">ATR Filter</div><div class="tgl-sub">Only trade with sufficient volatility</div></div><label class="tgl-sw"><input type="checkbox" id="f-atr"><span class="tgl-track"></span></label></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="save-bar">
+        <button class="btn-save" id="save-btn" onclick="saveProfileSettings()">SAVE SETTINGS</button>
+      </div>
+
+      <!-- Indicators accordion -->
+      <div class="acc" style="margin-top:4px">
+        <div class="acc-hdr open" onclick="toggleAcc('indicators')">
+          <span class="acc-hdr-title">Indicators</span>
+          <span class="acc-arrow open" id="arr-indicators">&#8964;</span>
+        </div>
+        <div class="acc-body open" id="body-indicators">
+          <div id="ind-list"><div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">Loading…</div></div>
+          <button class="ind-add-btn" onclick="openAddInd()">+ ADD INDICATOR</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /scroll-area -->
+</div><!-- /app -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- ── INDICATOR EDIT SHEET ────────────────────────────────────── -->
+<div class="sheet-overlay" id="ind-overlay" onclick="closeIndSheet()"></div>
+<div class="sheet" id="ind-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-hdr">
+    <span class="sheet-title" id="ind-sheet-title">Edit Indicator</span>
+    <button class="sheet-close" onclick="closeIndSheet()">&#215;</button>
+  </div>
+  <div class="sheet-body">
+    <div class="frow" style="margin-bottom:12px">
+      <div class="field"><label>Type</label><select class="pf-sel" id="ind-type" onchange="onIndTypeChange()" style="width:100%"></select></div>
+      <div class="field"><label>Category</label><select class="pf-sel" id="ind-cat" style="width:100%"><option value="trend">Trend</option><option value="entry">Entry</option></select></div>
+    </div>
+    <div class="tgl-list" style="margin-bottom:12px">
+      <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Enabled</div></div><label class="tgl-sw"><input type="checkbox" id="ind-enabled" checked><span class="tgl-track"></span></label></div>
+      <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Hard Stop</div><div class="tgl-sub">Must pass for entry to fire</div></div><label class="tgl-sw"><input type="checkbox" id="ind-hardstop" checked><span class="tgl-track"></span></label></div>
+    </div>
+    <div class="param-section">Parameters</div>
+    <div id="ind-param-fields"></div>
+    <div id="ind-err" style="color:var(--red);font-size:11px;margin-top:8px;display:none"></div>
+  </div>
+  <div class="sheet-footer">
+    <button class="sbtn dng" id="ind-del-btn" onclick="deleteIndicator()" style="display:none">DELETE</button>
+    <button class="sbtn sec" onclick="closeIndSheet()">Cancel</button>
+    <button class="sbtn" onclick="saveIndicator()">Save</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+const BASE = window.location.origin;
+
+// ── State ─────────────────────────────────────────────────────────
+let S = { u: null, role: null, internalKey: null };
+let _tab = 'dash';
+let _profiles = [];
+let _currentProfile = null;
+let _indicators = [];
+let _editIndId = null;
+let _arTimer = null;
+let _toastTimer = null;
+
+// ── Clock ─────────────────────────────────────────────────────────
+setInterval(() => {
+  const n = new Date();
+  document.getElementById('clk').textContent =
+    n.getUTCHours().toString().padStart(2,'0') + ':' +
+    n.getUTCMinutes().toString().padStart(2,'0') + ' UTC';
+}, 15000);
+
+// ── Login enter key ───────────────────────────────────────────────
+document.getElementById('ip').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+document.getElementById('iu').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('ip').focus(); });
+
+// ── Toast ─────────────────────────────────────────────────────────
+function showToast(msg, isErr=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = isErr ? 'err' : 'ok'; el.style.display = 'block';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3200);
+}
+
+// ── API helper ────────────────────────────────────────────────────
+function akey() { return S.internalKey ?? null; }
+
+async function api(path, opts={}) {
+  const k = akey(); if (!k) return null;
+  try {
+    const r = await fetch(BASE + path, {
+      credentials: 'include',
+      headers: { 'X-API-Key': k, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+      ...opts
+    });
+    if (r.status === 401) { fLogout('Session expired.'); return null; }
+    if (r.status === 204) return { ok: true };
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.detail || 'HTTP ' + r.status);
+    }
+    return await r.json();
+  } catch(e) {
+    console.warn('[api]', path, e.message);
+    throw e;
+  }
+}
+
+async function safeFetch(path) {
+  try { return await api(path); } catch { return null; }
+}
+
+// ── Auth ──────────────────────────────────────────────────────────
+async function doLogin() {
+  const u = document.getElementById('iu').value.trim();
+  const p = document.getElementById('ip').value;
+  if (!u || !p) { setLoginErr('Enter username and password.'); return; }
+  const btn = document.getElementById('lbtn');
+  btn.disabled = true; document.getElementById('lbtxt').textContent = 'AUTHENTICATING…';
+  document.getElementById('lerr').classList.remove('on');
+  try {
+    const r = await fetch(BASE + '/auth/login', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    });
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.detail || 'Auth failed'); }
+    await loadSession();
+  } catch(e) {
+    setLoginErr(e.message);
+    btn.disabled = false; document.getElementById('lbtxt').textContent = 'ACCESS DASHBOARD';
+  }
+}
+
+function setLoginErr(msg) {
+  const el = document.getElementById('lerr'); el.textContent = msg; el.classList.add('on');
+  document.getElementById('lbtn').disabled = false;
+  document.getElementById('lbtxt').textContent = 'ACCESS DASHBOARD';
+}
+
+async function loadSession() {
+  const r = await fetch(BASE + '/auth/me', { credentials: 'include' });
+  if (!r.ok) { setLoginErr('Could not load session.'); return; }
+  const d = await r.json();
+  S = { u: d.username, role: d.role, internalKey: d.internal_api_key ?? null };
+  scheduleRefresh(15);
+  showApp();
+}
+
+async function checkExistingSession() {
+  try {
+    const r = await fetch(BASE + '/auth/status', { credentials: 'include' });
+    if (r.ok) await loadSession();
+  } catch {}
+}
+
+function scheduleRefresh(expMin) {
+  setTimeout(async () => {
+    const r = await fetch(BASE + '/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (r.ok) scheduleRefresh(15); else fLogout('Session expired. Please log in.');
+  }, Math.max((expMin * 60 - 120) * 1000, 10000));
+}
+
+async function doLogout() {
+  clearInterval(_arTimer);
+  S = { u: null, role: null, internalKey: null };
+  await fetch(BASE + '/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+  showLogin();
+}
+
+function fLogout(msg='') { clearInterval(_arTimer); S = {}; showLogin(msg); }
+
+function showLogin(msg='') {
+  document.getElementById('app').classList.remove('on');
+  document.getElementById('ls').style.display = 'flex';
+  document.getElementById('ip').value = '';
+  if (msg) setLoginErr(msg);
+}
+
+function showApp() {
+  document.getElementById('ls').style.display = 'none';
+  document.getElementById('app').classList.add('on');
+  document.getElementById('drawer-user').textContent = (S.u || '') + (S.role ? ' · ' + S.role : '');
+  checkHealth();
+  loadDashboard();
+  loadAllProfiles();
+  _arTimer = setInterval(() => {
+    checkHealth();
+    if (_tab === 'dash') loadDashboard();
+    else if (_tab === 'positions') loadPositions();
+    else if (_tab === 'balances') loadBalances();
+  }, 30000);
+}
+
+function refreshCurrent() {
+  checkHealth();
+  if (_tab === 'dash') loadDashboard();
+  else if (_tab === 'positions') loadPositions();
+  else if (_tab === 'balances') loadBalances();
+  else if (_tab === 'profiles' && _currentProfile) loadProfileData(_currentProfile.name);
+}
+
+// ── Drawer / Navigation ───────────────────────────────────────────
+function openDrawer() {
+  document.getElementById('drawer-overlay').classList.add('open');
+  document.getElementById('drawer').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('drawer-overlay').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+}
+function navTo(name) {
+  closeDrawer();
+  _tab = name;
+  document.querySelectorAll('.drawer-item').forEach(el => el.classList.remove('on'));
+  const navEl = document.getElementById('nav-' + name);
+  if (navEl) navEl.classList.add('on');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  const panel = document.getElementById('p-' + name);
+  if (panel) panel.classList.add('on');
+  document.getElementById('scroll-area').scrollTop = 0;
+  if (name === 'positions') loadPositions();
+  else if (name === 'balances') loadBalances();
+  else if (name === 'profiles' && _profiles.length && !_currentProfile) setProfile(_profiles[0].name);
+}
+
+// ── Health ────────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const d = await fetch(BASE + '/health', { credentials: 'include' }).then(r => r.json());
+    document.getElementById('adot').className = 'dot';
+    document.getElementById('tdot').className = d?.telegram ? 'dot' : 'dot d';
+    return d;
+  } catch {
+    document.getElementById('adot').className = 'dot d';
+    document.getElementById('tdot').className = 'dot d';
+    return null;
+  }
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    // Fire all requests in parallel; use safeFetch so one failure doesn't block others
+    const [positions, dailyPnl, profiles, mon] = await Promise.all([
+      safeFetch('/positions'),
+      safeFetch('/profiles/daily-pnl'),
+      safeFetch('/profiles'),
+      safeFetch('/monitoring/status'),
+    ]);
+
+    // Portfolio: sum per-profile portfolio values (dedup by account_id)
+    const profArr = Array.isArray(profiles) ? profiles : [];
+    const seenAccounts = new Set();
+    const portPromises = profArr.map(p => {
+      const dedup = p.account_id ?? p.name;
+      if (seenAccounts.has(dedup)) return Promise.resolve(null);
+      seenAccounts.add(dedup);
+      return p.account_id ? safeFetch('/accounts/' + p.account_id + '/portfolio') : safeFetch('/portfolio/' + p.name);
+    });
+    const portResults = await Promise.all(portPromises);
+    const totalPort = portResults.reduce((s, r) => s + parseFloat(r?.total_value ?? 0), 0);
+    document.getElementById('k-port').textContent = fmtUsd(totalPort);
+
+    // Unrealised PnL
+    const posArr = Array.isArray(positions) ? positions : [];
+    const upnl = posArr.reduce((s, p) => s + (parseFloat(p.unrealised_pnl) || 0), 0);
+    const upnlEl = document.getElementById('k-upnl');
+    upnlEl.textContent = fmt$(upnl);
+    upnlEl.className = 'kpi-val ' + (upnl >= 0 ? 'g' : 'r');
+    document.getElementById('k-upnl-sub').textContent = posArr.length + ' open position' + (posArr.length !== 1 ? 's' : '');
+
+    // Daily PnL
+    const pnlArr = Array.isArray(dailyPnl) ? dailyPnl : [];
+    const dpnl = pnlArr.reduce((s, p) => s + (parseFloat(p.daily_pnl) || 0), 0);
+    const dpnlEl = document.getElementById('k-dpnl');
+    dpnlEl.textContent = fmt$(dpnl);
+    dpnlEl.className = 'kpi-val ' + (dpnl >= 0 ? 'g' : 'r');
+    document.getElementById('k-dpnl-sub').textContent = fmtSign$(dpnl);
+
+    // Active profiles
+    const active = profArr.filter(p => p.is_active);
+    document.getElementById('k-profs').textContent = active.length;
+    document.getElementById('k-profs-sub').textContent = profArr.length + ' total';
+
+    // Timestamp
+    document.getElementById('dash-ts').textContent = fmtNow();
+
+    // Profile breakdown
+    renderProfileGrid(profArr, pnlArr, posArr);
+
+    // Regime from /monitoring/status
+    renderRegime(mon);
+
+  } catch(e) { console.warn('loadDashboard', e); }
+}
+
+function renderRegime(mon) {
+  if (!mon) return;
+  // /monitoring/status returns regime nested under mon.regime or mon.regime_filter,
+  // or flat on mon itself — match the same fallback chain the desktop uses
+  const rg = mon.regime ?? mon.regime_filter ?? {};
+  setRegVal('r-btc', rg.btc_trend ?? mon.btc_trend);
+  setRegVal('r-eth', rg.eth_trend ?? mon.eth_trend);
+  setRegVal('r-mode', rg.market_mode ?? mon.market_mode);
+  const pass = rg.filter_pass ?? rg.pass ?? mon.regime_pass;
+  const passEl = document.getElementById('r-pass');
+  passEl.textContent = pass === true ? 'PASS' : pass === false ? 'BLOCK' : '—';
+  passEl.style.color = pass === true ? 'var(--grn)' : pass === false ? 'var(--red)' : 'var(--txd)';
+  document.getElementById('regime-badge').textContent = rg.market_mode ?? mon.market_mode ?? '—';
+}
+
+function setRegVal(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = val || '—';
+  const s = (val || '').toLowerCase();
+  el.style.color = s.includes('bull')||s.includes('up')||s.includes('trend') ? 'var(--grn)'
+    : s.includes('bear')||s.includes('down') ? 'var(--red)' : 'var(--tx)';
+}
+
+function renderProfileGrid(profiles, dailyPnl, positions) {
+  const pnlMap = {}, posMap = {};
+  dailyPnl.forEach(d => { pnlMap[d.profile_name] = parseFloat(d.daily_pnl) || 0; });
+  positions.forEach(p => { posMap[p.profile_name] = (posMap[p.profile_name] || 0) + 1; });
+  const container = document.getElementById('profgrid');
+  if (!profiles.length) {
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:14px">No profiles</div>';
+    return;
+  }
+  container.innerHTML = profiles.map(p => {
+    const dpnl = pnlMap[p.name] || 0;
+    const npos = posMap[p.name] || 0;
+    const c = dpnl >= 0 ? 'var(--grn)' : 'var(--red)';
+    return `<div class="prof-row">
+      <div>
+        <div style="font-size:12px;color:var(--tx)">${escHtml(p.display_name||p.name)}</div>
+        <div style="font-size:10px;color:var(--txd);margin-top:2px">${npos} pos · <span style="color:${p.is_active?'var(--grn)':'var(--red)'}">${p.is_active?'ACTIVE':'INACTIVE'}</span></div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:13px;font-weight:700;color:${c}">${fmtSign$(dpnl)}</div>
+        <div style="font-size:10px;color:var(--txd)">today</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('profgrid-badge').textContent = profiles.length + ' profile' + (profiles.length !== 1 ? 's' : '');
+}
+
+// ── Positions ─────────────────────────────────────────────────────
+async function loadPositions() {
+  const container = document.getElementById('pos-list');
+  container.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const positions = await safeFetch('/positions');
+    const arr = Array.isArray(positions) ? positions : [];
+    document.getElementById('pos-count-badge').textContent = arr.length ? arr.length + ' LIVE' : 'NONE';
+    if (!arr.length) { container.innerHTML = '<div class="empty">No open positions</div>'; return; }
+    container.innerHTML = arr.map(p => {
+      const pnl = parseFloat(p.unrealised_pnl) || 0;
+      const pnlPct = parseFloat(p.pnl_pct) || 0;
+      const pc = pnl >= 0 ? 'g' : 'r';
+      const sc = (p.side||'').toLowerCase() === 'long' ? 'long' : 'short';
+      return `<div class="pos-card">
+        <div class="pos-head">
+          <div><div class="pos-sym">${escHtml(p.symbol)}</div><div class="pos-prof">${escHtml(p.profile_name)}</div></div>
+          <span class="pos-side ${sc}">${(p.side||'').toUpperCase()}</span>
+        </div>
+        <div class="pos-grid">
+          <div><div class="pf-label">Quantity</div><div class="pf-val">${fmt4(p.quantity)}</div></div>
+          <div><div class="pf-label">Entry Price</div><div class="pf-val">${fmtPrice(p.entry_price)}</div></div>
+          <div><div class="pf-label">Mark Price</div><div class="pf-val">${fmtPrice(p.mark_price)}</div></div>
+          <div><div class="pf-label">P&amp;L</div><div class="pf-val pf-pnl ${pc}">${fmt$(pnl)} (${fmtSign(pnlPct,2)}%)</div></div>
+        </div>
+        <div class="pos-footer">
+          <span class="pos-tp">TP: ${p.tp_price ? fmtPrice(p.tp_price) : '—'}</span>
+          <span class="pos-sl">SL: ${p.sl_price ? fmtPrice(p.sl_price) : '—'}${p.trailing_sl_price ? ' ·trail: '+fmtPrice(p.trailing_sl_price) : ''}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    container.innerHTML = '<div class="empty" style="color:var(--red)">Error loading positions</div>';
+  }
+}
+
+// ── Balances ──────────────────────────────────────────────────────
+async function loadBalances() {
+  try {
+    // /balances returns { balances: [...] } with fields: asset, free, locked, usd_value
+    const data = await safeFetch('/balances');
+    const arr = Array.isArray(data) ? data : (Array.isArray(data?.balances) ? data.balances : []);
+    let total = 0, freeUsdc = 0;
+    arr.forEach(b => {
+      total += parseFloat(b.usd_value) || 0;
+      if (b.asset === 'USDC') freeUsdc = parseFloat(b.free ?? b.available ?? 0);
+    });
+    document.getElementById('b-total').textContent = fmt$(total);
+    document.getElementById('bal-total-badge').textContent = fmt$(total);
+    document.getElementById('b-free').textContent = fmt$(freeUsdc);
+
+    if (!arr.length) {
+      document.getElementById('bal-table-wrap').innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:14px">No balance data</div>';
+      return;
+    }
+    const sorted = [...arr].sort((a,b) => (parseFloat(b.usd_value)||0) - (parseFloat(a.usd_value)||0));
+    const maxUsd = parseFloat(sorted[0]?.usd_value) || 1;
+    document.getElementById('bal-table-wrap').innerHTML =
+      '<table class="bal-table"><thead><tr><th>Asset</th><th>Free</th><th>Locked</th><th>USD Value</th></tr></thead><tbody>' +
+      sorted.map(b => {
+        const usdV = parseFloat(b.usd_value) || 0;
+        const pct = Math.max(3, (usdV / maxUsd) * 100);
+        return `<tr>
+          <td style="font-weight:700;color:var(--txb)">${escHtml(b.asset)}</td>
+          <td>${fmtNum(parseFloat(b.free ?? b.available ?? 0))}<div class="bal-bar-wrap"><div class="bal-bar" style="width:${pct}%"></div></div></td>
+          <td style="color:var(--txd)">${fmtNum(parseFloat(b.locked ?? 0))}</td>
+          <td style="text-align:right;color:var(--txd)">${fmt$(usdV)}</td>
+        </tr>`;
+      }).join('') + '</tbody></table>';
+  } catch(e) {
+    document.getElementById('bal-table-wrap').innerHTML = '<div style="color:var(--red);font-size:11px;text-align:center;padding:14px">Error loading balances</div>';
+  }
+}
+
+// ── Profiles ──────────────────────────────────────────────────────
+async function loadAllProfiles() {
+  try {
+    _profiles = await safeFetch('/profiles');
+    if (!Array.isArray(_profiles)) _profiles = [];
+    const sel = document.getElementById('prof-select');
+    sel.innerHTML = _profiles.map(p =>
+      `<option value="${escAttr(p.name)}">${escHtml(p.display_name||p.name)}</option>`
+    ).join('');
+    if (_profiles.length) setProfile(_profiles[0].name);
+  } catch(e) { console.warn('loadAllProfiles', e); }
+}
+
+function onProfChange() { setProfile(document.getElementById('prof-select').value); }
+
+async function setProfile(name) {
+  try {
+    _currentProfile = await safeFetch('/profiles/' + name);
+    if (_currentProfile) { updateProfileUI(_currentProfile); loadIndicators(name); }
+  } catch {}
+}
+
+async function loadProfileData(name) {
+  _currentProfile = await safeFetch('/profiles/' + name);
+  if (_currentProfile) { updateProfileUI(_currentProfile); loadIndicators(name); }
+}
+
+function updateProfileUI(p) {
+  const badge = document.getElementById('prof-status');
+  const btn = document.getElementById('prof-act-btn');
+  badge.textContent = p.is_active ? 'ACTIVE' : 'INACTIVE';
+  badge.className = 'status-pill ' + (p.is_active ? 'active' : 'inactive');
+  btn.textContent = p.is_active ? 'DEACTIVATE' : 'ACTIVATE';
+  btn.className = 'act-btn ' + (p.is_active ? 'deactivate' : 'activate');
+  setFld('f-tp', p.take_profit_pct); setFld('f-sl', p.stop_loss_pct);
+  setFld('f-ts', p.trailing_stop_pct); setFld('f-arm', p.arm_trailing_stop_pct);
+  setChk('f-use-ts', p.use_trailing_stop);
+  setFld('f-conf', p.min_signal_confidence); setFld('f-scancd', p.signal_cooldown_minutes);
+  setFld('f-slcd', p.sl_cooldown_minutes); setFld('f-tpcd', p.tp_cooldown_minutes);
+  setFld('f-ordsize', p.default_order_size_usdc); setFld('f-maxpos', p.max_open_positions);
+  setChk('f-sig-gen', p.enable_signal_generation); setChk('f-regime', p.use_market_regime_filter);
+  setChk('f-trend', p.use_trend_filter); setChk('f-entry', p.use_entry_filter);
+  setChk('f-atr', p.use_atr_filter);
+}
+
+async function saveProfileSettings() {
+  if (!_currentProfile) return;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true; btn.textContent = 'SAVING…';
+  try {
+    await api('/profiles/' + _currentProfile.name, {
+      method: 'PUT',
+      body: JSON.stringify({
+        take_profit_pct:         numOrNull('f-tp'),
+        stop_loss_pct:           numOrNull('f-sl'),
+        trailing_stop_pct:       numOrNull('f-ts'),
+        arm_trailing_stop_pct:   numOrNull('f-arm'),
+        use_trailing_stop:       chkVal('f-use-ts'),
+        min_signal_confidence:   numOrNull('f-conf'),
+        signal_cooldown_minutes: numOrNull('f-scancd'),
+        sl_cooldown_minutes:     numOrNull('f-slcd'),
+        tp_cooldown_minutes:     numOrNull('f-tpcd'),
+        default_order_size_usdc: numOrNull('f-ordsize'),
+        max_open_positions:      numOrNull('f-maxpos'),
+        enable_signal_generation: chkVal('f-sig-gen'),
+        use_market_regime_filter: chkVal('f-regime'),
+        use_trend_filter:         chkVal('f-trend'),
+        use_entry_filter:         chkVal('f-entry'),
+        use_atr_filter:           chkVal('f-atr'),
+      })
+    });
+    showToast('Profile saved');
+    _currentProfile = await safeFetch('/profiles/' + _currentProfile.name);
+    if (_currentProfile) updateProfileUI(_currentProfile);
+  } catch(e) { showToast(e.message || 'Save failed', true); }
+  finally { btn.disabled = false; btn.textContent = 'SAVE SETTINGS'; }
+}
+
+async function toggleActive() {
+  if (!_currentProfile) return;
+  const btn = document.getElementById('prof-act-btn');
+  btn.disabled = true;
+  try {
+    await api('/profiles/' + _currentProfile.name + '/activate', { method: 'POST' });
+    showToast(_currentProfile.is_active ? 'Profile deactivated' : 'Profile activated');
+    _currentProfile = await safeFetch('/profiles/' + _currentProfile.name);
+    if (_currentProfile) updateProfileUI(_currentProfile);
+  } catch(e) { showToast(e.message || 'Failed', true); }
+  finally { btn.disabled = false; }
+}
+
+// ── Indicators ────────────────────────────────────────────────────
+async function loadIndicators(profName) {
+  const container = document.getElementById('ind-list');
+  container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">Loading…</div>';
+  try {
+    _indicators = await safeFetch('/indicators/' + profName);
+    if (!Array.isArray(_indicators)) _indicators = [];
+    renderIndList();
+  } catch { container.innerHTML = '<div style="color:var(--red);font-size:11px;text-align:center;padding:10px">Error loading indicators</div>'; }
+}
+
+function renderIndList() {
+  const container = document.getElementById('ind-list');
+  if (!_indicators.length) {
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">No indicators configured</div>';
+    return;
+  }
+  const sorted = [..._indicators].sort((a,b) => {
+    if (a.category !== b.category) return a.category === 'trend' ? -1 : 1;
+    return a.indicator_type.localeCompare(b.indicator_type);
+  });
+  container.innerHTML = sorted.map(ind => {
+    const badges = [
+      `<span class="badge ${ind.category}">${ind.category}</span>`,
+      ind.is_hard_stop ? '<span class="badge hard">hard stop</span>' : '',
+      !ind.enabled ? '<span class="badge off">disabled</span>' : '',
+    ].filter(Boolean).join('');
+    return `<div class="ind-item">
+      <div class="ind-info">
+        <div class="ind-type">${escHtml(ind.indicator_type)}</div>
+        <div class="ind-badges">${badges}</div>
+      </div>
+      <label class="tgl-sw"><input type="checkbox" ${ind.enabled?'checked':''} onchange="quickToggleInd(${ind.id})"><span class="tgl-track"></span></label>
+      <button class="ind-edit-btn" onclick="openEditInd(${ind.id})">EDIT</button>
+    </div>`;
+  }).join('');
+}
+
+async function quickToggleInd(id) {
+  if (!_currentProfile) return;
+  try {
+    const result = await api('/indicators/' + _currentProfile.name + '/' + id + '/toggle', { method: 'PATCH' });
+    if (result) { const i = _indicators.findIndex(x => x.id === id); if (i >= 0) _indicators[i] = result; renderIndList(); }
+  } catch(e) { showToast(e.message || 'Toggle failed', true); loadIndicators(_currentProfile.name); }
+}
+
+// ── Indicator schemas ─────────────────────────────────────────────
+const IND_SCHEMAS = {
+  ema_slope:                [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01}],
+  bollinger_bands:          [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:null},{k:'lookback_candles',t:'number',d:null}],
+  adx_regime:               [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
+  rsi_threshold:            [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
+  rsi_range:                [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
+  rsi_oversold:             [{k:'max_value',t:'number',d:35},{k:'require_rising',t:'bool',d:true},{k:'min_momentum',t:'number',d:0.5}],
+  rsi_overbought:           [{k:'side',t:'select',o:['long','short'],d:'long'},{k:'min_value',t:'number',d:65},{k:'max_value',t:'number',d:30},{k:'lookback_candles',t:'number',d:null}],
+  rsi_reversal_momentum:    [{k:'lookback_candles',t:'number',d:10},{k:'oversold_threshold',t:'number',d:45},{k:'current_min',t:'number',d:36},{k:'min_jump',t:'number',d:3},{k:'require_sustained',t:'bool',d:false},{k:'sustained_rise_mode',t:'select',o:['net','strict'],d:'net'}],
+  rsi_overbought_momentum:  [{k:'lookback_candles',t:'number',d:10},{k:'overbought_threshold',t:'number',d:70},{k:'current_max',t:'number',d:65},{k:'min_drop',t:'number',d:3},{k:'drop_required',t:'bool',d:true},{k:'require_sustained',t:'bool',d:false},{k:'sustained_fall_mode',t:'select',o:['net','strict'],d:'net'}],
+  ema_gap:                  [{k:'min_gap_pct',t:'number',d:0.15},{k:'mode',t:'select',o:['min','max','abs'],d:'min'}],
+  price_vs_ema:             [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-1.5},{k:'max_gap_pct',t:'number',d:2}],
+  price_ema50_range:        [{k:'max_gap_pct',t:'number',d:1}],
+  price_vs_vwap:            [],
+  price_below_vwap:         [{k:'min_gap_pct',t:'number',d:-0.15},{k:'max_gap_pct',t:'number',d:-2}],
+  price_above_vwap:         [{k:'min_gap_pct',t:'number',d:1},{k:'max_gap_pct',t:'number',d:10}],
+  price_extended_below_ema: [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-0.7},{k:'max_gap_pct',t:'number',d:-10}],
+  price_extended_above_ema: [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:0.7},{k:'max_gap_pct',t:'number',d:10}],
+  volume_spike:             [{k:'min_ratio',t:'number',d:1},{k:'max_ratio',t:'number',d:8}],
+  reversal_candle:          [{k:'pattern',t:'select',o:['hammer','doji','bull_close','higher_low','engulfing','shooting_star','bear_close','lower_high','bear_engulfing'],d:'hammer'},{k:'min_body_pct',t:'number',d:null},{k:'max_body_pct',t:'number',d:null},{k:'min_close_pct',t:'number',d:null},{k:'max_close_pct',t:'number',d:null}],
+  bb_width_regime:          [{k:'required_direction',t:'select',o:['not_expanding','expanding','contracting'],d:'not_expanding'},{k:'lookback',t:'number',d:4}],
+  bb_pct_b_momentum:        [{k:'required_direction',t:'select',o:['not_rising','rising','falling'],d:'not_rising'},{k:'lookback',t:'number',d:3}],
+};
+const IND_TYPES = Object.keys(IND_SCHEMAS);
+
+function openEditInd(id) {
+  const ind = _indicators.find(i => i.id === id); if (!ind) return;
+  _editIndId = id;
+  document.getElementById('ind-sheet-title').textContent = 'Edit Indicator';
+  document.getElementById('ind-del-btn').style.display = '';
+  const typeSel = document.getElementById('ind-type');
+  typeSel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t===ind.indicator_type?' selected':''}>${t}</option>`).join('');
+  document.getElementById('ind-cat').value = ind.category || 'trend';
+  document.getElementById('ind-enabled').checked = !!ind.enabled;
+  document.getElementById('ind-hardstop').checked = !!ind.is_hard_stop;
+  document.getElementById('ind-err').style.display = 'none';
+  const cleanParams = Object.fromEntries(Object.entries(ind.params??{}).filter(([k])=>k!=='hard_stop'));
+  buildParamFields(ind.indicator_type, cleanParams);
+  openSheet();
+}
+
+function openAddInd() {
+  _editIndId = null;
+  document.getElementById('ind-sheet-title').textContent = 'Add Indicator';
+  document.getElementById('ind-del-btn').style.display = 'none';
+  const typeSel = document.getElementById('ind-type');
+  typeSel.innerHTML = IND_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
+  document.getElementById('ind-cat').value = 'trend';
+  document.getElementById('ind-enabled').checked = true;
+  document.getElementById('ind-hardstop').checked = true;
+  document.getElementById('ind-err').style.display = 'none';
+  buildParamFields(IND_TYPES[0], {});
+  openSheet();
+}
+
+function onIndTypeChange() { buildParamFields(document.getElementById('ind-type').value, {}); }
+
+function buildParamFields(type, cur) {
+  const schema = IND_SCHEMAS[type] || [];
+  const el = document.getElementById('ind-param-fields');
+  if (!schema.length) { el.innerHTML = '<div style="color:var(--txd);font-size:11px;padding:6px 0">No parameters for this type.</div>'; return; }
+  let html = '';
+  for (let i = 0; i < schema.length; i++) {
+    const f = schema[i];
+    const val = cur[f.k] != null ? cur[f.k] : (f.d != null ? f.d : '');
+    if (f.t === 'bool') {
+      html += `<div class="ptgl-row"><span class="ptgl-name">${escHtml(f.k)}</span><label class="tgl-sw"><input type="checkbox" id="p-${f.k}" ${val?'checked':''}><span class="tgl-track"></span></label></div>`;
+    } else if (f.t === 'select') {
+      const opts = (f.o||[]).map(o=>`<option value="${o}"${o===val?' selected':''}>${o}</option>`).join('');
+      // Try to pair a select with a following number
+      const next = schema[i+1];
+      if (next && next.t === 'number') {
+        const v2 = cur[next.k]!=null?cur[next.k]:(next.d!=null?next.d:'');
+        html += `<div class="param-grid"><div class="pf"><div class="pf-lbl">${escHtml(f.k)}</div><select class="pf-sel" id="p-${f.k}">${opts}</select></div><div class="pf"><div class="pf-lbl">${escHtml(next.k)}</div><input class="pf-inp" id="p-${next.k}" type="number" value="${escAttr(v2)}" placeholder="${next.d!=null?next.d:''}"></div></div>`;
+        i++;
+      } else {
+        html += `<div class="pf" style="margin-bottom:9px"><div class="pf-lbl">${escHtml(f.k)}</div><select class="pf-sel" id="p-${f.k}">${opts}</select></div>`;
+      }
+    } else {
+      const next = schema[i+1];
+      if (next && next.t === 'number') {
+        const v2 = cur[next.k]!=null?cur[next.k]:(next.d!=null?next.d:'');
+        html += `<div class="param-grid"><div class="pf"><div class="pf-lbl">${escHtml(f.k)}</div><input class="pf-inp" id="p-${f.k}" type="number" value="${escAttr(val)}" placeholder="${f.d!=null?f.d:''}"></div><div class="pf"><div class="pf-lbl">${escHtml(next.k)}</div><input class="pf-inp" id="p-${next.k}" type="number" value="${escAttr(v2)}" placeholder="${next.d!=null?next.d:''}"></div></div>`;
+        i++;
+      } else {
+        html += `<div class="pf" style="margin-bottom:9px"><div class="pf-lbl">${escHtml(f.k)}</div><input class="pf-inp" id="p-${f.k}" type="number" value="${escAttr(val)}" placeholder="${f.d!=null?f.d:''}"></div>`;
+      }
+    }
+  }
+  el.innerHTML = html;
+}
+
+function readParamFields(type) {
+  const schema = IND_SCHEMAS[type] || {};
+  const params = {};
+  (IND_SCHEMAS[type]||[]).forEach(f => {
+    const el = document.getElementById('p-' + f.k); if (!el) return;
+    if (f.t==='bool') params[f.k] = el.checked;
+    else if (f.t==='select') params[f.k] = el.value;
+    else { const v = el.value.trim(); params[f.k] = v==='' ? null : parseFloat(v); }
+  });
+  return params;
+}
+
+async function saveIndicator() {
+  if (!_currentProfile) return;
+  const type = document.getElementById('ind-type').value;
+  const errEl = document.getElementById('ind-err'); errEl.style.display = 'none';
+  const body = {
+    indicator_type: type, category: document.getElementById('ind-cat').value,
+    enabled: document.getElementById('ind-enabled').checked,
+    is_hard_stop: document.getElementById('ind-hardstop').checked,
+    params: readParamFields(type),
+  };
+  try {
+    if (_editIndId == null) await api('/indicators/'+_currentProfile.name, {method:'POST',body:JSON.stringify(body)});
+    else await api('/indicators/'+_currentProfile.name+'/'+_editIndId, {method:'PUT',body:JSON.stringify(body)});
+    closeIndSheet(); showToast('Indicator saved'); loadIndicators(_currentProfile.name);
+  } catch(e) { errEl.textContent = e.message||'Save failed'; errEl.style.display = 'block'; }
+}
+
+async function deleteIndicator() {
+  if (!_editIndId || !_currentProfile) return;
+  if (!confirm('Delete this indicator?')) return;
+  try {
+    await fetch(BASE+'/indicators/'+_currentProfile.name+'/'+_editIndId, {method:'DELETE',credentials:'include',headers:{'X-API-Key':akey()??''}});
+    closeIndSheet(); showToast('Deleted');
+    _indicators = _indicators.filter(i => i.id !== _editIndId); renderIndList();
+  } catch(e) { showToast(e.message||'Delete failed', true); }
+}
+
+function openSheet() {
+  document.getElementById('ind-overlay').classList.add('open');
+  document.getElementById('ind-sheet').classList.add('open');
+}
+function closeIndSheet() {
+  document.getElementById('ind-overlay').classList.remove('open');
+  document.getElementById('ind-sheet').classList.remove('open');
+  _editIndId = null;
+}
+
+// ── Accordion ─────────────────────────────────────────────────────
+function toggleAcc(name) {
+  const body = document.getElementById('body-'+name);
+  const arr = document.getElementById('arr-'+name);
+  const hdr = body.previousElementSibling;
+  const open = body.classList.contains('open');
+  body.classList.toggle('open', !open);
+  arr.classList.toggle('open', !open);
+  hdr.classList.toggle('open', !open);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function setFld(id, val) { const el=document.getElementById(id); if(el) el.value=(val!=null&&val!=='')?val:''; }
+function setChk(id, val) { const el=document.getElementById(id); if(el) el.checked=!!val; }
+function chkVal(id) { const el=document.getElementById(id); return el?el.checked:false; }
+function numOrNull(id) { const el=document.getElementById(id); if(!el||el.value.trim()==='') return null; return parseFloat(el.value); }
+
+function fmt$(n) {
+  if (n==null||isNaN(n)) return '$—';
+  const a=Math.abs(n);
+  if (a>=1000000) return (n<0?'-':'')+'$'+(a/1000000).toFixed(2)+'M';
+  if (a>=1000)    return (n<0?'-':'')+'$'+(a/1000).toFixed(1)+'k';
+  return (n<0?'-$':'$')+a.toFixed(2);
+}
+function fmtUsd(n) {
+  if (n==null||isNaN(n)) return '$—';
+  return (n<0?'-$':'$') + Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtSign$(n) { if(n==null||isNaN(n)) return '—'; return (n>=0?'+':'')+fmt$(n); }
+function fmtSign(n,dp=2) { if(n==null||isNaN(n)) return '—'; return (n>=0?'+':'')+n.toFixed(dp); }
+function fmtPrice(n) {
+  if(n==null||n==='') return '—'; const v=parseFloat(n); if(isNaN(v)) return '—';
+  return v>=1000?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(6);
+}
+function fmt4(n) { if(n==null) return '—'; const v=parseFloat(n); return isNaN(v)?'—':v.toFixed(4); }
+function fmtNum(n) { const v=parseFloat(n); if(isNaN(v)) return '—'; return v>=1000?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(6); }
+function fmtNow() {
+  const n=new Date();
+  return n.getUTCHours().toString().padStart(2,'0')+':'+n.getUTCMinutes().toString().padStart(2,'0')+' UTC';
+}
+function escHtml(s) { if(s==null)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s) { if(s==null)return''; return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// ── Init ──────────────────────────────────────────────────────────
+checkExistingSession();
+</script>
+</body>
+</html>

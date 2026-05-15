@@ -3683,3 +3683,7 @@ app.mount("/web", StaticFiles(directory="web"), name="web")
 @app.get("/")
 async def serve_dashboard():
     return FileResponse("web/index.html")
+
+@app.get("/mobile")
+async def serve_mobile():
+    return FileResponse("web/mobile.html")
