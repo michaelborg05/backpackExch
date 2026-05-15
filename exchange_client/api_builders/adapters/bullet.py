@@ -733,15 +733,16 @@ class BulletAdapter(ExchangeAdapter):
             order_id = str(order_ns.__dict__.get("order_id", tx_id))
             for event in raw["events"]:
                 val = event.get("value", {})
-                trade = val.get("trade") or val.get("place_order")
+                trade = val.get("trade_v1") or val.get("trade") or val.get("place_order")
                 if not trade:
                     continue
-                if event.get("key") == "Exchange/Trade" and not trade.get("is_maker", True):
+                event_key = event.get("key", "")
+                if event_key in ("Exchange/TradeV1", "Exchange/Trade") and not trade.get("is_maker", True):
                     exec_price = str(trade.get("price", order_ns.price))
                     exec_qty = str(trade.get("size", order_ns.quantity))
                     order_id = str(trade.get("order_id", tx_id))
                     break
-                if event.get("key") == "Exchange/PlaceOrder" and exec_price is None:
+                if event_key == "Exchange/PlaceOrder" and exec_price is None:
                     # Use PlaceOrder as fallback if no Trade event found
                     exec_price = str(trade.get("price", order_ns.price))
                     exec_qty = str(trade.get("size", order_ns.quantity))
