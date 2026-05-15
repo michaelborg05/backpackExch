@@ -565,6 +565,8 @@ class BulletAdapter(ExchangeAdapter):
             return None
 
         # 2. Submit to Bullet
+        import time as _time
+        order_submitted_ms = int(_time.time() * 1000)
         position_already_flat = False
         try:
             url = BulletEndpoints.submit_tx()
@@ -605,9 +607,11 @@ class BulletAdapter(ExchangeAdapter):
 
         # 3b. The IOC limit price (aggressive +/-0.5%) is not the fill price.
         # Fetch the actual execution price from userTrades and override before persisting.
+        # Pass min_timestamp_ms so stale trades from before this order are skipped.
         actual_fill = self._lookup_fill_price(
             symbol=original_symbol or order_ns.symbol,
             side=order_ns.side,
+            min_timestamp_ms=order_submitted_ms,
         )
         if actual_fill:
             self.logger.info(
@@ -642,8 +646,19 @@ class BulletAdapter(ExchangeAdapter):
             self.logger.info(f"[Bullet] Trade saved: ID {saved_trade.id}")
 
             if is_long_entry or is_short_entry:
+                # TP/SL levels are based on current market price, not the aggressive IOC limit
+                # price, so the levels reflect the market at fill time.
+                from cache.price_cache import get_price_cache
+                _pc = get_price_cache()
+                _base = (original_symbol or order_ns.symbol).split("_")[0].split("-")[0]
+                _market_price = (
+                    _pc.get_price(original_symbol or order_ns.symbol)
+                    or _pc.get_price(f"{_base}_USDC")
+                    or _pc.get_price(_base)
+                    or float(saved_trade.price)
+                )
                 tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
-                    entry_price=saved_trade.price,
+                    entry_price=_market_price,
                     side=saved_trade.side,
                     profile=self.profile,
                 )
@@ -1017,24 +1032,38 @@ class BulletAdapter(ExchangeAdapter):
         places = max(0, -s.as_tuple().exponent)
         return f"{rounded:.{places}f}"
 
-    def _lookup_fill_price(self, symbol: str, side: str) -> Optional[float]:
+    def _lookup_fill_price(self, symbol: str, side: str, min_timestamp_ms: int = None) -> Optional[float]:
         """Return the actual fill price of the most recent trade matching symbol/side.
 
-        Called after a successful tx submission to correct the IOC limit price
-        (which is the aggressive +/-0.5% price, not what the exchange actually executed at).
+        Called after a successful tx submission to correct the IOC limit price.
+        Retries up to 3 times with a delay because userTrades indexing lags the tx.
+        min_timestamp_ms filters out trades that predate the current order.
         """
-        try:
-            trades = self.get_user_trades(symbol, limit=5)
-            side_lower = side.lower()
-            for trade in trades:
-                t_side = str(trade.get("side", "")).lower()
-                if t_side not in (side_lower, "buy" if side_lower == "bid" else "sell"):
-                    continue
-                price = trade.get("price") or trade.get("avgPrice") or trade.get("fillPrice")
-                if price:
-                    return float(price)
-        except Exception as e:
-            self.logger.warning(f"[Bullet] _lookup_fill_price failed: {e}")
+        import time as _time
+        side_lower = side.lower()
+        match_sides = {side_lower, "buy" if side_lower == "bid" else "sell"}
+
+        for attempt in range(3):
+            if attempt > 0:
+                _time.sleep(1.5)
+            try:
+                trades = self.get_user_trades(symbol, limit=10)
+                for trade in trades:
+                    t_side = str(trade.get("side", "")).lower()
+                    if t_side not in match_sides:
+                        continue
+                    if min_timestamp_ms:
+                        trade_time = (
+                            trade.get("time") or trade.get("timestamp")
+                            or trade.get("tradeTime") or 0
+                        )
+                        if int(trade_time) < min_timestamp_ms:
+                            continue
+                    price = trade.get("price") or trade.get("avgPrice") or trade.get("fillPrice")
+                    if price:
+                        return float(price)
+            except Exception as e:
+                self.logger.warning(f"[Bullet] _lookup_fill_price attempt {attempt + 1} failed: {e}")
         return None
 
     def _get_next_nonce(self) -> int:

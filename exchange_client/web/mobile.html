@@ -779,9 +779,9 @@ async function loadDashboard() {
     upnlEl.className = 'kpi-val ' + (upnl >= 0 ? 'g' : 'r');
     document.getElementById('k-upnl-sub').textContent = posArr.length + ' open position' + (posArr.length !== 1 ? 's' : '');
 
-    // Daily PnL
-    const pnlArr = Array.isArray(dailyPnl) ? dailyPnl : [];
-    const dpnl = pnlArr.reduce((s, p) => s + (parseFloat(p.daily_pnl) || 0), 0);
+    // Daily PnL — endpoint returns { profile_name: { total_pnl, realized_pnl, ... } }
+    const pnlByProf = (dailyPnl && typeof dailyPnl === 'object' && !Array.isArray(dailyPnl)) ? dailyPnl : {};
+    const dpnl = Object.values(pnlByProf).reduce((s, p) => s + (parseFloat(p.total_pnl) || 0), 0);
     const dpnlEl = document.getElementById('k-dpnl');
     dpnlEl.textContent = fmt$(dpnl);
     dpnlEl.className = 'kpi-val ' + (dpnl >= 0 ? 'g' : 'r');
@@ -796,7 +796,7 @@ async function loadDashboard() {
     document.getElementById('dash-ts').textContent = fmtNow();
 
     // Profile breakdown
-    renderProfileGrid(profArr, pnlArr, posArr);
+    renderProfileGrid(profArr, pnlByProf, posArr);
 
     // Regime from /monitoring/status
     renderRegime(mon);
@@ -828,9 +828,10 @@ function setRegVal(id, val) {
     : s.includes('bear')||s.includes('down') ? 'var(--red)' : 'var(--tx)';
 }
 
-function renderProfileGrid(profiles, dailyPnl, positions) {
+function renderProfileGrid(profiles, pnlByProf, positions) {
+  // pnlByProf is { profile_name: { total_pnl, realized_pnl, unrealized_pnl, ... } }
   const pnlMap = {}, posMap = {};
-  dailyPnl.forEach(d => { pnlMap[d.profile_name] = parseFloat(d.daily_pnl) || 0; });
+  Object.entries(pnlByProf).forEach(([name, d]) => { pnlMap[name] = parseFloat(d.total_pnl) || 0; });
   positions.forEach(p => { posMap[p.profile_name] = (posMap[p.profile_name] || 0) + 1; });
   const container = document.getElementById('profgrid');
   if (!profiles.length) {
