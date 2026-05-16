@@ -3,7 +3,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from contextlib import asynccontextmanager
 from models.webhook import TradingViewAlert, WebhookResponse
 from models.ticker import TickerRequest, UpdateTickersRequest
@@ -12,7 +12,7 @@ from models.webhook import TrendUpdateAlert, TrendData
 from models.symbol import SymbolConfigRequest
 from models.ai_prompt import AIPromptCreate, AIPromptUpdate
 from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorOut
-from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest
+from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest, TradingHoursEntry
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.factory import get_adapter
@@ -3266,6 +3266,72 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
         db.refresh(cb)
         get_circuit_breaker().invalidate_config_cache(profile_name)
         return _serialize_cb(cb)
+
+# ---------------------------------------------------------------------------
+# GET/PUT /profiles/{profile_name}/trading-hours
+# ---------------------------------------------------------------------------
+
+@app.get("/profiles/{profile_name}/trading-hours", dependencies=[Depends(require_read_permission)])
+async def get_trading_hours(profile_name: str):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, ProfileTradingHours
+
+    with get_db_session() as db:
+        profile = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        rows = (
+            db.query(ProfileTradingHours)
+            .filter(ProfileTradingHours.profile_id == profile.id)
+            .order_by(ProfileTradingHours.day_of_week)
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "day_of_week": r.day_of_week,
+                "start_time": r.start_time,
+                "end_time": r.end_time,
+                "enabled": r.enabled,
+            }
+            for r in rows
+        ]
+
+
+@app.put("/profiles/{profile_name}/trading-hours", dependencies=[Depends(require_admin_permission)])
+async def save_trading_hours(profile_name: str, body: List[TradingHoursEntry]):
+    """
+    Replace the full set of trading-hour windows for a profile.
+    Send an empty list to remove all restrictions (trade any time).
+    """
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, ProfileTradingHours
+    from services.profile_manager import refresh_profiles_from_db
+
+    with get_db_session() as db:
+        profile = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        db.query(ProfileTradingHours).filter(
+            ProfileTradingHours.profile_id == profile.id
+        ).delete()
+
+        for entry in body:
+            db.add(ProfileTradingHours(
+                profile_id=profile.id,
+                day_of_week=entry.day_of_week,
+                start_time=entry.start_time,
+                end_time=entry.end_time,
+                enabled=entry.enabled,
+            ))
+
+        db.commit()
+
+    refresh_profiles_from_db()
+    return {"message": "Trading hours saved", "windows": len(body)}
+
 
 @app.get("/exchange-accounts", dependencies=[Depends(require_read_permission)])
 async def list_exchange_accounts():

@@ -379,6 +379,7 @@
             <div class="stab" onclick="showTab('cb',this)">Circuit Breaker</div>
             <div class="stab" onclick="showTab('symbols',this)">Symbols</div>
             <div class="stab" onclick="showTab('indicators',this)">Indicators</div>
+            <div class="stab" onclick="showTab('hours',this)">Trading Hours</div>
           </div>
 
           <!-- ── SETTINGS TAB ────────────────────────────────────────────── -->
@@ -544,6 +545,52 @@
               </div>
               <div id="ind-groups-body" style="font-size:11px;color:var(--txd)">No groups configured — assign a group name to indicators above.</div>
             </div>
+          </div>
+
+          <!-- ── TRADING HOURS TAB ──────────────────────────────────────── -->
+          <div class="tab-panel" id="tab-hours">
+
+            <!-- VIEW MODE: heatmap grid -->
+            <div id="hours-view-mode">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px">
+                <div>
+                  <div class="section-title" style="margin-bottom:3px">Trading Hours (UTC)</div>
+                  <div style="font-size:10px;color:var(--txd)">Each cell = one hour. Green = trading allowed. No windows configured = unrestricted.</div>
+                </div>
+                <button onclick="switchHoursToEdit()" style="flex-shrink:0;padding:5px 14px;font-size:10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx);margin-left:16px">Edit</button>
+              </div>
+              <div id="hours-grid-container" style="overflow-x:auto"></div>
+            </div>
+
+            <!-- EDIT MODE: table of windows -->
+            <div id="hours-edit-mode" style="display:none">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+                <div>
+                  <div class="section-title" style="margin-bottom:3px">Edit Trading Hours (UTC)</div>
+                  <div style="font-size:10px;color:var(--txd)">Multiple windows per day are allowed. A window ending before its start spans midnight.</div>
+                </div>
+                <button onclick="switchHoursToView()" style="flex-shrink:0;padding:5px 14px;font-size:10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--txd);margin-left:16px">← View</button>
+              </div>
+              <table class="dt" id="hours-table" style="table-layout:fixed;max-width:560px">
+                <thead>
+                  <tr>
+                    <th style="width:130px">Day</th>
+                    <th style="width:150px">Start (UTC)</th>
+                    <th style="width:150px">End (UTC)</th>
+                    <th style="width:80px">Enabled</th>
+                    <th style="width:36px"></th>
+                  </tr>
+                </thead>
+                <tbody id="hours-tbody">
+                  <tr><td colspan="5" style="text-align:center;color:var(--txd);padding:24px">Select a profile to load trading hours</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top:12px;display:flex;gap:8px">
+                <button class="btn-new" onclick="addHoursRow()">+ Add Window</button>
+                <button class="btn-sm" onclick="prefillWeekdays()" style="font-size:10px;padding:4px 12px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Pre-fill Mon–Fri</button>
+              </div>
+            </div>
+
           </div>
 
           <!-- Save bar -->
@@ -1938,6 +1985,7 @@ function showProfileDetail() {
   loadCBSummary(p.name);
   loadSymbolsP();
   loadIndicatorsP();
+  loadTradingHours(p.name);
   updateSaveBar();
   showTab('settings', document.querySelector('#p-profiles .stab'));
 }
@@ -2056,7 +2104,7 @@ function showTab(name, el) {
 
 function updateSaveBar() {
   const bar = document.getElementById('save-bar');
-  bar.style.display = (_currentTab === 'settings' || _currentTab === 'cb') ? 'flex' : 'none';
+  bar.style.display = (_currentTab === 'settings' || _currentTab === 'cb' || _currentTab === 'hours') ? 'flex' : 'none';
   document.getElementById('save-status').textContent = '';
 }
 
@@ -2064,6 +2112,7 @@ async function saveCurrentTab() {
   if (!_currentProfile) return;
   if (_currentTab === 'settings') await saveSettings();
   else if (_currentTab === 'cb') await saveCB();
+  else if (_currentTab === 'hours') await saveHours();
 }
 
 function getNum(id) {
@@ -2178,6 +2227,214 @@ async function saveCB() {
     status.className = 'save-status ok';
     showToast('Circuit breaker config saved');
     loadCBSummary(_currentProfile.name);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'save-status err';
+  } finally {
+    btn.textContent = 'Save Changes';
+  }
+}
+
+// ── Trading Hours ─────────────────────────────────────────────────────────
+
+const DAY_NAMES = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+async function loadTradingHours(profileName) {
+  const tbody = document.getElementById('hours-tbody');
+  if (!profileName) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--txd);padding:24px">Select a profile to load trading hours</td></tr>';
+    renderHoursGrid([]);
+    return;
+  }
+  try {
+    const rows = await api('/profiles/' + profileName + '/trading-hours');
+    renderHoursRows(rows || []);
+    renderHoursGrid(rows || []);
+  } catch {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--red);padding:16px">Failed to load trading hours</td></tr>';
+  }
+  // Always start in view mode when switching profiles
+  document.getElementById('hours-view-mode').style.display = '';
+  document.getElementById('hours-edit-mode').style.display = 'none';
+}
+
+function renderHoursRows(rows) {
+  const tbody = document.getElementById('hours-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--txd);padding:24px">No windows configured — profile trades at any time. Click "+ Add Window" to restrict hours.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r, i) => hoursRowHtml(r, i)).join('');
+}
+
+function renderHoursGrid(windows) {
+  const container = document.getElementById('hours-grid-container');
+  const DAY_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+  // Build 7×24 active matrix
+  const active = Array.from({length: 7}, () => new Array(24).fill(false));
+  const hasAny = windows && windows.length > 0;
+
+  if (hasAny) {
+    for (const w of windows) {
+      if (!w.enabled) continue;
+      const d = w.day_of_week;
+      if (d < 0 || d > 6) continue;
+      const sh = parseInt((w.start_time || '00:00').split(':')[0]);
+      const eh = parseInt((w.end_time || '23:59').split(':')[0]);
+      if (sh <= eh) {
+        for (let h = sh; h <= eh; h++) active[d][h] = true;
+      } else {                          // spans midnight
+        for (let h = sh; h < 24; h++) active[d][h] = true;
+        for (let h = 0; h <= eh; h++) active[d][h] = true;
+      }
+    }
+  }
+
+  const COLS = 'grid-template-columns: 38px repeat(24, 1fr)';
+  const CELL_OPEN  = 'background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.35);border-radius:2px';
+  const CELL_SHUT  = 'background:var(--bg3);border:1px solid var(--brd);border-radius:2px';
+  const CELL_FREE  = 'background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.15);border-radius:2px';
+
+  let html = '';
+
+  // Hour label row
+  html += `<div style="display:grid;${COLS};gap:2px;margin-bottom:4px;align-items:end">
+    <div></div>`;
+  for (let h = 0; h < 24; h++) {
+    html += `<div style="text-align:center;font-size:8px;color:${h % 6 === 0 ? 'var(--txd)' : 'transparent'};line-height:1">${String(h).padStart(2,'0')}</div>`;
+  }
+  html += '</div>';
+
+  // Day rows
+  for (let d = 0; d < 7; d++) {
+    html += `<div style="display:grid;${COLS};gap:2px;margin-bottom:2px;align-items:center">
+      <div style="font-size:9px;color:var(--txd);letter-spacing:.04em">${DAY_SHORT[d]}</div>`;
+    for (let h = 0; h < 24; h++) {
+      const isOpen = hasAny ? active[d][h] : false;
+      const style  = hasAny ? (isOpen ? CELL_OPEN : CELL_SHUT) : CELL_FREE;
+      const title  = `${DAY_SHORT[d]} ${String(h).padStart(2,'0')}:00–${String(h+1 < 24 ? h+1 : 0).padStart(2,'0')}:00`;
+      html += `<div style="height:20px;${style}" title="${title}"></div>`;
+    }
+    html += '</div>';
+  }
+
+  // Legend
+  const legendItem = (style, label) =>
+    `<div style="display:flex;align-items:center;gap:5px">
+       <div style="width:12px;height:12px;flex-shrink:0;${style};border-radius:2px"></div>
+       <span>${label}</span>
+     </div>`;
+  html += `<div style="display:flex;gap:16px;margin-top:10px;font-size:10px;color:var(--txd)">
+    ${legendItem(CELL_OPEN, 'Trading allowed')}
+    ${legendItem(hasAny ? CELL_SHUT : CELL_FREE, hasAny ? 'Closed' : 'Unrestricted (all hours)')}
+  </div>`;
+
+  container.innerHTML = html;
+}
+
+function switchHoursToEdit() {
+  document.getElementById('hours-view-mode').style.display = 'none';
+  document.getElementById('hours-edit-mode').style.display = '';
+}
+
+function switchHoursToView() {
+  // Refresh grid from current (unsaved) rows so user can preview before saving
+  renderHoursGrid(collectHoursRows());
+  document.getElementById('hours-edit-mode').style.display = 'none';
+  document.getElementById('hours-view-mode').style.display = '';
+}
+
+// type="time" display format is locale-driven in browsers; the value is always HH:MM regardless.
+const _TIME_INPUT_STYLE = 'width:110px;background:var(--bg2);border:1px solid var(--brd);color:var(--tx);padding:4px 8px;border-radius:3px;font-size:12px;font-family:monospace';
+const _DAY_SELECT_STYLE = 'width:100%;background:var(--bg2);border:1px solid var(--brd);color:var(--tx);padding:4px 6px;border-radius:3px;font-size:12px';
+
+function hoursRowHtml(r, i) {
+  const dayOptions = DAY_NAMES.map((d, idx) =>
+    `<option value="${idx}" ${r.day_of_week === idx ? 'selected' : ''}>${d}</option>`
+  ).join('');
+  return `<tr data-row="${i}">
+    <td><select class="hr-day" style="${_DAY_SELECT_STYLE}">${dayOptions}</select></td>
+    <td><input class="hr-start" type="time" value="${r.start_time || '09:00'}" style="${_TIME_INPUT_STYLE}"></td>
+    <td><input class="hr-end"   type="time" value="${r.end_time   || '17:00'}" style="${_TIME_INPUT_STYLE}"></td>
+    <td style="text-align:center"><input class="hr-enabled" type="checkbox" ${r.enabled !== false ? 'checked' : ''}></td>
+    <td style="text-align:center"><button onclick="removeHoursRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 4px">×</button></td>
+  </tr>`;
+}
+
+function addHoursRow() {
+  const tbody = document.getElementById('hours-tbody');
+  if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+  tbody.appendChild(_makeHoursRow(0, '09:00', '17:00'));
+}
+
+function removeHoursRow(btn) {
+  btn.closest('tr').remove();
+  const tbody = document.getElementById('hours-tbody');
+  if (!tbody.rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--txd);padding:24px">No windows configured — profile trades at any time. Click "+ Add Window" to restrict hours.</td></tr>';
+  }
+}
+
+function _makeHoursRow(dayIdx, start, end) {
+  const dayOptions = DAY_NAMES.map((name, idx) =>
+    `<option value="${idx}" ${idx === dayIdx ? 'selected' : ''}>${name}</option>`
+  ).join('');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><select class="hr-day" style="${_DAY_SELECT_STYLE}">${dayOptions}</select></td>
+    <td><input class="hr-start" type="time" value="${start}" style="${_TIME_INPUT_STYLE}"></td>
+    <td><input class="hr-end"   type="time" value="${end}"   style="${_TIME_INPUT_STYLE}"></td>
+    <td style="text-align:center"><input class="hr-enabled" type="checkbox" checked></td>
+    <td style="text-align:center"><button onclick="removeHoursRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 4px">×</button>`;
+  return tr;
+}
+
+function prefillWeekdays() {
+  // Two sessions per weekday (Mon–Fri): 03:00–12:00 and 14:00–21:00 UTC.
+  // Multiple rows for the same day are all checked independently — trade if
+  // the current time falls within ANY enabled window for that day.
+  const tbody = document.getElementById('hours-tbody');
+  tbody.innerHTML = '';
+  for (let d = 0; d < 5; d++) {
+    tbody.appendChild(_makeHoursRow(d, '03:00', '12:00'));
+    tbody.appendChild(_makeHoursRow(d, '14:00', '21:00'));
+  }
+}
+
+function collectHoursRows() {
+  const rows = [];
+  document.querySelectorAll('#hours-tbody tr').forEach(tr => {
+    const day = tr.querySelector('.hr-day');
+    const start = tr.querySelector('.hr-start');
+    const end = tr.querySelector('.hr-end');
+    const enabled = tr.querySelector('.hr-enabled');
+    if (!day || !start || !end) return;
+    rows.push({
+      day_of_week: parseInt(day.value),
+      start_time: start.value || '00:00',
+      end_time: end.value || '23:59',
+      enabled: enabled ? enabled.checked : true,
+    });
+  });
+  return rows;
+}
+
+async function saveHours() {
+  const btn = document.getElementById('save-btn-text');
+  const status = document.getElementById('save-status');
+  btn.textContent = 'Saving...';
+  status.textContent = '';
+  const body = collectHoursRows();
+  try {
+    await api('/profiles/' + _currentProfile.name + '/trading-hours',
+              { method: 'PUT', body: JSON.stringify(body) });
+    status.textContent = '✓ Saved';
+    status.className = 'save-status ok';
+    showToast('Trading hours saved');
+    renderHoursGrid(body);
+    document.getElementById('hours-edit-mode').style.display = 'none';
+    document.getElementById('hours-view-mode').style.display = '';
   } catch (e) {
     status.textContent = '✗ ' + e.message;
     status.className = 'save-status err';

@@ -1,4 +1,5 @@
 TO DO
+# validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
 # make dynamic stop losses as per chat gpt suggestions
 # Add profile param for how many indicators needed for trend invalidation
 # possibility - Add price momentum check to TI: If price drops below entry within first 10 minutes, treat as instant TI
@@ -8,13 +9,12 @@ TO DO
 # Add TP and SL from AI suggestion to override defaults
 # web page changes
   - Add "exchange accounts" tab similar to profiles
+# Api call to manually refresh caches for various things - like settings, profiles, etc
 # When adding new profile, it doesnt keep the spot/perps setting I choose i nthe modal when it loadst he profle page
 # The profit figures don't match with balance changes. Find out why. Possibilities
     - close price being recorded is the theoretical price but maybe my actual trade is triggering at a differnt price
     - Maybe its not including fees
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
-# check in Circuit breaker deposit code
-# Add option to remove/close circuit breaker cleanly
 
 No need
  # split into separate modules so i can migrate to Azure
@@ -28,7 +28,6 @@ post_tp_reentry_rules:
   require_price_below_previous_high: true  # Must enter BELOW previous TP high
   min_volume_ratio_override: 1.5  # Higher volume requirement
  post_tp_cooldown_seconds: 7200
-# validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
 
  DONE
 # Add arming of trailing stop only after x percent profit
@@ -120,9 +119,4 @@ Improvement: The "Mean Reversion" Check
 # clean up circuit breaker
     - Reporting percent from start but triggering from highest - I.e. Reported CB trigger 1.5% loss even though loss limit was 3%. It was looking at highest price for period instead of cb_trigger amount. Would nee dto 
 # add circuit breaker delete/reset to UI
-# Api call to manually refresh caches for various things - like settings, profiles, etc
 # clean up the trend cache to remove the unused reasons summaries. Add it to the validation and remove the column from trades table
-# Add option to remove trend data for a coin no longer in use (Maybe in market page)
-# All close_reasons for perps is MANUAL , not stop or TP
-# when copying indicators, also copy grouping logic
-# when copying indicators, add option to also copy key params like timeframes, how many indicators need to pass, invalidation times, etc

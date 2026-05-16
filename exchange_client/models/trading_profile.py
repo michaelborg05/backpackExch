@@ -58,11 +58,15 @@ class TradingProfile(BaseModel):
     min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
     min_volume_ratio: float = 1.5                   # Require 50% above average volume
 
-    # position exit logic 
+    # position exit logic
     use_trend_invalidation_exit: Optional[bool] = False
     trend_invalidation_indicators: Optional[str] = "entry"  # trend or entry
     min_position_age_for_trend_check: Optional[int] = 120  # minutes
     max_position_hours: Optional[int] = 18  # Force exit if stuck
+
+    # Trading hours — list of {day_of_week: 0-6, start_time: "HH:MM", end_time: "HH:MM", enabled: bool}
+    # Empty list means unrestricted (trade any time).
+    trading_hours: Optional[List[Dict[str, Any]]] = None
 
     # Position sizing
     default_order_size_usdc: float = 100.0      # Default order size in USDC (fixed amount)
@@ -230,6 +234,14 @@ class ProfileUpdateRequest(BaseModel):
     max_position_hours: Optional[int] = None
 
     is_active: Optional[bool] = None
+
+
+class TradingHoursEntry(BaseModel):
+    """A single allowed trading window for one day of the week."""
+    day_of_week: int          # 0=Monday … 6=Sunday
+    start_time: str           # "HH:MM" UTC
+    end_time: str             # "HH:MM" UTC
+    enabled: bool = True
 
 
 class ProfileCredentialsRequest(BaseModel):

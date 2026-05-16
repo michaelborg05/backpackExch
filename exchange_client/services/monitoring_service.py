@@ -1089,9 +1089,46 @@ class MonitoringService:
         except Exception as e:
             self.logger.error(f"Error checking signals: {e}", exc_info=True)
     
+    def _is_within_trading_hours(self, profile: TradingProfile) -> bool:
+        """Return True if the current UTC time falls within any enabled trading window for today."""
+        hours = getattr(profile, 'trading_hours', None)
+        if not hours:
+            return True  # no windows configured — unrestricted
+
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+        today = now_utc.weekday()  # 0=Mon … 6=Sun
+        current_minutes = now_utc.hour * 60 + now_utc.minute
+
+        for window in hours:
+            if not window.get('enabled', True):
+                continue
+            if window.get('day_of_week') != today:
+                continue
+            try:
+                sh, sm = map(int, window['start_time'].split(':'))
+                eh, em = map(int, window['end_time'].split(':'))
+            except (KeyError, ValueError, AttributeError):
+                continue
+            start_m = sh * 60 + sm
+            end_m = eh * 60 + em
+            if start_m <= end_m:
+                if start_m <= current_minutes <= end_m:
+                    return True
+            else:  # window spans midnight
+                if current_minutes >= start_m or current_minutes <= end_m:
+                    return True
+
+        return False
+
     def _process_signals_for_profile(self, profile: TradingProfile):
         """Process trading signals for a specific profile"""
-                
+
+        # Check trading hours
+        if not self._is_within_trading_hours(profile):
+            self.logger.info(f"[{profile.name}] Outside trading hours — skipping signal check")
+            return None
+
         # Check circuit breakers
         circuit_breaker = get_circuit_breaker()
         can_trade, breaker_reason = circuit_breaker.check_circuit_breakers(

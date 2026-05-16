@@ -788,6 +788,31 @@ class MonitoredSymbol(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ProfileTradingHours(Base):
+    """
+    Allowed trading windows per profile, per day of week (UTC).
+
+    If no enabled rows exist for a profile on the current day, the profile
+    is considered outside its trading hours and signal generation is skipped.
+    If the table has no rows at all for a profile, all hours are permitted.
+    """
+    __tablename__ = "profile_trading_hours"
+
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(
+        Integer,
+        ForeignKey("trading_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    day_of_week = Column(Integer, nullable=False)   # 0=Monday … 6=Sunday
+    start_time = Column(String(5), nullable=False)  # "HH:MM" UTC
+    end_time = Column(String(5), nullable=False)    # "HH:MM" UTC
+    enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ExchangeAccount(Base):
     __tablename__ = "exchange_accounts"
 

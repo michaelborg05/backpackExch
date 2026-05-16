@@ -268,7 +268,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
     Indicators are stored in `indicators` table with a `category` column
     ('trend' | 'entry' | 'exit') and a `params` JSONB column.
     """
-    from db.models import TradingProfileDB  # local import to avoid circular deps
+    from db.models import TradingProfileDB, ProfileTradingHours  # local import to avoid circular deps
     from sqlalchemy.orm import joinedload
 
     db_profiles: List[TradingProfileDB] = (
@@ -277,6 +277,18 @@ def load_profiles_from_db(db_session) -> ProfileManager:
         .filter(TradingProfileDB.is_active == True)
         .all()
     )
+
+    # Pre-load all trading hours in one query, grouped by profile_id
+    all_hours_rows = db_session.query(ProfileTradingHours).all()
+    trading_hours_by_profile: Dict[int, list] = {}
+    for h in all_hours_rows:
+        trading_hours_by_profile.setdefault(h.profile_id, []).append({
+            "id": h.id,
+            "day_of_week": h.day_of_week,
+            "start_time": h.start_time,
+            "end_time": h.end_time,
+            "enabled": h.enabled,
+        })
 
     profiles: Dict[str, TradingProfile] = {}
 
@@ -385,6 +397,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             print(f"WARNING: Skipping profile '{row.name}' — build error: {e}")
             continue
 
+        profile.trading_hours = trading_hours_by_profile.get(row.id, [])
         profiles[row.name] = profile
 
         _log_profile_filters(
