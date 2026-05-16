@@ -184,8 +184,12 @@ def close_position(
     position.exit_price = sell_trade.price
     position.remaining_quantity = 0
 
-    # Calculate profit
-    position.profit = (position.exit_price - position.entry_price) * position.quantity 
+    # Calculate profit (direction-aware)
+    is_long = (position.direction or "LONG") != "SHORT"
+    if is_long:
+        position.profit = (position.exit_price - position.entry_price) * position.quantity
+    else:
+        position.profit = (position.entry_price - position.exit_price) * position.quantity
     
     db.commit()
     db.refresh(position)
@@ -331,11 +335,16 @@ def close_positions_fifo(
         # How much of this position can we close?
         close_qty = min(position.remaining_quantity, remaining_to_close)
         
-        # Calculate profit for this portion
+        # Calculate profit for this portion (direction-aware)
         entry_price = position.entry_price
         exit_price = Decimal(sell_trade.price)
-        profit = (exit_price - entry_price) * position.quantity
-        profit_pct = ((exit_price - entry_price) / entry_price) * 100
+        is_long = (position.direction or "LONG") != "SHORT"
+        if is_long:
+            profit = (exit_price - entry_price) * position.quantity
+            profit_pct = ((exit_price - entry_price) / entry_price) * 100
+        else:
+            profit = (entry_price - exit_price) * position.quantity
+            profit_pct = ((entry_price - exit_price) / entry_price) * 100
         
         # Update position
         position.remaining_quantity -= close_qty
