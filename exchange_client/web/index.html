@@ -2280,13 +2280,18 @@ function renderHoursGrid(windows) {
       if (!w.enabled) continue;
       const d = w.day_of_week;
       if (d < 0 || d > 6) continue;
-      const sh = parseInt((w.start_time || '00:00').split(':')[0]);
-      const eh = parseInt((w.end_time || '23:59').split(':')[0]);
-      if (sh <= eh) {
-        for (let h = sh; h <= eh; h++) active[d][h] = true;
-      } else {                          // spans midnight
-        for (let h = sh; h < 24; h++) active[d][h] = true;
-        for (let h = 0; h <= eh; h++) active[d][h] = true;
+      const [sh, sm] = (w.start_time || '00:00').split(':').map(Number);
+      const [eh, em] = (w.end_time   || '23:59').split(':').map(Number);
+      const start_m = sh * 60 + sm;
+      const end_m   = eh * 60 + em;
+      for (let h = 0; h < 24; h++) {
+        const hStart = h * 60;
+        const hEnd   = (h + 1) * 60;
+        // end_time is exclusive — cell h is green only if window overlaps [hStart, hEnd)
+        const covers = start_m <= end_m
+          ? (start_m < hEnd && end_m > hStart)     // normal window
+          : (start_m < hEnd || end_m > hStart);    // spans midnight
+        if (covers) active[d][h] = true;
       }
     }
   }
@@ -2298,11 +2303,11 @@ function renderHoursGrid(windows) {
 
   let html = '';
 
-  // Hour label row
+  // Hour label row — all 24 labels visible
   html += `<div style="display:grid;${COLS};gap:2px;margin-bottom:4px;align-items:end">
     <div></div>`;
   for (let h = 0; h < 24; h++) {
-    html += `<div style="text-align:center;font-size:8px;color:${h % 6 === 0 ? 'var(--txd)' : 'transparent'};line-height:1">${String(h).padStart(2,'0')}</div>`;
+    html += `<div style="text-align:center;font-size:7px;color:var(--txd);line-height:1;overflow:hidden">${String(h).padStart(2,'0')}</div>`;
   }
   html += '</div>';
 
@@ -2391,15 +2396,22 @@ function _makeHoursRow(dayIdx, start, end) {
 }
 
 function prefillWeekdays() {
-  // Two sessions per weekday (Mon–Fri): 03:00–12:00 and 14:00–21:00 UTC.
-  // Multiple rows for the same day are all checked independently — trade if
-  // the current time falls within ANY enabled window for that day.
   const tbody = document.getElementById('hours-tbody');
   tbody.innerHTML = '';
-  for (let d = 0; d < 5; d++) {
-    tbody.appendChild(_makeHoursRow(d, '03:00', '12:00'));
-    tbody.appendChild(_makeHoursRow(d, '14:00', '21:00'));
-  }
+  // Monday
+  tbody.appendChild(_makeHoursRow(0, '05:00', '12:00'));
+  tbody.appendChild(_makeHoursRow(0, '15:00', '21:00'));
+  // Tuesday — single session
+  tbody.appendChild(_makeHoursRow(1, '02:00', '23:00'));
+  // Wednesday
+  tbody.appendChild(_makeHoursRow(2, '01:00', '12:00'));
+  tbody.appendChild(_makeHoursRow(2, '14:00', '23:00'));
+  // Thursday
+  tbody.appendChild(_makeHoursRow(3, '03:00', '12:00'));
+  tbody.appendChild(_makeHoursRow(3, '14:00', '21:00'));
+  // Friday
+  tbody.appendChild(_makeHoursRow(4, '03:00', '12:00'));
+  tbody.appendChild(_makeHoursRow(4, '14:00', '21:00'));
 }
 
 function collectHoursRows() {

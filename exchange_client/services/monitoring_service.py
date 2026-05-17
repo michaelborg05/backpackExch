@@ -1113,10 +1113,11 @@ class MonitoringService:
             start_m = sh * 60 + sm
             end_m = eh * 60 + em
             if start_m <= end_m:
-                if start_m <= current_minutes <= end_m:
+                # end_time is exclusive: 12:00 means stop at 12:00, not include it
+                if start_m <= current_minutes < end_m:
                     return True
             else:  # window spans midnight
-                if current_minutes >= start_m or current_minutes <= end_m:
+                if current_minutes >= start_m or current_minutes < end_m:
                     return True
 
         return False
