@@ -99,23 +99,17 @@ class MonitoringService:
         self._last_retention_date = datetime.now(timezone.utc).date()
 
     def _load_cooldown_cache_from_db(self, db):
-        """Restore _last_signals from recent trade history so cooldowns survive restarts."""
-        from db.models import Trade
-        from utils.constants import TradeReason
+        """Restore _last_signals from recent positions so cooldowns survive restarts."""
+        from db.models import Position
         from sqlalchemy import func
         from datetime import datetime, timezone, timedelta
 
-        # Look back far enough to cover any reasonable cooldown setting (max 6 hours)
-        lookback_cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
-        signal_reasons = [TradeReason.RULES_SIGNAL.value, TradeReason.AI_SIGNAL.value]
+        lookback_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
         rows = (
-            db.query(Trade.profile_name, Trade.symbol, func.max(Trade.created_at).label("last_trade"))
-            .filter(
-                Trade.reason.in_(signal_reasons),
-                Trade.created_at >= lookback_cutoff,
-            )
-            .group_by(Trade.profile_name, Trade.symbol)
+            db.query(Position.profile_name, Position.symbol, func.max(Position.created_at).label("last_trade"))
+            .filter(Position.created_at >= lookback_cutoff)
+            .group_by(Position.profile_name, Position.symbol)
             .all()
         )
 
