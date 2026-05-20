@@ -348,6 +348,14 @@
           <span class="sidebar-label">Profiles</span>
           <button class="btn-new" onclick="openCreateModal()">+ New</button>
         </div>
+        <div style="padding:8px 12px;border-bottom:1px solid var(--brd);display:flex;flex-direction:column;gap:6px">
+          <input id="profile-filter" type="text" placeholder="Filter profiles…" oninput="renderSidebar()"
+            style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;border-radius:3px;outline:none">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd);cursor:pointer;user-select:none">
+            <input type="checkbox" id="profile-active-only" checked onchange="renderSidebar()" style="cursor:pointer">
+            Active only
+          </label>
+        </div>
         <div class="profile-list" id="profile-list">
           <div style="padding:16px;color:var(--txd);font-size:11px">Loading...</div>
         </div>
@@ -1919,7 +1927,18 @@ function renderSidebar() {
     el.innerHTML = '<div style="padding:16px;color:var(--txd);font-size:11px">No profiles yet — create one</div>';
     return;
   }
-  el.innerHTML = _allProfiles.map(p => {
+  const q = (document.getElementById('profile-filter')?.value ?? '').toLowerCase();
+  const activeOnly = document.getElementById('profile-active-only')?.checked ?? true;
+  const visible = _allProfiles.filter(p => {
+    if (activeOnly && !p.is_active) return false;
+    if (q && !p.display_name.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  if (!visible.length) {
+    el.innerHTML = '<div style="padding:16px;color:var(--txd);font-size:11px">No matches</div>';
+    return;
+  }
+  el.innerHTML = visible.map(p => {
     const tradingBadge = p.is_active ? tradingTypeBadge(p.trading_type, p.enable_signal_generation) : '';
     const isShort = (p.strategy_type || '').startsWith('short_');
     const stratColor = isShort ? 'color:#f87171' : '';
@@ -2572,6 +2591,8 @@ async function toggleProfileActive() {
       await api('/profiles/' + _currentProfile.name, { method: 'DELETE' });
       showToast('Profile deactivated');
       _currentProfile = await api('/profiles/' + _currentProfile.name);
+      const idx1 = _allProfiles.findIndex(p => p.name === _currentProfile.name);
+      if (idx1 >= 0) _allProfiles[idx1] = _currentProfile;
       renderSidebar();
       showProfileDetail();
     } catch (e) {
@@ -2583,6 +2604,8 @@ async function toggleProfileActive() {
       await api('/profiles/' + _currentProfile.name + '/activate', { method: 'POST' });
       showToast('Profile activated');
       _currentProfile = await api('/profiles/' + _currentProfile.name);
+      const idx2 = _allProfiles.findIndex(p => p.name === _currentProfile.name);
+      if (idx2 >= 0) _allProfiles[idx2] = _currentProfile;
       renderSidebar();
       showProfileDetail();
     } catch (e) {
