@@ -434,10 +434,16 @@ class CircuitBreakerService:
     ) -> None:
         direction = "DEPOSIT" if transfer_amount > 0 else "WITHDRAWAL"
         snapshot.starting_balance += transfer_amount
-        snapshot.highest_balance = max(
-            snapshot.highest_balance + transfer_amount,
-            snapshot.starting_balance,
-        )
+        if transfer_amount > 0:
+            # Deposit: raise high water mark proportionally
+            snapshot.highest_balance = max(
+                snapshot.highest_balance + transfer_amount,
+                snapshot.starting_balance,
+            )
+        else:
+            # Withdrawal: reset high water mark to new starting balance so the
+            # drawdown check doesn't compare against a peak that included withdrawn funds
+            snapshot.highest_balance = snapshot.starting_balance
         if snapshot.circuit_breaker_baseline is not None:
             snapshot.circuit_breaker_baseline += transfer_amount
 
@@ -450,10 +456,11 @@ class CircuitBreakerService:
                 snapshot.circuit_breaker_baseline,
             )
 
+        cb_baseline_str = f"${snapshot.circuit_breaker_baseline:.2f}" if snapshot.circuit_breaker_baseline is not None else "None"
         self.logger.info(
             f"[{profile_name}] {direction} detected (${abs(float(transfer_amount)):.2f}) — "
             f"CB baselines adjusted. starting=${snapshot.starting_balance:.2f}, "
-            f"cb_baseline=${snapshot.circuit_breaker_baseline:.2f}"
+            f"cb_baseline={cb_baseline_str}"
         )
         self._send_telegram(
             f"Transfer Detected [{profile_name}]\n"
@@ -479,7 +486,7 @@ class CircuitBreakerService:
         if not cb_baseline or cb_baseline <= 0:
             return False
 
-        threshold_pct = 2 * max(
+        threshold_pct =  max(
             float(config.max_daily_profit_pct),
             float(config.max_daily_loss_pct),
         )
@@ -489,13 +496,19 @@ class CircuitBreakerService:
 
         from services.profile_manager import get_profile_manager
         from api_builders.account_builder import get_recent_transfers
+        from utils.settings_helper import SettingsHelper
+        from utils.config import Config
         pm = get_profile_manager()
         profile = pm.get_profile(profile_name) if pm else None
         if not profile:
             return False
 
         try:
-            transfers = get_recent_transfers(profile, lookback_seconds=300)
+            _settings = SettingsHelper()
+            _config = Config()
+            cycle_seconds = (_settings.circuit_breaker_interval or 2) * (_config.monitor_delay_interval or 30)
+            lookback_seconds = cycle_seconds + (_config.monitor_delay_interval or 30)  # one extra cycle as buffer
+            transfers = get_recent_transfers(profile, lookback_seconds=lookback_seconds)
         except Exception as e:
             self.logger.warning(f"[{profile_name}] Transfer check failed: {e} — proceeding with CB trigger")
             return False
