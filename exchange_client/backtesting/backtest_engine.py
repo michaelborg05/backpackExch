@@ -1586,6 +1586,7 @@ class BacktestProfile:
         "entry_indicators":           [],
         "trend_indicator_groups":     None,
         "entry_indicator_groups":     None,
+        "trading_hours":              None,
     }
 
     def __init__(self, name: str, config: dict):
@@ -1950,6 +1951,39 @@ class BacktestEngine:
         self.verbose = verbose
 
     # ------------------------------------------------------------------
+    # Trading hours filter
+    # ------------------------------------------------------------------
+    def _is_within_trading_hours(self, row_time: datetime) -> bool:
+        """Return True if row_time falls within any enabled trading window."""
+        hours = getattr(self.profile, "trading_hours", None)
+        if not hours:
+            return True
+
+        today = row_time.weekday()  # 0=Mon … 6=Sun
+        current_minutes = row_time.hour * 60 + row_time.minute
+
+        for window in hours:
+            if not window.get("enabled", True):
+                continue
+            if window.get("day_of_week") != today:
+                continue
+            try:
+                sh, sm = map(int, window["start_time"].split(":"))
+                eh, em = map(int, window["end_time"].split(":"))
+            except (KeyError, ValueError, AttributeError):
+                continue
+            start_m = sh * 60 + sm
+            end_m   = eh * 60 + em
+            if start_m <= end_m:
+                if start_m <= current_minutes < end_m:
+                    return True
+            else:  # window spans midnight
+                if current_minutes >= start_m or current_minutes < end_m:
+                    return True
+
+        return False
+
+    # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
     def run(
@@ -2061,6 +2095,12 @@ class BacktestEngine:
                     continue  # still in trade — skip signal logic
 
             # ---- Signal generation ----
+            # Check trading hours
+            if not self._is_within_trading_hours(row_time):
+                if self.verbose:
+                    print(f"[{row_time}] Outside trading hours — skipping")
+                continue
+
             # Check cooldown
             cooldown_sec = getattr(self.profile, "signal_cooldown_minutes", 15) * 60
             if cooldown_until and row_time < cooldown_until:

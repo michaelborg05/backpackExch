@@ -22,6 +22,17 @@ _MEAN_REV_BASE = {
     "use_entry_filter": True,
     "max_position_hours": 6,
     "use_market_regime_filter": False,
+    "trading_hours": [
+        {"day_of_week": 0, "start_time": "05:00", "end_time": "12:00", "enabled": True},
+        {"day_of_week": 0, "start_time": "15:00", "end_time": "21:00", "enabled": True},
+        {"day_of_week": 1, "start_time": "02:00", "end_time": "23:00", "enabled": True},
+        {"day_of_week": 2, "start_time": "01:00", "end_time": "12:00", "enabled": True},
+        {"day_of_week": 2, "start_time": "14:00", "end_time": "23:00", "enabled": True},
+        {"day_of_week": 3, "start_time": "03:00", "end_time": "12:00", "enabled": True},
+        {"day_of_week": 3, "start_time": "14:00", "end_time": "21:00", "enabled": True},
+        {"day_of_week": 4, "start_time": "03:00", "end_time": "12:00", "enabled": True},
+        {"day_of_week": 4, "start_time": "14:00", "end_time": "21:00", "enabled": True},
+    ],
     "trend_indicators": [
         {"type": "price_extended_below_ema",   "params": {"ema": 50, "min_gap_pct": -1.5, "max_gap_pct": -3.0}},
         {"type": "price_extended_below_ema",   "params": {"ema": 50, "min_gap_pct": 0.5, "max_gap_pct": -0.5}},
