@@ -79,11 +79,6 @@ class SettingsHelper:
         return self._get_int('trend_invalidation_interval', 10)
     
     @property
-    def profile_refresh_interval(self) -> int:
-        """How often to refresh Profiles from db (in monitoring cycles)"""
-        return self._get_int('profile_refresh_interval', 30)
-
-    @property
     def position_validation_interval(self) -> int:
         """How often to validate positions (in monitoring cycles)"""
         return self._get_int('position_validation_interval', 10)

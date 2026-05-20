@@ -1025,7 +1025,6 @@ def populate_default_settings():
                 'alert_price_max_age': '300',       #  max age for price cache before i raise an alert - in seconds
                 'alert_re_alert_cooldown': '900',   # time between raising the same alert
                 'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
-                'profile_refresh_interval': '30',      # how many cycles to refresh profile from db - 30 x 30 seconds = 10 mins
                 # Data retention (days)
                 'retention_trans_history_days': '90',   # orders, positions, trades, ai_signal_log
                 'retention_trenddata_history_days': '90', # trend_analysis_log
