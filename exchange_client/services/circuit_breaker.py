@@ -435,11 +435,9 @@ class CircuitBreakerService:
         direction = "DEPOSIT" if transfer_amount > 0 else "WITHDRAWAL"
         snapshot.starting_balance += transfer_amount
         if transfer_amount > 0:
-            # Deposit: raise high water mark proportionally
-            snapshot.highest_balance = max(
-                snapshot.highest_balance + transfer_amount,
-                snapshot.starting_balance,
-            )
+            # Deposit: the live balance already includes the deposit, so don't add
+            # transfer_amount again — just ensure highest >= new starting
+            snapshot.highest_balance = max(snapshot.highest_balance, snapshot.starting_balance)
         else:
             # Withdrawal: reset high water mark to new starting balance so the
             # drawdown check doesn't compare against a peak that included withdrawn funds
