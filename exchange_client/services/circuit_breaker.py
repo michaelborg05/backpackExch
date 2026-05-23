@@ -183,6 +183,14 @@ class CircuitBreakerService:
         else:
             self._config_cache.clear()
 
+    def full_reload(self):
+        """Force a complete reload of all state from DB. Call after manual DB edits (e.g. editing reset_at on an active event)."""
+        self._config_cache.clear()
+        self._event_cache.clear()
+        self._snapshot_cache.clear()
+        self._initialized = False
+        self._load_state_from_db()
+
     # ── Account helpers ───────────────────────────────────────────────────────
 
     def _get_account_id(self, profile_name: str) -> Optional[int]:

@@ -383,15 +383,30 @@
           </div>
 
           <div class="subtabs">
-            <div class="stab on" onclick="showTab('settings',this)">Settings</div>
+            <div class="stab on" onclick="showTab('overview',this)">Overview</div>
+            <div class="stab" onclick="showTab('settings',this)">Settings</div>
             <div class="stab" onclick="showTab('cb',this)">Circuit Breaker</div>
             <div class="stab" onclick="showTab('symbols',this)">Symbols</div>
             <div class="stab" onclick="showTab('indicators',this)">Indicators</div>
             <div class="stab" onclick="showTab('hours',this)">Trading Hours</div>
           </div>
 
+          <!-- ── OVERVIEW TAB ───────────────────────────────────────────── -->
+          <div class="tab-panel on" id="tab-overview">
+            <div id="ov-cb-banner" style="display:none;background:rgba(220,80,80,0.12);border:1px solid rgba(220,80,80,0.35);border-radius:4px;padding:12px 16px;margin-bottom:16px;align-items:center;justify-content:space-between;gap:12px">
+              <div>
+                <div style="font-size:11px;font-weight:600;color:#e07070;margin-bottom:3px">⚡ Circuit Breaker Active</div>
+                <div style="font-size:11px;color:var(--txd)" id="ov-cb-text">—</div>
+              </div>
+              <button onclick="resetCB()" style="background:var(--red,#c0392b);color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;flex-shrink:0">Reset CB</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-width:860px" id="ov-balance-grid">
+              <div style="color:var(--txd);font-size:11px;grid-column:1/-1;padding:16px 0">Select a profile to load overview</div>
+            </div>
+          </div>
+
           <!-- ── SETTINGS TAB ────────────────────────────────────────────── -->
-          <div class="tab-panel on" id="tab-settings">
+          <div class="tab-panel" id="tab-settings">
             <div class="form-section">
               <div class="section-title">Identity</div>
               <div class="form-grid">
@@ -951,11 +966,9 @@ function showLs(m=''){
   const e=document.getElementById('lerr');e.textContent=m;e.classList.toggle('on',!!m);
 }
 function jumpProfile(prof){
-  // Switch active profile and jump to Positions tab
-  S.active=prof;
-  document.getElementById('psel').value=prof;
-  const posTab=Array.from(document.querySelectorAll('.nt')).find(el=>el.textContent.trim()==='Positions');
-  if(posTab)st('positions',posTab);
+  const profTab=Array.from(document.querySelectorAll('.nt')).find(el=>el.textContent.trim()==='Profiles');
+  if(profTab)st('profiles',profTab);
+  selectProfile(prof);
 }
 function onPC(){S.active=document.getElementById('psel').value;loadAI();}
 
@@ -1903,7 +1916,7 @@ let _symEditId = null;
 let _indDataP = [];
 let _indCatP = 'all';
 let _indEditId = null;
-let _currentTab = 'settings';
+let _currentTab = 'overview';
 let _exchangeAccounts = [];
 let _paramTabP = 'form';
 let _advancedMode = false;
@@ -2002,11 +2015,12 @@ function showProfileDetail() {
   fillSettings(p);
   fillCB(p.circuit_breaker);
   loadCBSummary(p.name);
+  loadOverviewTab(p.name);
   loadSymbolsP();
   loadIndicatorsP();
   loadTradingHours(p.name);
   updateSaveBar();
-  showTab('settings', document.querySelector('#p-profiles .stab'));
+  showTab('overview', document.querySelector('#p-profiles .stab'));
 }
 
 function fillSettings(p) {
@@ -2100,6 +2114,7 @@ async function resetCB() {
   const r = await api('/circuit-breaker/reset/' + _currentProfile.name, { method: 'POST' });
   if (r) {
     loadCBSummary(_currentProfile.name);
+    loadOverviewTab(_currentProfile.name);
   }
 }
 
@@ -2109,6 +2124,32 @@ function cbStat(label, val, sub) {
     <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txb)">${val ?? '—'}</div>
     ${sub ? `<div style="font-size:10px;color:var(--txd);margin-top:2px">${sub}</div>` : ''}
   </div>`;
+}
+
+async function loadOverviewTab(profileName) {
+  const grid = document.getElementById('ov-balance-grid');
+  const banner = document.getElementById('ov-cb-banner');
+  if (!grid) return;
+  try {
+    const s = await api('/circuit-breaker/daily-summary/' + profileName);
+    if (!s) { grid.innerHTML = '<div style="color:var(--txd);font-size:11px;grid-column:1/-1">No data available</div>'; return; }
+    const fmt = v => { const n = parseFloat(v); return isNaN(n) ? (v ?? '—') : '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); };
+    grid.innerHTML =
+      cbStat('Current Balance', fmt(s.current_balance)) +
+      cbStat('Day Start', fmt(s.daily_start_balance)) +
+      cbStat('High Water', fmt(s.highest_balance)) +
+      cbStat('Daily P&L', s.daily_pnl_pct, s.daily_pnl && s.daily_pnl !== 'N/A' ? fmt(s.daily_pnl) : null) +
+      cbStat('CB P&L', s.cb_pnl_pct) +
+      cbStat('Drawdown', s.drawdown_pnl_pct) +
+      cbStat('Reset In', s.hours_until_reset !== 'N/A' ? s.hours_until_reset + 'h' : '—');
+    if (s.circuit_breaker_active) {
+      banner.style.display = 'flex';
+      document.getElementById('ov-cb-text').textContent =
+        (s.event_reason ? s.event_reason.split(':')[0] + '  ·  ' : '') + s.hours_remaining + 'h remaining';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch { if (grid) grid.innerHTML = '<div style="color:var(--txd);font-size:11px;grid-column:1/-1">Failed to load</div>'; }
 }
 
 function showTab(name, el) {

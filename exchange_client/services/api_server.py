@@ -3688,8 +3688,8 @@ async def admin_refresh_cache(cache_name: str):
             cb = get_circuit_breaker()
             if cb is None:
                 raise HTTPException(status_code=503, detail="Circuit breaker not initialised")
-            cb.invalidate_config_cache()
-            return {"ok": True, "cache": cache_name, "detail": "Config cache cleared; will reload from DB on next access"}
+            cb.full_reload()
+            return {"ok": True, "cache": cache_name, "detail": "Full circuit breaker state reloaded from DB (config, active events, snapshots)"}
 
         elif cache_name == "signal_generators":
             from services.signal_generator import invalidate_all_signal_generators
