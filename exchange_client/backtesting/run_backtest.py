@@ -39,6 +39,7 @@ FILE_MAP = {
     "mr":       ("backtesting.profile_samples.mean_reversion_variants",       "MEAN_REV_VARIANTS"),
     "mr_short": ("backtesting.profile_samples.mean_reversion_short_variants", "MEAN_REV_SHORT_VARIANTS"),
     "trend":    ("backtesting.profile_samples.trend_variants",                "TREND_VARIANTS"),
+    "trend_short": ("backtesting.profile_samples.trend_short_variants",                "TREND_SHORT_VARIANTS"),
 }
 
 # Aliases so the full filename also works without extension
@@ -140,9 +141,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--file",    required=False, default="swing",
+    parser.add_argument("--file",    required=False, default="trend_short",
                         help="Profile sample file (swing, range, mr, mr_short, trend)")
-    parser.add_argument("--profile", default="p3_v19_tight_pullback",
+    parser.add_argument("--profile", default="tfs_v16_star_lowvol",
                         help="Profile key within that file (use --list to see options)")
     parser.add_argument("--list",    action="store_true",
                         help="List available profile names in --file and exit")

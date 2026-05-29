@@ -14,6 +14,7 @@ TO DO
     - close price being recorded is the theoretical price but maybe my actual trade is triggering at a differnt price
     - Maybe its not including fees
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
+# Add EXIT indicators and trend invalidation should evaluate the exit indicators
 
 No need
  # split into separate modules so i can migrate to Azure

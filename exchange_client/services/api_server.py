@@ -2957,6 +2957,8 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             use_atr_filter=body.use_atr_filter,
             min_indicators_required=body.min_indicators_required,
             min_entry_indicators_required=body.min_entry_indicators_required,
+            market_type=body.market_type or "SPOT",
+            leverage_multiplier=body.leverage_multiplier or 1.0,
             is_active=body.is_active,
         )
         db.add(p)

@@ -290,9 +290,9 @@ TREND_SHORT_VARIANTS = {
     "tfs_v16_star_lowvol": {
         **_TF_SHORT_BASE,
         # symbols handled at assignment layer: ETH_USDC, BNB_USDC (NOT BTC_USDC)
-        "take_profit_pct": 1.0,
-        "stop_loss_pct": 0.7,
-        "trailing_stop_pct": 0.25,
+        "take_profit_pct": 1.2,
+        "stop_loss_pct": 0.8,
+        "trailing_stop_pct": 0.5,
         "arm_trailing_stop_pct": 0.6,
         "max_position_hours": 6,
         "min_volume_ratio": 0.0,
@@ -393,42 +393,6 @@ TREND_SHORT_VARIANTS = {
             # KEY CHANGE: pct_b floor raised from 0.35 to 0.40
             {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.40, "max_pct_b": 0.85, "hard_stop": True}},
             {"type": "volume_spike", "params": {"min_ratio": 0.0, "max_ratio": 0.8, "hard_stop": True}},
-        ],
-        "min_entry_indicators_required": 5,
-    },
-
-    # -------------------------------------------------------------------------
-    # V19: V16 + TIGHTER ENTRY — the "make v16 sharper" variant
-    # v16's structure (vol<=0.5, no BTC) with RSI floor 43, pct_b floor 0.40,
-    # and tighter trail (0.15 instead of 0.25). Tightest config in the set.
-    # Projection: 75-83% WR / +0.46% avg, but very low trade count (n=4 on
-    # this data). High-confidence sleeve — expect <1 trade/week.
-    # -------------------------------------------------------------------------
-    "tfs_v19_v16_tight_entry": {
-        **_TF_SHORT_BASE,
-        # symbols handled at assignment layer: ETH_USDC, BNB_USDC (NOT BTC_USDC)
-        "take_profit_pct": 1.0,
-        "stop_loss_pct": 0.7,
-        # Tighter trail: lock in more of each trail exit (trail exits avg +0.50%
-        # currently — tighter trail captures ~+0.10% more per trade)
-        "trailing_stop_pct": 0.15,
-        "arm_trailing_stop_pct": 0.6,
-        "max_position_hours": 4,
-        "min_volume_ratio": 0.0,
-        "trend_indicators": [
-            {"type": "ema_slope", "params": {"ema": 20, "direction": "falling", "min_slope_pct": 0.02, "hard_stop": True}},
-            {"type": "ema_slope", "params": {"ema": 50, "direction": "falling", "min_slope_pct": 0.0}},
-            {"type": "adx_regime", "params": {"min_adx": 12, "max_adx": 25, "hard_stop": True}},
-        ],
-        "min_indicators_required": 2,
-        "entry_indicators": [
-            {"type": "ema_slope", "params": {"ema": 20, "direction": "falling", "min_slope_pct": 0.0, "max_slope_pct": 0.30, "hard_stop": True}},
-            {"type": "rsi_range", "params": {"min": 43, "max": 58, "invert": True, "hard_stop": True}},
-            {"type": "price_extended_above_ema", "params": {"ema": 20, "min_gap_pct": -1.5, "max_gap_pct": 0.8}},
-            {"type": "price_above_vwap", "params": {"min_gap_pct": -8.0, "max_gap_pct": 0.5}},
-            {"type": "reversal_candle", "params": {"pattern": "bear_close", "max_close_pct": 0.45, "max_rise_from_close_pct": 0.6}},
-            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.40, "max_pct_b": 0.85, "hard_stop": True}},
-            {"type": "volume_spike", "params": {"min_ratio": 0.0, "max_ratio": 0.5, "hard_stop": True}},
         ],
         "min_entry_indicators_required": 5,
     },

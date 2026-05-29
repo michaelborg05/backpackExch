@@ -10,13 +10,13 @@ from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREN
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 42,
+parser.add_argument("--days",    type=int, default= 60,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
 parser.add_argument("--set",     default="trend_short", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=True,
+parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
 parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
 #parser.add_argument("--csv",     default="c:\\temp\\backtestresults.csv",
@@ -36,7 +36,7 @@ VARIANT_SETS = {
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","BNB_USDC"]),
     "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","BNB_USDC"]),
     "mr_short":    (MEAN_REV_SHORT_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
-    "trend_short": (TREND_SHORT_VARIANTS,     ["BTC_USDC", "ETH_USDC", "BNB_USDC", "ZEC_USDC"]),
+    "trend_short": (TREND_SHORT_VARIANTS,     [ "ETH_USDC", "BNB_USDC", "ZEC_USDC"]),
 
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]

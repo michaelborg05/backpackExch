@@ -116,7 +116,7 @@
     </div>
 
     <!-- ── Add Monitored Symbol Modal ──────────────────────────────────────── -->
-    <div class="modal-overlay" id="ms-add-modal" style="display:none" onclick="if(event.target===this)closeMsModal()">
+    <div class="modal-overlay" id="ms-add-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeMsModal()">
       <div class="modal-box" style="max-width:360px">
         <div class="modal-header"><span class="modal-title">Add Monitored Symbol</span><button class="modal-close" onclick="closeMsModal()">×</button></div>
         <div class="modal-body">
@@ -225,7 +225,7 @@
     </div>
 
     <!-- Prompt create/edit modal -->
-    <div class="modal-overlay" id="prompt-modal" style="display:none" onclick="if(event.target===this)closePromptModal()">
+    <div class="modal-overlay" id="prompt-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closePromptModal()">
       <div class="modal-box">
         <div class="modal-header">
           <span class="modal-title" id="prompt-modal-title">New AI Prompt</span>
@@ -626,7 +626,7 @@
     </div><!-- /layout -->
 
     <!-- ── Create Profile Modal ──────────────────────────────────────────── -->
-    <div class="modal-overlay" id="create-modal" style="display:none" onclick="if(event.target===this)closeCreateModal()">
+    <div class="modal-overlay" id="create-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeCreateModal()">
       <div class="modal-box" style="max-width:560px">
         <div class="modal-header"><span class="modal-title">Create New Profile</span><button class="modal-close" onclick="closeCreateModal()">×</button></div>
         <div class="modal-body">
@@ -655,7 +655,7 @@
     </div>
 
     <!-- ── Change Credentials Modal ─────────────────────────────────────── -->
-    <div class="modal-overlay" id="creds-modal" style="display:none" onclick="if(event.target===this)closeCredsModal()">
+    <div class="modal-overlay" id="creds-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeCredsModal()">
       <div class="modal-box" style="max-width:500px">
         <div class="modal-header"><span class="modal-title">Change Credentials — <span id="creds-modal-profile">—</span></span><button class="modal-close" onclick="closeCredsModal()">×</button></div>
         <div class="modal-body">
@@ -672,7 +672,7 @@
     </div>
 
     <!-- ── Symbol Modal ──────────────────────────────────────────────────── -->
-    <div class="modal-overlay" id="sym-modal-p" style="display:none" onclick="if(event.target===this)closeSymModalP()">
+    <div class="modal-overlay" id="sym-modal-p" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeSymModalP()">
       <div class="modal-box" style="max-width:420px">
         <div class="modal-header"><span class="modal-title" id="sym-modal-title-p">Add Symbol Config</span><button class="modal-close" onclick="closeSymModalP()">×</button></div>
         <div class="modal-body">
@@ -693,7 +693,7 @@
     </div>
 
     <!-- ── Copy Indicators Modal ────────────────────────────────────────── -->
-    <div class="modal-overlay" id="copy-ind-modal" style="display:none" onclick="if(event.target===this)closeCopyIndicatorsModal()">
+    <div class="modal-overlay" id="copy-ind-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeCopyIndicatorsModal()">
       <div class="modal-box" style="max-width:420px">
         <div class="modal-header">
           <span class="modal-title">Copy Indicators From Profile</span>
@@ -735,7 +735,7 @@
     </div>
 
     <!-- ── Indicator Modal ───────────────────────────────────────────────── -->
-    <div class="modal-overlay" id="ind-modal-p" style="display:none" onclick="if(event.target===this)closeIndModalP()">
+    <div class="modal-overlay" id="ind-modal-p" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeIndModalP()">
       <div class="modal-box">
         <div class="modal-header"><span class="modal-title" id="imodp-title">Add Indicator</span><button class="modal-close" onclick="closeIndModalP()">×</button></div>
         <div class="modal-body">
@@ -900,6 +900,9 @@
 // BASE is defined in common.js
 let S={u:null,role:null,profiles:{},active:null,internalKey:null};
 let _rt=null,_ar=null;
+// Track mousedown target so drag-out-of-modal doesn't trigger backdrop close
+let _mdTarget=null;
+document.addEventListener('mousedown', e => { _mdTarget = e.target; });
 setInterval(()=>{document.getElementById('clk').textContent=new Date().toUTCString().split(' ')[4]+' UTC';},1000);
 document.getElementById('ip').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 document.getElementById('iu').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('ip').focus();});
@@ -2750,7 +2753,7 @@ async function deleteSymP() {
 
 const IND_SCHEMAS = {
   ema_cross:                    [{k:'use_slope',t:'bool',d:false},{k:'min_slope_pct',t:'number',d:0.01}],
-  ema_slope:                   [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01}],
+  ema_slope:                   [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01},{k:'max_slope_pct',t:'number',d:null}],
   bollinger_bands:             [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:null},{k:'lookback_candles',t:'number',d:null}],
   adx_regime:                  [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
   rsi_threshold:               [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
