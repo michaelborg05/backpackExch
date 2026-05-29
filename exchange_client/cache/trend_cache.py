@@ -686,7 +686,7 @@ class TrendCache:
             
             elif indicator_type == "ema_slope":
                 # Check if EMA is rising/falling/flat
-                # params: {ema: 20|50, direction: "rising"|"not_falling"|"not_rising"|"flat", slope_threshold: 0.01, max_slope_pct: None}
+                # params: {ema: 20|50, direction: "rising"|"falling"|"not_falling"|"not_rising"|"flat", slope_threshold: 0.01, max_slope_pct: None}
                 ema_type = params.get("ema", 20)
                 required_direction = params.get("direction", "rising")
                 min_slope_pct = params.get("min_slope_pct", 0.01)
@@ -702,6 +702,9 @@ class TrendCache:
                     if required_direction == "rising":
                         is_bullish = slope_pct > min_slope_pct
                         direction = "rising" if slope_pct > min_slope_pct else "flat/falling"
+                    elif required_direction == "falling":
+                        is_bullish = slope_pct < -min_slope_pct
+                        direction = "falling" if is_bullish else "flat/rising"
                     elif required_direction == "not_falling":
                         is_bullish = slope_pct >= -min_slope_pct
                         direction = "rising/flat" if is_bullish else "falling"

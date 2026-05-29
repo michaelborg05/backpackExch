@@ -138,15 +138,27 @@ class DustConverter:
             Dictionary mapping account names to conversion results
         """
         from db.utils import get_db_session
-        from db.models import ExchangeAccount
+        from db.models import ExchangeAccount, TradingProfileDB
         from utils.db_secrets import resolve_secret
 
         with get_db_session() as db:
+            # Only convert dust for accounts that have at least one enabled profile
+            enabled_account_ids = (
+                db.query(TradingProfileDB.account_id)
+                .filter(
+                    TradingProfileDB.is_active == True,
+                    TradingProfileDB.enable_signal_generation == True,
+                    TradingProfileDB.account_id.isnot(None),
+                )
+                .distinct()
+                .subquery()
+            )
             accounts = (
                 db.query(ExchangeAccount)
                 .filter(
                     ExchangeAccount.is_active == True,
                     ExchangeAccount.exchange_type == "backpack",
+                    ExchangeAccount.id.in_(enabled_account_ids),
                 )
                 .order_by(ExchangeAccount.name)
                 .all()

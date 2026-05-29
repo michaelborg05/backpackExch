@@ -2,132 +2,199 @@
 """
 backtesting/run_backtest.py
 ============================
-Entry point for running backtests and parameter sweeps.
+Run a single profile variant with optional parameter sweeps.
 
-Run from project root:
-    python -m backtesting.run_backtest
-    python -m backtesting.run_backtest --profile default --symbol SOL_USDC --sweep
-    python -m backtesting.run_backtest --profile 15m_MB  --symbol BTC_USDC --days 7
+Pick a profile from one of the profile_samples files, then run it
+with a TP/SL sweep (or single run) across one or more symbols.
+
+Examples:
+    # List available profiles in swing_variants
+    python -m backtesting.run_backtest --file swing_variants --list
+
+    # Single run: p3_base profile from swing_variants on SOL
+    python -m backtesting.run_backtest --file swing_variants --profile p3_base --symbol SOL_USDC
+
+    # TP/SL sweep across symbols
+    python -m backtesting.run_backtest --file swing_variants --profile p3_base --sweep --sweep-grid tp_sl
+
+    # Confidence/volume sweep, 14 days, export CSV
+    python -m backtesting.run_backtest --file mr --profile mr_v1 --sweep --sweep-grid confidence_volume --days 14 --csv
 """
 
 import argparse
+import importlib
 import sys
-import yaml
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Path setup — adjust if your project layout differs
-# ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# ---------------------------------------------------------------------------
+# Map --file shorthand -> (module path, dict name)
+# ---------------------------------------------------------------------------
+FILE_MAP = {
+    "swing":    ("backtesting.profile_samples.swing_variants",                "SWING_VARIANTS"),
+    "range":    ("backtesting.profile_samples.range_variants",                "RANGE_VARIANTS"),
+    "mr":       ("backtesting.profile_samples.mean_reversion_variants",       "MEAN_REV_VARIANTS"),
+    "mr_short": ("backtesting.profile_samples.mean_reversion_short_variants", "MEAN_REV_SHORT_VARIANTS"),
+    "trend":    ("backtesting.profile_samples.trend_variants",                "TREND_VARIANTS"),
+}
 
-def load_profiles_yaml(path: str = "trading_profiles.yaml") -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
+# Aliases so the full filename also works without extension
+for _fname in list(FILE_MAP.keys()):
+    FILE_MAP[f"{_fname}_variants"] = FILE_MAP[_fname]
+
+
+def load_variant_dict(file_key: str) -> tuple[str, dict]:
+    """Return (resolved_key, variants_dict) for a given --file value."""
+    key = file_key.removesuffix(".py")
+    if key not in FILE_MAP:
+        print(f"ERROR: Unknown --file '{file_key}'")
+        print(f"Available: {sorted(set(FILE_MAP.keys()))}")
+        sys.exit(1)
+    mod_path, dict_name = FILE_MAP[key]
+    mod = importlib.import_module(mod_path)
+    return key, getattr(mod, dict_name)
 
 
 def get_db_session():
-    """Import your real DB session factory here."""
     from db.utils import get_db_session as _get
     return _get()
 
 
-def run_single(args, profile_config: dict):
+def run_single(args, profile_name: str, profile_config: dict):
     from backtesting.backtest_engine import BacktestEngine, BacktestProfile
 
-    profile = BacktestProfile.from_dict(args.profile, profile_config)
-
+    profile = BacktestProfile.from_dict(profile_name, profile_config)
     end   = datetime.now(tz=timezone.utc)
     start = end - timedelta(days=args.days)
 
-    with get_db_session() as db:
-        engine = BacktestEngine(db, profile, verbose=args.verbose)
-        result = engine.run(symbol=args.symbol, start=start, end=end)
+    symbols = [args.symbol] if args.symbol else ["BTC_USDC"]
 
-    print(result.summary())
+    for symbol in symbols:
+        print(f"\n{'='*60}")
+        print(f"  {profile_name}  --  {symbol}")
+        print(f"{'='*60}")
+        with get_db_session() as db:
+            engine = BacktestEngine(db, profile, verbose=args.verbose)
+            result = engine.run(symbol=symbol, start=start, end=end)
 
-    if args.trades:
-        print("\nPer-trade log:")
-        for i, t in enumerate(result.trades, 1):
-            print(f"  [{i:>3}] {t.entry_time} | entry={t.entry_price:.4f} "
-                  f"exit={t.exit_price if t.exit_price else 'OPEN':<10} "
-                  f"pnl={t.pnl_pct:+.2f}% | {t.exit_reason}")
+        print(result.summary())
+
+        if args.trades:
+            print("\nPer-trade log:")
+            for i, t in enumerate(result.trades, 1):
+                exit_px = f"{t.exit_price:.4f}" if t.exit_price else "OPEN"
+                print(f"  [{i:>3}] {t.entry_time} | entry={t.entry_price:.4f} "
+                      f"exit={exit_px:<10} pnl={t.pnl_pct:+.2f}% | {t.exit_reason}")
 
 
-def run_sweep(args, profile_config: dict):
+def run_sweep(args, profile_name: str, profile_config: dict):
     from backtesting.backtest_engine import BacktestProfile, ParameterSweep
 
-    profile = BacktestProfile.from_dict(args.profile, profile_config)
-
+    profile = BacktestProfile.from_dict(profile_name, profile_config)
     end   = datetime.now(tz=timezone.utc)
     start = end - timedelta(days=args.days)
 
-    # -----------------------------------------------------------------------
-    # EDIT THIS GRID TO SUIT YOUR EXPERIMENT
-    # -----------------------------------------------------------------------
     param_grids = {
-        # Confidence + volume threshold sweep (good starting point for any profile)
+        "tp_sl": {
+            "take_profit_pct": [0.8, 1.0, 1.5, 2.0, 2.5, 3.0],
+            "stop_loss_pct":   [0.7, 0.8, 1.0, 1.5, 2.5, 3.0],
+        },
         "confidence_volume": {
             "min_signal_confidence": [60.0, 65.0, 70.0, 75.0, 80.0],
             "min_volume_ratio":      [0.8, 1.0, 1.1, 1.3, 1.5],
         },
-
-        # Take-profit / stop-loss ratio sweep
-        "tp_sl": {
-            "take_profit_pct": [0.8, 1.0, 1.5, 2.0,2.5,3],
-            "stop_loss_pct":   [0.7, 0.8, 1.0,1.5,2.5,3],
-        },
-
-        # Trailing stop sensitivity
         "trailing": {
-            "arm_trailing_stop_pct":  [0.3, 0.5, 0.7, 1.0],
-            "trailing_stop_pct":      [0.3, 0.5, 0.7, 1.0],
+            "arm_trailing_stop_pct": [0.3, 0.5, 0.7, 1.0],
+            "trailing_stop_pct":     [0.3, 0.5, 0.7, 1.0],
         },
     }
 
-    grid = param_grids.get(args.sweep_grid, param_grids["confidence_volume"])
-    print(f"[run_backtest] Sweep grid: '{args.sweep_grid}'\n{grid}\n")
+    grid = param_grids[args.sweep_grid]
+    symbols = [args.symbol] if args.symbol else ["BTC_USDC"]
 
-    with get_db_session() as db:
-        sweep   = ParameterSweep(db, profile, verbose=args.verbose)
-        results = sweep.run(symbol=args.symbol, start=start, end=end, param_grid=grid)
+    print(f"[run_backtest] Profile: {profile_name}  |  Sweep: '{args.sweep_grid}'")
+    print(f"Grid: {grid}\n")
 
-    ParameterSweep.print_comparison(results, top_n=20)
+    for symbol in symbols:
+        print(f"\n{'='*60}")
+        print(f"  {profile_name}  --  {symbol}")
+        print(f"{'='*60}")
+        with get_db_session() as db:
+            sweep   = ParameterSweep(db, profile, verbose=args.verbose)
+            results = sweep.run(symbol=symbol, start=start, end=end, param_grid=grid)
 
-    if args.csv:
-        sweep_csv = f"backtest_{args.profile}_{args.symbol}_{args.sweep_grid}.csv"
-        ParameterSweep.to_csv(results, sweep_csv)
+        ParameterSweep.print_comparison(results, top_n=20)
+
+        if args.csv:
+            csv_path = f"backtest_{profile_name}_{symbol}_{args.sweep_grid}.csv"
+            ParameterSweep.to_csv(results, csv_path)
+            print(f"CSV saved: {csv_path}")
 
 
 def main():
-    import sys
-    parser = argparse.ArgumentParser(description="Run strategy backtests")
-    parser.add_argument("--profile",    default="default",       help="Profile name from YAML")
-    parser.add_argument("--symbol",     default="BTC_USDC",      help="Trading pair")
-    parser.add_argument("--days",       type=int, default=7,     help="Lookback window in days")
-    parser.add_argument("--yaml",       default="config/trading_profiles.yaml", help="Path to profiles YAML")
-    parser.add_argument("--sweep",      action="store_true",     help="Run parameter sweep", default=False)
+    parser = argparse.ArgumentParser(
+        description="Run a single profile variant with optional TP/SL or confidence sweeps.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--file",    required=False, default="swing",
+                        help="Profile sample file (swing, range, mr, mr_short, trend)")
+    parser.add_argument("--profile", default="p3_v19_tight_pullback",
+                        help="Profile key within that file (use --list to see options)")
+    parser.add_argument("--list",    action="store_true",
+                        help="List available profile names in --file and exit")
+    parser.add_argument("--symbol",  default="ETH_USDC",
+                        help="Symbol override, e.g. SOL_USDC (default: BTC_USDC)")
+    parser.add_argument("--days",    type=int, default=35,
+                        help="Lookback window in days (default: 35)")
+    parser.add_argument("--sweep",   action="store_true", default=True,
+                        help="Run parameter sweep instead of single backtest")
     parser.add_argument("--sweep-grid", default="tp_sl",
-                        choices=["confidence_volume", "tp_sl", "trailing"],
-                        help="Which parameter grid to sweep")
-    parser.add_argument("--trades",     action="store_true",     help="Print per-trade log (single run only)", default=False)
-    parser.add_argument("--verbose",    action="store_true",     help="Print per-candle debug")
-    parser.add_argument("--csv",        action="store_true",     help="Export sweep results to CSV", default=False)
+                        choices=["tp_sl", "confidence_volume", "trailing"],
+                        help="Which parameter grid to sweep (default: tp_sl)")
+    parser.add_argument("--trades",  action="store_true", default=False,
+                        help="Print per-trade log (single run only)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Per-candle debug output")
+    parser.add_argument("--csv",     action="store_true",
+                        help="Export sweep results to CSV")
     args = parser.parse_args()
 
-    yaml_data = load_profiles_yaml(args.yaml)
-    profile_config = yaml_data["profiles"].get(args.profile)
-    if not profile_config:
-        print(f"ERROR: Profile '{args.profile}' not found in {args.yaml}")
-        print(f"Available: {list(yaml_data['profiles'].keys())}")
+    if not args.file:
+        print("ERROR: --file is required.")
+        print(f"Available files: {sorted(set(FILE_MAP.keys()))}")
         sys.exit(1)
 
+    _, variants = load_variant_dict(args.file)
+
+    if args.list:
+        print(f"Profiles in '{args.file}':")
+        for name in variants:
+            print(f"  {name}")
+        sys.exit(0)
+
+    if not args.profile:
+        print("ERROR: --profile is required (use --list to see options).")
+        sys.exit(1)
+
+    if args.profile not in variants:
+        print(f"ERROR: Profile '{args.profile}' not found in '{args.file}'.")
+        print(f"Available: {list(variants.keys())}")
+        sys.exit(1)
+
+    profile_config = variants[args.profile]
+
+    end   = datetime.now(tz=timezone.utc)
+    start = end - timedelta(days=args.days)
+    print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
+
     if args.sweep:
-        run_sweep(args, profile_config)
+        run_sweep(args, args.profile, profile_config)
     else:
-        run_single(args, profile_config)
+        run_single(args, args.profile, profile_config)
 
 
 if __name__ == "__main__":

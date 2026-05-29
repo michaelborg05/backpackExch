@@ -6,17 +6,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS,SWING_VARIANTS,MEAN_REV_SHORT_VARIANTS, run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, TREND_SHORT_VARIANTS, run_all_variants
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 21,
+parser.add_argument("--days",    type=int, default= 42,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="trend", choices=["all", "range", "mr"],
+parser.add_argument("--set",     default="trend_short", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=False,
+parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
 parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
 #parser.add_argument("--csv",     default="c:\\temp\\backtestresults.csv",
@@ -34,8 +34,9 @@ VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","XRP_USDC","BNB_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","XRP_USDC","BNB_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","BNB_USDC"]),
-    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","XRP_USDC","BNB_USDC"]),
-    "mr_short":    (MEAN_REV_SHORT_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","BNB_USDC"]),
+    "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","BNB_USDC"]),
+    "mr_short":    (MEAN_REV_SHORT_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
+    "trend_short": (TREND_SHORT_VARIANTS,     ["BTC_USDC", "ETH_USDC", "BNB_USDC", "ZEC_USDC"]),
 
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
@@ -70,6 +71,8 @@ with get_db_session() as db:
             label   = "TREND FOLLOWING"
         elif set_name == "4hr_swing":
             label   = "4hr_swing"
+        elif set_name == "trend_short":
+            label   = "TREND FOLLOWING SHORT"
 
 
         for symbol in symbols:

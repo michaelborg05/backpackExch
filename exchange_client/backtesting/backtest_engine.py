@@ -466,6 +466,9 @@ class ReplayTrendCache:
                     if req_dir == "rising":
                         is_bull   = slope_pct > min_slope
                         direction = "rising" if is_bull else "flat/falling"
+                    elif req_dir == "falling":
+                        is_bull   = slope_pct < -min_slope
+                        direction = "falling" if is_bull else "flat/rising"
                     elif req_dir == "not_falling":
                         is_bull   = slope_pct >= -min_slope
                         direction = "rising/flat" if is_bull else "falling"
