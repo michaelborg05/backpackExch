@@ -715,11 +715,11 @@ class TrendCache:
                         is_bullish = abs(slope_pct) <= min_slope_pct
                         direction = "flat"
 
-                    if is_bullish and max_slope_pct is not None and slope_pct > max_slope_pct:
+                    if is_bullish and max_slope_pct is not None and abs(slope_pct) > max_slope_pct:
                         is_bullish = False
                         direction = "too steep"
 
-                    max_str = f", max {max_slope_pct:+.3f}%" if max_slope_pct is not None else ""
+                    max_str = f", max ±{max_slope_pct:.3f}%" if max_slope_pct is not None else ""
                     msg = f"EMA{ema_type} slope: {'✓' if is_bullish else '✗'} ({direction} {slope_pct:+.3f}%{max_str})"
                 
             elif indicator_type == "rsi_range":
