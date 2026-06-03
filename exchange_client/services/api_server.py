@@ -3748,6 +3748,30 @@ app.include_router(auth_router)
 # Mount static files directory
 app.mount("/web", StaticFiles(directory="web"), name="web")
 
+@app.post("/webhook/test-log")
+async def webhook_test_log(request: Request):
+    """No-auth endpoint for logging raw webhook payloads during testing."""
+    body_bytes = await request.body()
+    headers = dict(request.headers)
+    query_params = dict(request.query_params)
+
+    try:
+        body_json = await request.json()
+    except Exception:
+        body_json = body_bytes.decode("utf-8", errors="replace")
+
+    apiserver_logger.info(
+        "WEBHOOK_TEST | method=%s path=%s query=%s headers=%s body=%s",
+        request.method,
+        request.url.path,
+        query_params,
+        headers,
+        body_json,
+    )
+
+    return {"status": "logged"}
+
+
 @app.get("/")
 async def serve_dashboard():
     return FileResponse("web/index.html")
