@@ -115,6 +115,12 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         if entry_indicators is None:
             use_entry_filter = False
 
+    # ── Exit indicators ──────────────────────────────────────────────────────
+    exit_indicators = cfg.get("exit_indicators", None)
+    min_exit_indicators_required = cfg.get("min_exit_indicators_required", 2)
+    exit_indicator_groups = cfg.get("exit_indicator_groups", None)
+    exit_timeframe = cfg.get("exit_timeframe", None)
+
     # ── ATR filter ───────────────────────────────────────────────────────────
     use_atr_filter = cfg.get("use_atr_filter", False)
     atr_timeframe = cfg.get("atr_timeframe", "1m")
@@ -156,6 +162,11 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         entry_indicators=entry_indicators,
         min_entry_indicators_required=min_entry_indicators_required,
         entry_indicator_groups=entry_indicator_groups,
+        # Exit indicators
+        exit_indicators=exit_indicators,
+        min_exit_indicators_required=min_exit_indicators_required,
+        exit_indicator_groups=exit_indicator_groups,
+        exit_timeframe=exit_timeframe,
         # ATR filter
         use_atr_filter=use_atr_filter,
         atr_timeframe=atr_timeframe,
@@ -296,6 +307,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
         # ── Reconstruct indicator lists from IndicatorDB rows ────────────
         trend_indicators = []
         entry_indicators = []
+        exit_indicators = []
 
         for ind in row.indicators:
             if not ind.enabled:
@@ -318,7 +330,8 @@ def load_profiles_from_db(db_session) -> ProfileManager:
                 trend_indicators.append(indicator_cfg)
             elif ind.category == "entry":
                 entry_indicators.append(indicator_cfg)
-            # 'exit' category reserved for future use
+            elif ind.category == "exit":
+                exit_indicators.append(indicator_cfg)
 
         # ── Build a normalised cfg dict (same shape _build_profile expects) ─
         cfg = {
@@ -353,6 +366,11 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "entry_indicators": entry_indicators or None,
             "min_entry_indicators_required": row.min_entry_indicators_required or 2,
             "entry_indicator_groups": row.entry_indicator_groups or None,
+            # Exit indicators
+            "exit_indicators": exit_indicators or None,
+            "min_exit_indicators_required": row.min_exit_indicators_required or 2,
+            "exit_indicator_groups": row.exit_indicator_groups or None,
+            "exit_timeframe": row.exit_timeframe or None,
             # ATR filter
             "use_atr_filter": bool(row.use_atr_filter),
             # Signal generation

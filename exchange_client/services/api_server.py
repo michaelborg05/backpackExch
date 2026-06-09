@@ -2048,6 +2048,8 @@ async def copy_indicators(
                 tgt_prof.trend_indicator_groups = _copy.deepcopy(src_prof.trend_indicator_groups) if src_prof.trend_indicator_groups else None
             if not category or category == "entry":
                 tgt_prof.entry_indicator_groups = _copy.deepcopy(src_prof.entry_indicator_groups) if src_prof.entry_indicator_groups else None
+            if not category or category == "exit":
+                tgt_prof.exit_indicator_groups = _copy.deepcopy(src_prof.exit_indicator_groups) if src_prof.exit_indicator_groups else None
 
             # Optionally copy key profile params (timeframes, signal logic, invalidation)
             if copy_profile_params:
@@ -2057,6 +2059,9 @@ async def copy_indicators(
                 if not category or category == "entry":
                     tgt_prof.entry_timeframe = src_prof.entry_timeframe
                     tgt_prof.min_entry_indicators_required = src_prof.min_entry_indicators_required
+                if not category or category == "exit":
+                    tgt_prof.exit_timeframe = src_prof.exit_timeframe
+                    tgt_prof.min_exit_indicators_required = src_prof.min_exit_indicators_required
                 if not category:
                     tgt_prof.max_position_hours = src_prof.max_position_hours
                     tgt_prof.use_trend_invalidation_exit = src_prof.use_trend_invalidation_exit
@@ -2957,6 +2962,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             use_atr_filter=body.use_atr_filter,
             min_indicators_required=body.min_indicators_required,
             min_entry_indicators_required=body.min_entry_indicators_required,
+            min_exit_indicators_required=body.min_exit_indicators_required,
             market_type=body.market_type or "SPOT",
             leverage_multiplier=body.leverage_multiplier or 1.0,
             is_active=body.is_active,
@@ -3040,10 +3046,10 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "trend_timeframe", "entry_timeframe",
         "use_market_regime_filter", "use_trend_filter",
         "use_entry_filter", "use_atr_filter", "enable_signal_generation",
-        "min_indicators_required", "min_entry_indicators_required",
-        "trend_indicator_groups", "entry_indicator_groups",
+        "min_indicators_required", "min_entry_indicators_required", "min_exit_indicators_required",
+        "trend_indicator_groups", "entry_indicator_groups", "exit_indicator_groups",
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
-        "min_position_age_for_trend_check", "max_position_hours",
+        "min_position_age_for_trend_check", "max_position_hours", "exit_timeframe",
         "market_type", "leverage_multiplier",
         "is_active",
     ]
@@ -3056,7 +3062,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         before = {k: _safe_val(getattr(p, k, None)) for k in _EDITABLE}
         changes = {}
 
-        _DICT_FIELDS = {"trend_indicator_groups", "entry_indicator_groups"}
+        _DICT_FIELDS = {"trend_indicator_groups", "entry_indicator_groups", "exit_indicator_groups"}
         for field in _EDITABLE:
             val = getattr(body, field, None)
             # Dict fields: apply if explicitly set (even empty dict clears groups)
@@ -3413,18 +3419,21 @@ def _serialize_profile(p, cb=None) -> dict:
         "enable_signal_generation":    bool(p.enable_signal_generation) if p.enable_signal_generation is not None else False,
 
         # Indicator thresholds
-        "min_indicators_required":     p.min_indicators_required,
+        "min_indicators_required":       p.min_indicators_required,
         "min_entry_indicators_required": p.min_entry_indicators_required,
+        "min_exit_indicators_required":  p.min_exit_indicators_required if p.min_exit_indicators_required is not None else 2,
 
         # Indicator group configs
-        "trend_indicator_groups":      p.trend_indicator_groups or None,
-        "entry_indicator_groups":      p.entry_indicator_groups or None,
+        "trend_indicator_groups":        p.trend_indicator_groups or None,
+        "entry_indicator_groups":        p.entry_indicator_groups or None,
+        "exit_indicator_groups":         p.exit_indicator_groups or None,
 
         # Exit logic
         "use_trend_invalidation_exit":          bool(p.use_trend_invalidation_exit) if p.use_trend_invalidation_exit is not None else False,
         "trend_invalidation_indicators":        p.trend_invalidation_indicators if p.trend_invalidation_indicators else None,
         "min_position_age_for_trend_check":     p.min_position_age_for_trend_check if p.min_position_age_for_trend_check else None,
         "max_position_hours":                   p.max_position_hours if p.max_position_hours else None,
+        "exit_timeframe":                       p.exit_timeframe if p.exit_timeframe else None,
 
         # Circuit breaker (embedded)
         "circuit_breaker":             _serialize_cb(cb) if cb else None,

@@ -45,6 +45,12 @@ class TradingProfile(BaseModel):
     min_entry_indicators_required: int = Field(default=2, ge=1)  # Minimum entry indicators required
     entry_indicator_groups: Optional[Dict[str, Any]] = None  # Group configs: {group_id: {require_all, hard_stop}}
 
+    # Exit Indicators (used for trend invalidation exit checks)
+    exit_indicators: Optional[List[Dict[str, Any]]] = None
+    min_exit_indicators_required: int = Field(default=2, ge=1)
+    exit_indicator_groups: Optional[Dict[str, Any]] = None
+    exit_timeframe: Optional[str] = None  # None = fall back to entry_timeframe
+
     # ATR Filters
     use_atr_filter: bool = False
     atr_timeframe: str = "15m"
@@ -169,16 +175,19 @@ class ProfileCreateRequest(BaseModel):
     # Indicator thresholds
     min_indicators_required: Optional[int] = 2
     min_entry_indicators_required: Optional[int] = 2
+    min_exit_indicators_required: Optional[int] = 2
 
     # Indicator group configs
     trend_indicator_groups: Optional[Dict[str, Any]] = None
     entry_indicator_groups: Optional[Dict[str, Any]] = None
+    exit_indicator_groups: Optional[Dict[str, Any]] = None
 
     # Exit logic
     use_trend_invalidation_exit: Optional[bool] = False
     trend_invalidation_indicators: Optional[str] = "entry"
     min_position_age_for_trend_check: Optional[int] = 120
     max_position_hours: Optional[int] = None
+    exit_timeframe: Optional[str] = None
 
     # Market type
     market_type: Optional[str] = "SPOT"
@@ -224,14 +233,17 @@ class ProfileUpdateRequest(BaseModel):
 
     min_indicators_required: Optional[int] = None
     min_entry_indicators_required: Optional[int] = None
+    min_exit_indicators_required: Optional[int] = None
 
     trend_indicator_groups: Optional[Dict[str, Any]] = None
     entry_indicator_groups: Optional[Dict[str, Any]] = None
+    exit_indicator_groups: Optional[Dict[str, Any]] = None
 
     use_trend_invalidation_exit: Optional[bool] = None
     trend_invalidation_indicators: Optional[str] = None
     min_position_age_for_trend_check: Optional[int] = None
     max_position_hours: Optional[int] = None
+    exit_timeframe: Optional[str] = None
 
     is_active: Optional[bool] = None
 
