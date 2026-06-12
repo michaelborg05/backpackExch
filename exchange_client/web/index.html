@@ -482,10 +482,7 @@
                 <div class="toggle-row"><input type="checkbox" id="f-use_entry_filter"><div><div class="toggle-label">Entry Filter (LTF)</div><div class="toggle-sub">Require entry indicators on signal TF</div></div></div>
                 <div class="toggle-row"><input type="checkbox" id="f-use_atr_filter"><div><div class="toggle-label">ATR Filter</div><div class="toggle-sub">Only trade when volatility meets threshold</div></div></div>
               </div>
-              <div class="form-grid" style="margin-top:12px;max-width:500px">
-                <div class="field"><label>Min Trend Indicators Required</label><input id="f-min_indicators_required" type="number" step="1" min="1" placeholder="2"></div>
-                <div class="field"><label>Min Entry Indicators Required</label><input id="f-min_entry_indicators_required" type="number" step="1" min="1" placeholder="2"></div>
-              </div>
+              <div style="margin-top:8px;font-size:10px;color:var(--txd)">Min indicators required — edit in the Indicators tab.</div>
             </div>
             <div class="form-section">
               <div class="section-title">Position Exit Logic</div>
@@ -494,7 +491,8 @@
                 <div><div class="toggle-label">Trend Invalidation Exit</div><div class="toggle-sub">Close position when trend indicators turn bearish</div></div>
               </div>
               <div class="form-grid" style="margin-top:12px;max-width:600px">
-                <div class="field"><label>Invalidation Indicators</label><select id="f-trend_invalidation_indicators"><option value="entry">Entry indicators</option><option value="trend">Trend indicators</option><option value="mean_reversion">Mean reversion</option></select></div>
+                <div class="field"><label>Invalidation Indicators</label><select id="f-trend_invalidation_indicators"><option value="entry">Entry indicators</option><option value="trend">Trend indicators</option><option value="exit">Exit indicators</option><option value="mean_reversion">Mean reversion</option></select></div>
+                <div class="field"><label>Exit Timeframe</label><select id="f-exit_timeframe"><option value="">Use entry timeframe</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select><div class="field-hint">Timeframe used for exit indicator evaluation</div></div>
                 <div class="field"><label>Min Position Age (min)</label><input id="f-min_position_age_for_trend_check" type="number" step="15" placeholder="120"><div class="field-hint">Don't check until position is this old</div></div>
                 <div class="field"><label>Max Position Hours</label><input id="f-max_position_hours" type="number" step="1" placeholder="18"><div class="field-hint">Force-exit if stuck (leave blank to disable)</div></div>
               </div>
@@ -549,12 +547,26 @@
                 <div class="stab on" style="border-bottom:none;padding:5px 14px;font-size:10px" onclick="setIndCatP('all',this)">All</div>
                 <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('trend',this)">Trend</div>
                 <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('entry',this)">Entry</div>
+                <div class="stab" style="border-bottom:none;border-left:1px solid var(--brd);padding:5px 14px;font-size:10px" onclick="setIndCatP('exit',this)">Exit</div>
               </div>
               <span style="flex:1"></span>
               <span id="ind-count-p" style="font-size:10px;color:var(--txd)"></span>
               <button class="btn-sm" onclick="openCopyIndicatorsModal()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Copy From</button>
               <button id="adv-mode-btn" class="btn-sm" onclick="toggleAdvancedMode()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--txd)">⚙ Advanced</button>
               <button class="btn-new" onclick="openAddIndicatorP()">+ Add</button>
+            </div>
+            <!-- Min required quick-edit bar -->
+            <div id="ind-min-req-bar" style="display:flex;gap:16px;align-items:center;padding:8px 12px;background:var(--bg2);border:1px solid var(--brd);margin-top:6px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--txd)">
+                <span style="letter-spacing:.1em;text-transform:uppercase">Min Required</span>
+                <span style="color:var(--acc)">Trend</span>
+                <input id="f-min_indicators_required" type="number" step="1" min="1" placeholder="2" style="width:48px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:3px 6px;font-size:11px;font-family:'Space Mono',monospace;outline:none" onchange="saveMinRequired()">
+                <span style="color:var(--acc)">Entry</span>
+                <input id="f-min_entry_indicators_required" type="number" step="1" min="1" placeholder="2" style="width:48px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:3px 6px;font-size:11px;font-family:'Space Mono',monospace;outline:none" onchange="saveMinRequired()">
+                <span style="color:var(--acc)">Exit</span>
+                <input id="f-min_exit_indicators_required" type="number" step="1" min="1" placeholder="2" style="width:48px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:3px 6px;font-size:11px;font-family:'Space Mono',monospace;outline:none" onchange="saveMinRequired()">
+                <span id="min-req-save-status" style="color:var(--txd);font-size:10px"></span>
+              </div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:4px" id="ind-grid-p">
               <div style="color:var(--txd);font-size:11px;grid-column:1/-1;padding:16px 0">Select a profile to load indicators</div>
@@ -740,7 +752,7 @@
         <div class="modal-header"><span class="modal-title" id="imodp-title">Add Indicator</span><button class="modal-close" onclick="closeIndModalP()">×</button></div>
         <div class="modal-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-            <div class="form-row" style="margin-bottom:0"><label>Category</label><select id="imodp-cat"><option value="trend">Trend</option><option value="entry">Entry</option></select></div>
+            <div class="form-row" style="margin-bottom:0"><label>Category</label><select id="imodp-cat"><option value="trend">Trend</option><option value="entry">Entry</option><option value="exit">Exit</option></select></div>
             <div class="form-row" style="margin-bottom:0"><label>Type</label><select id="imodp-type" onchange="onIndTypePChange()"></select></div>
           </div>
           <div style="display:flex;gap:20px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
@@ -1925,6 +1937,7 @@ let _paramTabP = 'form';
 let _advancedMode = false;
 let _trendGroups = {};   // { group_id: { require_all, hard_stop } }
 let _entryGroups = {};   // same, for entry indicators
+let _exitGroups  = {};   // same, for exit indicators
 let _groupsSaveTimer = null;
 
 async function loadProfiles() {
@@ -2065,8 +2078,13 @@ function fillSettings(p) {
   set('f-min_entry_indicators_required', p.min_entry_indicators_required);
   set('f-use_trend_invalidation_exit', p.use_trend_invalidation_exit);
   set('f-trend_invalidation_indicators', p.trend_invalidation_indicators);
+  set('f-exit_timeframe', p.exit_timeframe ?? '');
   set('f-min_position_age_for_trend_check', p.min_position_age_for_trend_check);
   set('f-max_position_hours', p.max_position_hours);
+  // Indicators tab min-required bar
+  set('f-min_indicators_required', p.min_indicators_required);
+  set('f-min_entry_indicators_required', p.min_entry_indicators_required);
+  set('f-min_exit_indicators_required', p.min_exit_indicators_required ?? 2);
 }
 
 function fillCB(cb) {
@@ -2247,8 +2265,10 @@ async function saveSettings() {
     use_atr_filter:                 getBool('f-use_atr_filter'),
     min_indicators_required:        getInt('f-min_indicators_required'),
     min_entry_indicators_required:  getInt('f-min_entry_indicators_required'),
+    min_exit_indicators_required:   getInt('f-min_exit_indicators_required'),
     use_trend_invalidation_exit:    getBool('f-use_trend_invalidation_exit'),
     trend_invalidation_indicators:  getStr('f-trend_invalidation_indicators'),
+    exit_timeframe:                 getStr('f-exit_timeframe') || null,
     min_position_age_for_trend_check: getInt('f-min_position_age_for_trend_check'),
     max_position_hours:             getInt('f-max_position_hours'),
   };
@@ -2782,11 +2802,19 @@ async function loadIndicatorsP() {
   _indDataP = await api('/indicators/' + _currentProfile.name).catch(() => []) ?? [];
   _trendGroups = _currentProfile.trend_indicator_groups ? JSON.parse(JSON.stringify(_currentProfile.trend_indicator_groups)) : {};
   _entryGroups = _currentProfile.entry_indicator_groups ? JSON.parse(JSON.stringify(_currentProfile.entry_indicator_groups)) : {};
+  _exitGroups  = _currentProfile.exit_indicator_groups  ? JSON.parse(JSON.stringify(_currentProfile.exit_indicator_groups))  : {};
+
+  // Populate min-required bar
+  const setBar = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+  setBar('f-min_indicators_required',      _currentProfile.min_indicators_required);
+  setBar('f-min_entry_indicators_required', _currentProfile.min_entry_indicators_required);
+  setBar('f-min_exit_indicators_required',  _currentProfile.min_exit_indicators_required ?? 2);
 
   // Auto-enable advanced mode if this profile already has groups configured.
   const hasGroups = _indDataP.some(i => i.indicator_group) ||
                     Object.keys(_trendGroups).length > 0 ||
-                    Object.keys(_entryGroups).length > 0;
+                    Object.keys(_entryGroups).length > 0 ||
+                    Object.keys(_exitGroups).length > 0;
   if (hasGroups !== _advancedMode) {
     _advancedMode = hasGroups;
     const btn = document.getElementById('adv-mode-btn');
@@ -2818,7 +2846,7 @@ function renderIndGridP() {
     return;
   }
   const groups = _indCatP === 'all'
-    ? ['trend','entry'].filter(c => filtered.some(i => i.category === c))
+    ? ['trend','entry','exit'].filter(c => filtered.some(i => i.category === c))
     : [_indCatP];
   grid.innerHTML = groups.map(cat => {
     const items = filtered.filter(i => i.category === cat);
@@ -2875,15 +2903,16 @@ function renderGroupsPanel() {
   // Collect all unique (category, group_id) pairs from current indicators
   const trendGroupIds = [...new Set(_indDataP.filter(i => i.category === 'trend' && i.indicator_group).map(i => i.indicator_group))];
   const entryGroupIds = [...new Set(_indDataP.filter(i => i.category === 'entry' && i.indicator_group).map(i => i.indicator_group))];
+  const exitGroupIds  = [...new Set(_indDataP.filter(i => i.category === 'exit'  && i.indicator_group).map(i => i.indicator_group))];
 
-  if (!trendGroupIds.length && !entryGroupIds.length) {
+  if (!trendGroupIds.length && !entryGroupIds.length && !exitGroupIds.length) {
     body.innerHTML = '<div style="color:var(--txd);font-size:11px">No groups configured — assign a group name to indicators above.</div>';
     return;
   }
 
   const renderSection = (label, groupIds, storeKey) => {
     if (!groupIds.length) return '';
-    const store = storeKey === 'trend' ? _trendGroups : _entryGroups;
+    const store = storeKey === 'trend' ? _trendGroups : storeKey === 'entry' ? _entryGroups : _exitGroups;
     const rows = groupIds.map(gid => {
       const cfg = store[gid] || { require_all: false, hard_stop: false };
       return `<tr style="border-bottom:1px solid var(--brd)">
@@ -2913,14 +2942,14 @@ function renderGroupsPanel() {
       </table>`;
   };
 
-  body.innerHTML = renderSection('Trend Groups', trendGroupIds, 'trend') + renderSection('Entry Groups', entryGroupIds, 'entry');
+  body.innerHTML = renderSection('Trend Groups', trendGroupIds, 'trend') + renderSection('Entry Groups', entryGroupIds, 'entry') + renderSection('Exit Groups', exitGroupIds, 'exit');
 }
 
 function onGroupCfgChange(el) {
   const cat = el.dataset.cat;
   const gid = el.dataset.gid;
   const field = el.dataset.field;
-  const store = cat === 'trend' ? _trendGroups : _entryGroups;
+  const store = cat === 'trend' ? _trendGroups : cat === 'entry' ? _entryGroups : _exitGroups;
   if (!store[gid]) store[gid] = { require_all: false, hard_stop: false };
   store[gid][field] = el.type === 'checkbox' ? el.checked : (el.value === 'true');
   // Auto-save with debounce
@@ -2928,6 +2957,31 @@ function onGroupCfgChange(el) {
   if (status) status.textContent = 'Saving…';
   clearTimeout(_groupsSaveTimer);
   _groupsSaveTimer = setTimeout(saveGroups, 600);
+}
+
+let _minReqSaveTimer = null;
+async function saveMinRequired() {
+  if (!_currentProfile) return;
+  const status = document.getElementById('min-req-save-status');
+  if (status) status.textContent = 'Saving…';
+  clearTimeout(_minReqSaveTimer);
+  _minReqSaveTimer = setTimeout(async () => {
+    const getIntEl = id => { const el = document.getElementById(id); return el ? (parseInt(el.value) || null) : null; };
+    try {
+      await api('/profiles/' + _currentProfile.name, {
+        method: 'PUT',
+        body: JSON.stringify({
+          min_indicators_required:       getIntEl('f-min_indicators_required'),
+          min_entry_indicators_required: getIntEl('f-min_entry_indicators_required'),
+          min_exit_indicators_required:  getIntEl('f-min_exit_indicators_required'),
+        }),
+      });
+      _currentProfile = await api('/profiles/' + _currentProfile.name);
+      if (status) { status.textContent = '✓'; setTimeout(() => { if (status) status.textContent = ''; }, 2000); }
+    } catch (e) {
+      if (status) status.textContent = '✗ ' + e.message;
+    }
+  }, 600);
 }
 
 async function saveGroups() {
@@ -2939,6 +2993,7 @@ async function saveGroups() {
       body: JSON.stringify({
         trend_indicator_groups: Object.keys(_trendGroups).length ? _trendGroups : {},
         entry_indicator_groups: Object.keys(_entryGroups).length ? _entryGroups : {},
+        exit_indicator_groups:  Object.keys(_exitGroups).length  ? _exitGroups  : {},
       }),
     });
     _currentProfile = await api('/profiles/' + _currentProfile.name);
@@ -2953,7 +3008,7 @@ function openAddIndicatorP() {
   _indEditId = null;
   document.getElementById('imodp-title').textContent = 'Add Indicator';
   document.getElementById('imodp-del-btn').style.display = 'none';
-  document.getElementById('imodp-cat').value = _indCatP === 'all' ? 'trend' : _indCatP;
+  document.getElementById('imodp-cat').value = (!_indCatP || _indCatP === 'all') ? 'trend' : _indCatP;
   document.getElementById('imodp-hardstop').checked = true;
   document.getElementById('imodp-enabled').checked = true;
   document.getElementById('imodp-group').value = '';

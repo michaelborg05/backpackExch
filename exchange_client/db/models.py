@@ -62,6 +62,10 @@ class TradingProfileDB(Base):
     # Indicator group configs: {"group_id": {"require_all": bool, "hard_stop": bool}}
     trend_indicator_groups = Column(JSONB, nullable=True)
     entry_indicator_groups = Column(JSONB, nullable=True)
+    exit_indicator_groups = Column(JSONB, nullable=True)
+
+    min_exit_indicators_required = Column(Integer, default=2, server_default=text("2"))
+    exit_timeframe = Column(String, nullable=True)
 
     # Relationship to Indicators
     indicators = relationship("IndicatorDB", back_populates="profile", cascade="all, delete-orphan")

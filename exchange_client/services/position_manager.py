@@ -103,27 +103,40 @@ class PositionManager:
             return False, f"Too young ({position_age_minutes:.1f}m < {min_age}m)"
 
         # Get entry data. If not found, use trend data
-        if getattr(profile, 'trend_invalidation_indicators', "entry") == "entry":
+        if getattr(profile, 'trend_invalidation_indicators', "entry") == "exit":
+            exit_inds = getattr(profile, 'exit_indicators', None)
+            if exit_inds:
+                indicators_config = exit_inds
+                min_required = getattr(profile, 'min_exit_indicators_required', 2)
+                exit_tf = getattr(profile, 'exit_timeframe', None)
+                indicator_timeframe = exit_tf or getattr(profile, 'entry_timeframe', '15')
+            else:
+                # No exit indicators configured — fall back to entry indicators
+                indicators_config = getattr(profile, 'entry_indicators', None)
+                min_required = getattr(profile, 'min_entry_indicators_required', 2) - 1
+                indicator_timeframe = getattr(profile, 'entry_timeframe', '15')
+
+        elif getattr(profile, 'trend_invalidation_indicators', "entry") == "entry":
             indicators_config = getattr(profile, 'entry_indicators', None)
             min_required = getattr(profile, 'min_entry_indicators_required', 2) - 1 #Reduce min required by 1 for trend invalidation
             indicator_timeframe = getattr(profile, 'entry_timeframe', '15')
-        
+
         elif getattr(profile, 'trend_invalidation_indicators', "entry") == "mean_reversion":
             lookback_candles = self.settings.mean_rever_rsi_lookback_candles
             min_rsi = self.settings.mean_rever_rsi_inval_threshold
-            #try to use custom rsi_reversal_momentum logic for mean reversion strategy. 
+            #try to use custom rsi_reversal_momentum logic for mean reversion strategy.
             # Set oversold_threshold high as we dont need this limit in this check
 
             indicators_config = [
-                {"type": "rsi_reversal_momentum", "params": 
-                 {"lookback_candles": lookback_candles, "oversold_threshold": 60, 
+                {"type": "rsi_reversal_momentum", "params":
+                 {"lookback_candles": lookback_candles, "oversold_threshold": 60,
                   "current_min": min_rsi,"min_jump":1, "require_sustained":False,
                   "jump_required": False
                  }}
             ]
             min_required = 1
             indicator_timeframe = getattr(profile, 'entry_timeframe', '15')
-        
+
         elif profile.use_trend_filter:
             indicators_config = getattr(profile, 'trend_indicators', None)
             min_required = getattr(profile, 'min_indicators_required', 2)  - 1 #Reduce min required by 1 for trend invalidation

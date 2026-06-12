@@ -1,6 +1,7 @@
 import urllib.request
 import urllib.error
 import json
+import ssl
 from typing import Dict, Optional, Any
 from utils.config import Config
 from utils.logging import log_manager
@@ -8,16 +9,23 @@ import socket
 from utils.constants import HttpMethod
 from utils.exceptions import ExchangeAPIError
 
+# Reusable unverified SSL context for exchanges with expired/self-signed certs.
+# Only pass this when the exchange itself has a cert problem (e.g. Bullet mainnet).
+UNVERIFIED_SSL_CTX = ssl.create_default_context()
+UNVERIFIED_SSL_CTX.check_hostname = False
+UNVERIFIED_SSL_CTX.verify_mode = ssl.CERT_NONE
+
 config = Config()
 client_logger = log_manager.get_logger("client")
 
 
 def api_request(
-    url: str, 
-    headers: Optional[Dict[str, str]] = None, 
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
     body: Optional[Dict[str, Any]] = None,
-    timeout: int = 10, 
-    requestType: str = HttpMethod.GET
+    timeout: int = 10,
+    requestType: str = HttpMethod.GET,
+    ssl_context: Optional[ssl.SSLContext] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Generic API request function
@@ -62,7 +70,7 @@ def api_request(
             method=requestType.value
         )
 
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
             # Read response bytes once
             resp_bytes = response.read()
 

@@ -18,8 +18,11 @@ from typing import Optional, List, Dict, Any
 from api_builders.adapters.base import ExchangeAdapter
 from utils.endpoints import BulletEndpoints
 from utils.logging import log_manager
-from services.client import api_request
+from services.client import api_request, UNVERIFIED_SSL_CTX
 from utils.constants import HttpMethod
+
+# Bullet mainnet cert has expired — use unverified context for all requests.
+_SSL = UNVERIFIED_SSL_CTX
 
 # Mapping: internal base symbol → Bullet perpetual symbol
 # Add more as Bullet lists new markets.
@@ -86,7 +89,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol)
         url = BulletEndpoints.ticker(bullet_symbol)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if data and isinstance(data, list) and data:
                 return float(data[0].get("price", 0) or 0)
             if data and isinstance(data, dict):
@@ -100,7 +103,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol)
         url = BulletEndpoints.depth(bullet_symbol)
         try:
-            return api_request(url)
+            return api_request(url, ssl_context=_SSL)
         except Exception as e:
             self.logger.error(f"[Bullet] get_depth({symbol}) failed: {e}")
             return None
@@ -131,7 +134,7 @@ class BulletAdapter(ExchangeAdapter):
 
         url = BulletEndpoints.coingecko_ohlc(coin_id, days)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data or not isinstance(data, list):
                 return []
             # CoinGecko OHLC format: [timestamp_ms, open, high, low, close]
@@ -154,7 +157,7 @@ class BulletAdapter(ExchangeAdapter):
         """Fetch all markets from Bullet /fapi/v1/exchangeInfo and normalise to Backpack-like format."""
         url = BulletEndpoints.exchange_info()
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return None
             symbols = data.get("symbols", [])
@@ -197,7 +200,7 @@ class BulletAdapter(ExchangeAdapter):
         """
         url = BulletEndpoints.balance(self.read_address)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return None
             # Bullet balance format (TBC — adapt once endpoint is confirmed working):
@@ -224,7 +227,7 @@ class BulletAdapter(ExchangeAdapter):
         """Fetch full account state (positions, PnL) from /fapi/v3/account."""
         url = BulletEndpoints.account(self.read_address)
         try:
-            return api_request(url)
+            return api_request(url, ssl_context=_SSL)
         except Exception as e:
             self.logger.error(f"[Bullet] get_account() failed: {e}")
             return None
@@ -389,6 +392,7 @@ class BulletAdapter(ExchangeAdapter):
                 url,
                 body={"body": tx_b64},
                 requestType=HttpMethod.POST,
+                ssl_context=_SSL,
             )
             return response
         except NotImplementedError:
@@ -415,6 +419,7 @@ class BulletAdapter(ExchangeAdapter):
                 url,
                 body={"body": tx_b64},
                 requestType=HttpMethod.POST,
+                ssl_context=_SSL,
             )
             return response
         except NotImplementedError:
@@ -431,7 +436,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol)
         url = BulletEndpoints.open_orders(bullet_symbol, self.read_address)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return []
             return data if isinstance(data, list) else []
@@ -444,7 +449,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol)
         url = BulletEndpoints.single_order(bullet_symbol, self.read_address, order_id=order_id)
         try:
-            return api_request(url)
+            return api_request(url, ssl_context=_SSL)
         except Exception as e:
             self.logger.error(f"[Bullet] get_single_order({order_id}) failed: {e}")
             return None
@@ -454,7 +459,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol) if symbol else None
         url = BulletEndpoints.order_history(self.read_address, symbol=bullet_symbol, order_id=order_id)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return []
             # Bullet returns {"data": [...], "nextCursor": ...}
@@ -475,7 +480,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol)
         url = BulletEndpoints.user_trades(self.read_address, symbol=bullet_symbol)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return []
             trades = data if isinstance(data, list) else data.get("data", [])
@@ -522,7 +527,7 @@ class BulletAdapter(ExchangeAdapter):
         bullet_symbol = _to_bullet_symbol(symbol) if symbol else None
         url = BulletEndpoints.funding_rate(bullet_symbol)
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return None
             return data if isinstance(data, list) else [data]
@@ -574,7 +579,7 @@ class BulletAdapter(ExchangeAdapter):
         position_already_flat = False
         try:
             url = BulletEndpoints.submit_tx()
-            raw = api_request(url, body={"body": tx_b64}, requestType=HttpMethod.POST)
+            raw = api_request(url, body={"body": tx_b64}, requestType=HttpMethod.POST, ssl_context=_SSL)
             if raw:
                 self.logger.debug(f"[Bullet] /tx/submit response for {order_ns.symbol}: {raw}")
         except Exception as e:
@@ -998,7 +1003,7 @@ class BulletAdapter(ExchangeAdapter):
         self._market_filters_cache: Dict[str, tuple] = {}
         url = BulletEndpoints.exchange_info()
         try:
-            data = api_request(url)
+            data = api_request(url, ssl_context=_SSL)
             if not data:
                 return
             for s in data.get("symbols", []):
