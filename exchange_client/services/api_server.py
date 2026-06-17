@@ -2093,6 +2093,109 @@ async def copy_indicators(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class _PasteSectionModel(BaseModel):
+    indicators: List[dict]
+    groups_config: Optional[dict] = None
+    min_required: Optional[int] = None
+
+class IndicatorPasteImport(BaseModel):
+    sections: dict[str, _PasteSectionModel]   # keys: "trend" | "entry" | "exit"
+
+
+@app.post("/indicators/{profile_name}/paste-import", dependencies=[Depends(require_admin_permission)])
+async def paste_import_indicators(profile_name: str, body: IndicatorPasteImport):
+    """Bulk-replace indicators from pasted variant config.
+
+    body.sections is a dict keyed by category ("trend", "entry", "exit"). For each
+    category present, existing indicators of that category are deleted and replaced
+    with the supplied list. Optional groups_config and min_required are applied to
+    the profile if provided.
+    """
+    from db.utils import get_db_session
+    from db.models import IndicatorDB
+    from services.profile_manager import refresh_profiles_from_db
+    import copy as _copy
+
+    VALID_CATEGORIES = {"trend", "entry", "exit"}
+    invalid = set(body.sections) - VALID_CATEGORIES
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Invalid categories: {invalid}")
+    if not body.sections:
+        raise HTTPException(status_code=400, detail="No sections provided")
+
+    try:
+        with get_db_session() as db:
+            prof = _ind_profile_or_404(db, profile_name)
+            total_deleted = 0
+            total_created = 0
+
+            for cat, section in body.sections.items():
+                # Delete existing indicators for this category
+                deleted = db.query(IndicatorDB).filter(
+                    IndicatorDB.profile_id == prof.id,
+                    IndicatorDB.category == cat,
+                ).delete(synchronize_session=False)
+                total_deleted += deleted
+
+                # Insert new indicators
+                for ind_data in section.indicators:
+                    ind_type = ind_data.get("type")
+                    if not ind_type:
+                        continue
+                    params = ind_data.get("params", {})
+                    indicator_group = ind_data.get("indicator_group") or None
+                    is_hard_stop = params.pop("hard_stop", False)
+                    new_ind = IndicatorDB(
+                        profile_id=prof.id,
+                        category=cat,
+                        indicator_type=ind_type,
+                        params=params,
+                        is_hard_stop=is_hard_stop,
+                        enabled=True,
+                        indicator_group=indicator_group,
+                    )
+                    db.add(new_ind)
+                    total_created += 1
+
+                # Update groups config on profile
+                if section.groups_config is not None:
+                    if cat == "trend":
+                        prof.trend_indicator_groups = _copy.deepcopy(section.groups_config) or None
+                    elif cat == "entry":
+                        prof.entry_indicator_groups = _copy.deepcopy(section.groups_config) or None
+                    elif cat == "exit":
+                        prof.exit_indicator_groups = _copy.deepcopy(section.groups_config) or None
+
+                # Update min_required on profile
+                if section.min_required is not None:
+                    if cat == "trend":
+                        prof.min_indicators_required = section.min_required
+                    elif cat == "entry":
+                        prof.min_entry_indicators_required = section.min_required
+                    elif cat == "exit":
+                        prof.min_exit_indicators_required = section.min_required
+
+            db.commit()
+            refresh_profiles_from_db()
+
+            cats = ", ".join(body.sections.keys())
+            apiserver_logger.info(
+                f"Paste-import: {total_created} indicator(s) into '{profile_name}' "
+                f"(categories: {cats}, deleted: {total_deleted})"
+            )
+            return {
+                "success": True,
+                "created": total_created,
+                "deleted": total_deleted,
+                "message": f"Imported {total_created} indicator(s) into {cats} ({total_deleted} removed)",
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error in paste-import: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── AI Monitor ────────────────────────────────────────────────────────────────
 
 @app.get("/ai-monitor/report/{profile_name}", dependencies=[Depends(require_read_permission)])

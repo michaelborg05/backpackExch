@@ -552,6 +552,7 @@
               <span style="flex:1"></span>
               <span id="ind-count-p" style="font-size:10px;color:var(--txd)"></span>
               <button class="btn-sm" onclick="openCopyIndicatorsModal()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Copy From</button>
+              <button class="btn-sm" onclick="openPasteImportModal()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Paste Import</button>
               <button id="adv-mode-btn" class="btn-sm" onclick="toggleAdvancedMode()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--txd)">⚙ Advanced</button>
               <button class="btn-new" onclick="openAddIndicatorP()">+ Add</button>
             </div>
@@ -742,6 +743,44 @@
         <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
           <button class="btn-cancel" onclick="closeCopyIndicatorsModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Cancel</button>
           <button id="copy-ind-confirm" onclick="executeCopyIndicators()" style="padding:6px 14px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Paste Import Modal ───────────────────────────────────────────── -->
+    <div class="modal-overlay" id="paste-import-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closePasteImportModal()">
+      <div class="modal-box" style="max-width:600px;width:90vw">
+        <div class="modal-header">
+          <span class="modal-title">Paste Import Indicators</span>
+          <button class="modal-close" onclick="closePasteImportModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--txd);margin-bottom:12px;line-height:1.5">
+            Paste a variant block from your <code>trend_variants.py</code> / <code>mean_reversion_variants.py</code> files.
+            The parser accepts <code>trend_indicators</code>, <code>entry_indicators</code>, <code>exit_indicators</code>,
+            group configs, and <code>min_*_required</code> fields. Detected sections will appear below.
+          </div>
+          <textarea id="paste-import-textarea" rows="12" spellcheck="false"
+            placeholder='"trend_indicators": [&#10;    {"type": "rsi_momentum", "params": {"min_momentum": 0.0, "hard_stop": True}},&#10;    ...&#10;],&#10;"entry_indicators": [&#10;    ...&#10;],'
+            style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;resize:vertical;outline:none;line-height:1.45"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <button onclick="parsePasteImport()" style="padding:5px 14px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:11px;color:#fff;font-weight:600">Parse</button>
+            <button onclick="document.getElementById('paste-import-textarea').value='';clearPastePreview()" style="padding:5px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:11px;color:var(--txd)">Clear</button>
+            <span id="paste-parse-status" style="font-size:11px;color:var(--txd)"></span>
+          </div>
+
+          <!-- Preview of parsed sections -->
+          <div id="paste-preview" style="display:none;margin-top:14px">
+            <div style="font-size:11px;font-weight:600;color:var(--tx);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em">Detected Sections</div>
+            <div id="paste-section-list" style="display:flex;flex-direction:column;gap:8px"></div>
+            <div id="paste-import-warning" style="margin-top:12px;background:rgba(220,80,80,0.12);border:1px solid rgba(220,80,80,0.35);border-radius:4px;padding:8px 10px;font-size:11px;color:#e07070">
+              ⚠ Checked sections will <strong>replace</strong> existing indicators in the current profile.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
+          <button onclick="closePasteImportModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Cancel</button>
+          <button id="paste-import-confirm" onclick="executePasteImport()" disabled style="padding:6px 14px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600;opacity:.5">Import</button>
         </div>
       </div>
     </div>
@@ -3121,6 +3160,181 @@ async function executeCopyIndicators() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Copy';
+  }
+}
+
+// ── Paste Import ─────────────────────────────────────────────────────────────
+
+let _pasteImportParsed = null;
+
+function openPasteImportModal() {
+  if (!_currentProfile) { showToast('Select a profile first', true); return; }
+  _pasteImportParsed = null;
+  document.getElementById('paste-import-textarea').value = '';
+  document.getElementById('paste-parse-status').textContent = '';
+  document.getElementById('paste-preview').style.display = 'none';
+  document.getElementById('paste-import-confirm').disabled = true;
+  document.getElementById('paste-import-confirm').style.opacity = '.5';
+  document.getElementById('paste-import-modal').style.display = 'flex';
+}
+
+function closePasteImportModal() {
+  document.getElementById('paste-import-modal').style.display = 'none';
+}
+
+function clearPastePreview() {
+  _pasteImportParsed = null;
+  document.getElementById('paste-parse-status').textContent = '';
+  document.getElementById('paste-preview').style.display = 'none';
+  document.getElementById('paste-import-confirm').disabled = true;
+  document.getElementById('paste-import-confirm').style.opacity = '.5';
+}
+
+function _pasteExtractBracketedValue(src, key) {
+  // Find "key": followed by [ or { and extract balanced content
+  const re = new RegExp(`"${key}"\\s*:\\s*`);
+  const idx = src.search(re);
+  if (idx === -1) return null;
+  const afterKey = src.slice(idx).replace(re, '').trimStart();
+  const open = afterKey[0];
+  if (open !== '[' && open !== '{') return null;
+  const close = open === '[' ? ']' : '}';
+  let depth = 0, i = 0;
+  for (; i < afterKey.length; i++) {
+    if (afterKey[i] === open) depth++;
+    else if (afterKey[i] === close) { depth--; if (depth === 0) { i++; break; } }
+  }
+  return afterKey.slice(0, i);
+}
+
+function _pasteExtractInt(src, key) {
+  const m = src.match(new RegExp(`"${key}"\\s*:\\s*(\\d+)`));
+  return m ? parseInt(m[1]) : null;
+}
+
+function parsePasteImport() {
+  const raw = document.getElementById('paste-import-textarea').value;
+  if (!raw.trim()) { document.getElementById('paste-parse-status').textContent = 'Nothing to parse.'; return; }
+
+  // Normalise Python → JSON
+  let s = raw
+    .replace(/#[^\n]*/g, '')        // strip Python comments
+    .replace(/\bTrue\b/g, 'true')
+    .replace(/\bFalse\b/g, 'false')
+    .replace(/\bNone\b/g, 'null');
+
+  const CATS = [
+    { cat: 'trend', indKey: 'trend_indicators',  grpKey: 'trend_indicator_groups',  minKey: 'min_indicators_required' },
+    { cat: 'entry', indKey: 'entry_indicators',  grpKey: 'entry_indicator_groups',  minKey: 'min_entry_indicators_required' },
+    { cat: 'exit',  indKey: 'exit_indicators',   grpKey: 'exit_indicator_groups',   minKey: 'min_exit_indicators_required' },
+  ];
+
+  const result = {};
+  const errors = [];
+
+  for (const { cat, indKey, grpKey, minKey } of CATS) {
+    const indRaw = _pasteExtractBracketedValue(s, indKey);
+    if (!indRaw) continue;
+    let indicators;
+    try { indicators = JSON.parse(indRaw); } catch (e) {
+      errors.push(`${cat} indicators: ${e.message}`); continue;
+    }
+    if (!Array.isArray(indicators)) { errors.push(`${cat}: expected array`); continue; }
+
+    const section = { indicators };
+
+    const grpRaw = _pasteExtractBracketedValue(s, grpKey);
+    if (grpRaw) {
+      try { section.groups_config = JSON.parse(grpRaw); } catch (_) {}
+    }
+    const minReq = _pasteExtractInt(s, minKey);
+    if (minReq !== null) section.min_required = minReq;
+
+    result[cat] = section;
+  }
+
+  const statusEl = document.getElementById('paste-parse-status');
+  if (errors.length) { statusEl.textContent = 'Parse errors: ' + errors.join('; '); statusEl.style.color = '#e07070'; }
+  else { statusEl.textContent = ''; statusEl.style.color = ''; }
+
+  if (!Object.keys(result).length) {
+    statusEl.textContent = (statusEl.textContent || '') + ' No indicator sections found.';
+    statusEl.style.color = '#e07070';
+    document.getElementById('paste-preview').style.display = 'none';
+    _pasteImportParsed = null;
+    document.getElementById('paste-import-confirm').disabled = true;
+    document.getElementById('paste-import-confirm').style.opacity = '.5';
+    return;
+  }
+
+  _pasteImportParsed = result;
+  renderPastePreview(result);
+}
+
+function renderPastePreview(sections) {
+  const list = document.getElementById('paste-section-list');
+  list.innerHTML = '';
+  for (const [cat, sec] of Object.entries(sections)) {
+    const hasGroups = sec.groups_config && Object.keys(sec.groups_config).length > 0;
+    const groupNames = hasGroups ? Object.keys(sec.groups_config).join(', ') : null;
+    const groupedCount = sec.indicators.filter(i => i.indicator_group).length;
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px';
+    row.innerHTML = `
+      <input type="checkbox" data-cat="${cat}" checked style="margin-top:2px;cursor:pointer">
+      <div style="flex:1">
+        <div style="font-weight:600;color:var(--acc);text-transform:capitalize">${cat} Indicators</div>
+        <div style="color:var(--txd);font-size:11px;margin-top:3px">
+          ${sec.indicators.length} indicator${sec.indicators.length !== 1 ? 's' : ''}
+          ${groupedCount ? ` · ${groupedCount} in group${groupedCount !== 1 ? 's' : ''}` : ''}
+          ${groupNames ? ` · groups: <span style="color:var(--tx)">${groupNames}</span>` : ''}
+          ${sec.min_required != null ? ` · min required: <span style="color:var(--tx)">${sec.min_required}</span>` : ''}
+        </div>
+        <div style="margin-top:6px;font-size:10px;color:var(--txd);font-family:monospace;max-height:80px;overflow:auto">
+          ${sec.indicators.map(i => {
+            const grp = i.indicator_group ? ` <span style="color:#7abfff">[${i.indicator_group}]</span>` : '';
+            const hs = (i.params && i.params.hard_stop) ? ' <span style="color:#e07070">hard_stop</span>' : '';
+            return `<div>${i.type}${grp}${hs}</div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    list.appendChild(row);
+  }
+
+  document.getElementById('paste-preview').style.display = 'block';
+  document.getElementById('paste-import-confirm').disabled = false;
+  document.getElementById('paste-import-confirm').style.opacity = '1';
+}
+
+async function executePasteImport() {
+  if (!_pasteImportParsed || !_currentProfile) return;
+
+  // Build sections from checked boxes only
+  const checked = [...document.querySelectorAll('#paste-section-list input[data-cat]:checked')].map(el => el.dataset.cat);
+  if (!checked.length) { showToast('Select at least one section', true); return; }
+
+  const sections = {};
+  for (const cat of checked) {
+    if (_pasteImportParsed[cat]) sections[cat] = _pasteImportParsed[cat];
+  }
+
+  const btn = document.getElementById('paste-import-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  try {
+    const result = await api(`/indicators/${_currentProfile.name}/paste-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sections }),
+    });
+    closePasteImportModal();
+    await loadIndicatorsP();
+    showToast(result.message || `Imported ${result.created} indicator(s)`);
+  } catch (e) {
+    showToast(e.message || 'Import failed', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import';
   }
 }
 
