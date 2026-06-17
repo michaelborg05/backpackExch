@@ -3218,10 +3218,11 @@ function parsePasteImport() {
 
   // Normalise Python → JSON
   let s = raw
-    .replace(/#[^\n]*/g, '')        // strip Python comments
+    .replace(/#[^\n]*/g, '')              // strip Python comments
     .replace(/\bTrue\b/g, 'true')
     .replace(/\bFalse\b/g, 'false')
-    .replace(/\bNone\b/g, 'null');
+    .replace(/\bNone\b/g, 'null')
+    .replace(/,(\s*[\]}])/g, '$1');       // remove trailing commas (invalid in JSON)
 
   const CATS = [
     { cat: 'trend', indKey: 'trend_indicators',  grpKey: 'trend_indicator_groups',  minKey: 'min_indicators_required' },
@@ -3324,7 +3325,6 @@ async function executePasteImport() {
   try {
     const result = await api(`/indicators/${_currentProfile.name}/paste-import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sections }),
     });
     closePasteImportModal();
