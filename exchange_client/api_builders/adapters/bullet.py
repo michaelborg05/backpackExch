@@ -489,17 +489,17 @@ class BulletAdapter(ExchangeAdapter):
             self.logger.error(f"[Bullet] get_user_trades({symbol}) failed: {e}")
             return []
 
-    def get_latest_close_price(self, symbol: str, opened_at=None) -> Optional[float]:
+    def get_latest_close_price(self, symbol: str, opened_at=None, is_long: bool = True) -> Optional[float]:
         """Return the fill price of the most recent closing trade for symbol.
 
-        Looks through userTrades for the most recent ASK (sell/close) fill placed
-        after `opened_at` (a datetime or epoch-ms int). Returns None if not found.
+        For LONG positions the close side is ASK/SELL; for SHORT positions it is BID/BUY.
+        `opened_at` is a datetime or epoch-ms int used to skip entry fills.
+        Returns None if no matching fill is found.
         """
         trades = self.get_user_trades(symbol, limit=20)
         if not trades:
             return None
 
-        import time as _time
         opened_ms = None
         if opened_at is not None:
             if hasattr(opened_at, "timestamp"):
@@ -507,10 +507,13 @@ class BulletAdapter(ExchangeAdapter):
             else:
                 opened_ms = int(opened_at)
 
+        # LONG closes with a sell (ask); SHORT closes with a buy (bid).
+        close_sides = ("ask", "sell") if is_long else ("bid", "buy")
+
         # Bullet trade fields: side "Ask"/"Bid", price, qty/quantity, time/timestamp
         for trade in trades:
             side = str(trade.get("side", "")).lower()
-            if side not in ("ask", "sell"):
+            if side not in close_sides:
                 continue
             trade_time = trade.get("time") or trade.get("timestamp") or trade.get("tradeTime") or 0
             if opened_ms and int(trade_time) < opened_ms:
