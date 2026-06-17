@@ -615,7 +615,8 @@ class MonitoringService:
                     # Prefer actual fill price from userTrades
                     if hasattr(adapter, "get_latest_close_price"):
                         opened_at = getattr(position, "opened_at", None) or getattr(position, "created_at", None)
-                        actual_price = adapter.get_latest_close_price(exchange_symbol, opened_at=opened_at)
+                        is_long = (position.direction or "LONG") != "SHORT"
+                        actual_price = adapter.get_latest_close_price(exchange_symbol, opened_at=opened_at, is_long=is_long)
                         if actual_price:
                             exit_price = actual_price
                             price_source = "exchange fill"
@@ -645,6 +646,7 @@ class MonitoringService:
                             profit = (entry_price - exit_price) * quantity
                             profit_pct = ((entry_price - exit_price) / entry_price) * 100
                         position.profit = profit
+                        position.exit_price = exit_price
                         db.flush()
                         self.logger.info(
                             f"Recorded P&L for externally-closed position {position.id} "
