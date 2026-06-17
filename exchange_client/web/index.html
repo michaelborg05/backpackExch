@@ -2776,6 +2776,7 @@ const IND_SCHEMAS = {
   ema_slope:                   [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01},{k:'max_slope_pct',t:'number',d:null}],
   bollinger_bands:             [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:null},{k:'lookback_candles',t:'number',d:null}],
   adx_regime:                  [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
+  rsi_momentum:                [{k:'min_momentum',t:'number',d:null},{k:'max_momentum',t:'number',d:null},{k:'lookback_candles',t:'number',d:1}],
   rsi_threshold:               [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
   rsi_range:                   [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
   rsi_oversold:                [{k:'max_value',t:'number',d:35},{k:'require_rising',t:'bool',d:true},{k:'min_momentum',t:'number',d:0.5}],

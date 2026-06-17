@@ -1292,6 +1292,30 @@ class ReplayTrendCache:
                             f"over {lookback} candles — need {required_direction})"
                         )
 			
+            elif indicator_type == "rsi_momentum":
+                min_momentum     = params.get("min_momentum", None)
+                max_momentum     = params.get("max_momentum", None)
+                lookback_candles = int(params.get("lookback_candles", 1))
+
+                rsi_mom, rsi_dir = self._get_rsi_momentum(symbol, timeframe, lookback=lookback_candles)
+
+                if rsi_mom is None:
+                    is_bull = False
+                    msg = f"RSI momentum: ✗ (insufficient RSI history)"
+                else:
+                    min_ok = (min_momentum is None) or (rsi_mom >= min_momentum)
+                    max_ok = (max_momentum is None) or (rsi_mom <= max_momentum)
+                    is_bull = min_ok and max_ok
+                    arrow = "↑" if rsi_mom > 0 else ("↓" if rsi_mom < 0 else "→")
+                    bound_str = (
+                        f"{min_momentum:+.1f}.." if min_momentum is not None else ".."
+                    ) + (f"{max_momentum:+.1f}" if max_momentum is not None else "")
+                    msg = (
+                        f"RSI momentum: {'✓' if is_bull else '✗'} "
+                        f"{arrow}{rsi_mom:+.2f} [{rsi_dir}] "
+                        f"(need {bound_str} over {lookback_candles} candle{'s' if lookback_candles != 1 else ''})"
+                    )
+
             else:
                 is_bull = False
                 msg = f"Unknown indicator type: {indicator_type}"

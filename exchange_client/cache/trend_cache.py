@@ -1950,6 +1950,43 @@ class TrendCache:
                             f"over {lookback} candles — need {required_direction})"
                         )
                         
+            elif indicator_type == "rsi_momentum":
+                """
+                Pass when RSI momentum (rate of change) falls within [min_momentum, max_momentum].
+
+                For long entries: set positive bounds (e.g. min=0.5, max=3.0) to require RSI
+                rising but not surging. For short entries: use negative bounds (e.g. min=-3.0,
+                max=-0.5) to require RSI falling at a controlled pace.
+
+                params: {
+                    min_momentum:    0.5,   # signed lower bound on avg RSI change
+                    max_momentum:    3.0,   # signed upper bound on avg RSI change
+                    lookback_candles: 1     # candles to average over (1 = previous candle only)
+                }
+                """
+                min_momentum     = params.get("min_momentum", None)
+                max_momentum     = params.get("max_momentum", None)
+                lookback_candles = int(params.get("lookback_candles", 1))
+
+                rsi_momentum, rsi_direction = self._get_rsi_momentum(symbol, timeframe, lookback=lookback_candles)
+
+                if rsi_momentum is None:
+                    is_bullish = False
+                    msg = f"RSI momentum: ✗ (insufficient RSI history)"
+                else:
+                    min_ok = (min_momentum is None) or (rsi_momentum >= min_momentum)
+                    max_ok = (max_momentum is None) or (rsi_momentum <= max_momentum)
+                    is_bullish = min_ok and max_ok
+                    arrow = "↑" if rsi_momentum > 0 else ("↓" if rsi_momentum < 0 else "→")
+                    bound_str = (
+                        f"{min_momentum:+.1f}.." if min_momentum is not None else ".."
+                    ) + (f"{max_momentum:+.1f}" if max_momentum is not None else "")
+                    msg = (
+                        f"RSI momentum: {'✓' if is_bullish else '✗'} "
+                        f"{arrow}{rsi_momentum:+.2f} [{rsi_direction}] "
+                        f"(need {bound_str} over {lookback_candles} candle{'s' if lookback_candles != 1 else ''})"
+                    )
+
             results.append((is_bullish, msg))
             indicator_groups_list.append(indicator_group)
             # Only ungrouped hard stops trigger an immediate fail here;
