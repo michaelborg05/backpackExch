@@ -1113,6 +1113,8 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert, background_tasks: B
 def sync_trend_updates(trends):
     from db.utils import get_db_session
     from db.crud_monitored_symbols import get_enabled_symbols_set
+    from db.models import WebhookPriceTick
+    from datetime import datetime, timezone
     try:
         with get_db_session() as db:
             allowed = get_enabled_symbols_set(db)
@@ -1121,11 +1123,22 @@ def sync_trend_updates(trends):
         allowed = None
 
     trend_cache = get_trend_cache()
+    now = datetime.now(timezone.utc)
+    ticks = []
     for trend_data in trends:
         if allowed is not None and trend_data.symbol not in allowed:
             apiserver_logger.debug(f"Ignoring trend data for unmonitored symbol: {trend_data.symbol}")
             continue
         trend_cache.update(trend_data)
+        ticks.append(WebhookPriceTick(symbol=trend_data.symbol, timestamp=now, price=trend_data.price))
+
+    if ticks:
+        try:
+            with get_db_session() as db:
+                db.add_all(ticks)
+                db.commit()
+        except Exception as e:
+            apiserver_logger.warning(f"Failed to persist webhook price ticks: {e}")
 
 @app.get("/trend/{symbol}/{timeframe}")
 async def get_trend_status(symbol: str, timeframe: str):

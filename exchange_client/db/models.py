@@ -828,5 +828,13 @@ class ExchangeAccount(Base):
     wallet_address = Column(String, nullable=True)          # Encrypted (Bullet: wallet address - Use main wallet for read operations)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
     profiles = relationship("TradingProfileDB", back_populates="account")
+
+
+class WebhookPriceTick(Base):
+    __tablename__ = "webhook_price_ticks"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    price = Column(Numeric, nullable=False)
