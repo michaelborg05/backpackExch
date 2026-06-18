@@ -14,7 +14,7 @@ parser.add_argument("--days",    type=int, default= 10,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short"],
+parser.add_argument("--set",     default="mr", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
@@ -105,6 +105,7 @@ with get_db_session() as db:
                 verbose=args.verbose,
                 show_trades=args.trades,
                 export_csv=csv_path,
+                price_source="ticks"
             )
 
             for r in symbol_results:

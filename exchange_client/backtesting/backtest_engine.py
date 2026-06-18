@@ -44,8 +44,9 @@ from __future__ import annotations
 import copy
 import itertools
 import time
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
@@ -2027,6 +2028,7 @@ class BacktestEngine:
         start: datetime,
         end: datetime,
         price_mode: str = "auto",
+        price_source: str = "candle",  # "candle" | "ticks"
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
@@ -2043,6 +2045,20 @@ class BacktestEngine:
                 price_mode = "low"
             else:
                 price_mode = "close"
+
+        # Minutes per entry candle — used to compute candle time windows for ticks
+        entry_tf_minutes = int(self.profile.entry_timeframe)
+
+        # Pre-load price ticks if requested
+        tick_times: List[float] = []    # epoch seconds, sorted
+        tick_prices: List[float] = []
+        if price_source == "ticks":
+            tick_times, tick_prices, ticks_available = self._load_price_ticks(symbol, start, end)
+            if not ticks_available:
+                print(f"[Backtest] No price ticks for {symbol} {start.date()}→{end.date()} — falling back to candle prices")
+                price_source = "candle"
+            else:
+                print(f"[Backtest] Loaded {len(tick_times):,} price ticks for {symbol} ({price_source} mode)")
 
         result = BacktestResult(
             profile_name=self.profile.name,
@@ -2111,7 +2127,17 @@ class BacktestEngine:
 
             # ---- Manage open position ----
             if open_pos is not None:
-                exit_result = self._check_exit(open_pos, row)
+                if price_source == "ticks":
+                    candle_start_ts = row_time.timestamp()
+                    candle_end_ts   = candle_start_ts + entry_tf_minutes * 60
+                    candle_ticks    = self._get_candle_ticks(tick_times, tick_prices, candle_start_ts, candle_end_ts)
+                    if candle_ticks:
+                        exit_result = self._check_exit_from_prices(open_pos, candle_ticks)
+                    else:
+                        exit_result = self._check_exit(open_pos, row)  # fallback: no ticks for this candle
+                else:
+                    exit_result = self._check_exit(open_pos, row)
+
                 if exit_result:
                     if is_short:
                         pnl = (open_pos["entry_price"] - exit_result["price"]) / open_pos["entry_price"] * 100
@@ -2124,8 +2150,9 @@ class BacktestEngine:
                     open_pos["trade"].won         = pnl > 0
                     open_pos = None
                 else:
-                    # Update trailing stop water mark
-                    if self.profile.use_trailing_stop:
+                    # Candle mode: update trailing stop water mark from candle high/low.
+                    # Tick mode: water mark is updated inside _check_exit_from_prices above.
+                    if price_source == "candle" and self.profile.use_trailing_stop:
                         arm_pct = float(self.profile.arm_trailing_stop_pct) / 100
                         if is_short:
                             if float(row.low) < open_pos["lowest_price"]:
@@ -2219,7 +2246,7 @@ class BacktestEngine:
             # Always use close for the trend timeframe: when the 15m signal fires,
             # the HTF context is the last *completed* 60m candle, not its intra-candle wick.
             if self.profile.use_trend_filter:
-                trend_ok, _ = cache.is_bullish(
+                trend_ok, trend_reason = cache.is_bullish(
                     symbol,
                     self.profile.trend_timeframe,
                     indicators_config=self.profile.trend_indicators,
@@ -2229,7 +2256,7 @@ class BacktestEngine:
                 )
                 if not trend_ok:
                     if self.verbose:
-                        print(f"{self._tag}[{row_time}] Trend filter failed")
+                        print(f"{self._tag}[{row_time}] Trend filter failed: {trend_reason}")
                     continue
 
             # Run entry filter (execution TF)
@@ -2289,12 +2316,22 @@ class BacktestEngine:
 
             # SIGNAL — open position
             result.signals_fired += 1
-            # Always enter at candle close regardless of price_mode.
-            # price_mode controls WHEN the signal condition is checked (e.g. candle low
-            # for MR to catch mid-candle wicks), but entry itself happens after the candle
-            # closes. This is slightly pessimistic vs reality (you'd have entered earlier
-            # at a better price) but avoids the hindsight bias of entering at the exact low.
-            entry_price = float(row.close)
+
+            # Determine entry price and (for tick mode) which ticks remain after entry.
+            if price_source == "ticks":
+                candle_start_ts  = row_time.timestamp()
+                candle_end_ts    = candle_start_ts + entry_tf_minutes * 60
+                entry_candle_ticks = self._get_candle_ticks(tick_times, tick_prices, candle_start_ts, candle_end_ts)
+                entry_price, entry_tick_idx = self._find_entry_tick(
+                    entry_candle_ticks, float(row.close), price_mode
+                )
+            else:
+                # Candle mode: always enter at candle close.
+                # price_mode controls WHEN the signal condition is checked (e.g. candle low
+                # for MR), but entry itself is at the candle close.
+                entry_price        = float(row.close)
+                entry_candle_ticks = []
+                entry_tick_idx     = -1
 
             _bb_pct_b = None
             if cached_trend and cached_trend.bb is not None:
@@ -2345,8 +2382,7 @@ class BacktestEngine:
                 "entry_time":      row_time,
                 "is_short":        is_short,
             }
-            
-            from datetime import timedelta
+
             cooldown_until = row_time + timedelta(seconds=cooldown_sec)
 
             if self.verbose:
@@ -2355,12 +2391,38 @@ class BacktestEngine:
                     f"TP={tp_price:.4f} SL={sl_price:.4f} conf={confidence_pct:.1f}%"
                 )
 
+            # Tick mode: immediately check remaining ticks in the entry candle for exit.
+            # This handles the realistic case where TP/SL is hit within the same candle
+            # that the signal fired — particularly common for MR entries on volatile candles.
+            if price_source == "ticks" and entry_tick_idx >= 0 and entry_candle_ticks:
+                remaining = entry_candle_ticks[entry_tick_idx + 1:]
+                if remaining:
+                    same_candle_exit = self._check_exit_from_prices(open_pos, remaining)
+                    if same_candle_exit:
+                        sx_price = same_candle_exit["price"]
+                        if is_short:
+                            pnl = (entry_price - sx_price) / entry_price * 100
+                        else:
+                            pnl = (sx_price - entry_price) / entry_price * 100
+                        trade.exit_price  = sx_price
+                        trade.exit_time   = row_time  # same candle; exact minute unknown
+                        trade.exit_reason = same_candle_exit["reason"]
+                        trade.pnl_pct     = pnl
+                        trade.won         = pnl > 0
+                        open_pos = None
+                        if self.verbose:
+                            print(f"{self._tag}[{row_time}] SAME-CANDLE EXIT {same_candle_exit['reason']} @ {sx_price:.4f} pnl={pnl:+.2f}%")
+
         # Force-close any lingering open position at end of window
         if open_pos is not None:
-            last_row = entry_tf_rows[-1] if entry_tf_rows else all_rows[-1]
-            last_price = float(last_row.close)
-            last_time  = last_row.timestamp.replace(tzinfo=timezone.utc) \
-                         if last_row.timestamp.tzinfo is None else last_row.timestamp
+            if price_source == "ticks" and tick_prices:
+                last_price = tick_prices[-1]
+                last_time  = end
+            else:
+                last_row   = entry_tf_rows[-1] if entry_tf_rows else all_rows[-1]
+                last_price = float(last_row.close)
+                last_time  = last_row.timestamp.replace(tzinfo=timezone.utc) \
+                             if last_row.timestamp.tzinfo is None else last_row.timestamp
             if is_short:
                 pnl = (open_pos["entry_price"] - last_price) / open_pos["entry_price"] * 100
             else:
@@ -2417,6 +2479,134 @@ class BacktestEngine:
             age_hours = (row_time - pos["entry_time"]).total_seconds() / 3600
             if age_hours >= max_hours:
                 return {"price": float(row.close), "reason": "max_age", "candle_price": close}
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Tick-based helpers
+    # ------------------------------------------------------------------
+
+    def _load_price_ticks(
+        self, symbol: str, start: datetime, end: datetime
+    ) -> Tuple[List[float], List[float], bool]:
+        """
+        Load webhook_price_ticks for symbol in [start, end], sorted by timestamp.
+        Returns (tick_times_epoch, tick_prices, available).
+        """
+        from db.models import WebhookPriceTick
+        rows = (
+            self.db.query(WebhookPriceTick.timestamp, WebhookPriceTick.price)
+            .filter(
+                WebhookPriceTick.symbol    == symbol,
+                WebhookPriceTick.timestamp >= start,
+                WebhookPriceTick.timestamp <= end,
+            )
+            .order_by(WebhookPriceTick.timestamp)
+            .all()
+        )
+        if not rows:
+            return [], [], False
+        tick_times, tick_prices = [], []
+        for r in rows:
+            ts = r.timestamp
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            tick_times.append(ts.timestamp())
+            tick_prices.append(float(r.price))
+        return tick_times, tick_prices, True
+
+    @staticmethod
+    def _get_candle_ticks(
+        tick_times: List[float], tick_prices: List[float],
+        start_ts: float, end_ts: float,
+    ) -> List[float]:
+        """Return tick prices that fall within [start_ts, end_ts) (epoch seconds)."""
+        lo = bisect_left(tick_times, start_ts)
+        hi = bisect_left(tick_times, end_ts)   # exclusive upper bound
+        return tick_prices[lo:hi]
+
+    @staticmethod
+    def _find_entry_tick(
+        candle_ticks: List[float], close_price: float, price_mode: str
+    ) -> Tuple[float, int]:
+        """
+        Choose which tick within the candle represents the realistic entry.
+
+        MR / price_mode="low":
+          Signals fire on the way DOWN when price first crosses the trigger level.
+          We model this as the first tick that's at or below the candle close —
+          i.e. the moment during the candle where price reached the level that
+          the close price settled at, before any subsequent bounce.
+          This places entry earlier and higher than the candle close, matching
+          how live MR trades fill.
+
+        Trend / price_mode="close":
+          Enter at the last tick of the candle (candle close equivalent).
+
+        Returns (entry_price, index_into_candle_ticks).
+        index=-1 means no ticks available (caller should fall back to row.close).
+        """
+        if not candle_ticks:
+            return close_price, -1
+
+        if price_mode == "low":
+            # First tick that's at or below the candle close = "on the way down"
+            for i, price in enumerate(candle_ticks):
+                if price <= close_price:
+                    return price, i
+            # All ticks stayed above close (unusual — price never dipped to close level)
+            # Fall back to last tick
+            return candle_ticks[-1], len(candle_ticks) - 1
+
+        # Trend / default: last tick ≈ candle close
+        return candle_ticks[-1], len(candle_ticks) - 1
+
+    def _check_exit_from_prices(
+        self, pos: dict, prices: List[float]
+    ) -> Optional[dict]:
+        """
+        Iterate tick prices in chronological order.
+        Updates trailing stop water mark as a side effect (mutates pos).
+        Returns {"price": float, "reason": str} on first trigger, else None.
+        """
+        is_short  = pos.get("is_short", False)
+        use_ts    = self.profile.use_trailing_stop
+        arm_pct   = float(self.profile.arm_trailing_stop_pct) / 100
+        trail_pct = float(self.profile.trailing_stop_pct) / 100
+
+        for price in prices:
+            # --- update water mark ---
+            if use_ts:
+                if is_short:
+                    if price < pos["lowest_price"]:
+                        pos["lowest_price"] = price
+                        if not pos["trailing_armed"] and price <= pos["entry_price"] * (1 - arm_pct):
+                            pos["trailing_armed"] = True
+                else:
+                    if price > pos["highest_price"]:
+                        pos["highest_price"] = price
+                        if not pos["trailing_armed"] and price >= pos["entry_price"] * (1 + arm_pct):
+                            pos["trailing_armed"] = True
+
+            # --- check exits ---
+            if is_short:
+                if price >= pos["sl_price"]:
+                    return {"price": pos["sl_price"], "reason": "stop_loss"}
+                if price <= pos["tp_price"]:
+                    return {"price": pos["tp_price"], "reason": "take_profit"}
+                if use_ts and pos["trailing_armed"]:
+                    trail_sl = pos["lowest_price"] * (1 + trail_pct)
+                    if price >= trail_sl:
+                        return {"price": trail_sl, "reason": "trailing_stop"}
+            else:
+                if price <= pos["sl_price"]:
+                    return {"price": pos["sl_price"], "reason": "stop_loss"}
+                if price >= pos["tp_price"]:
+                    return {"price": pos["tp_price"], "reason": "take_profit"}
+                if use_ts and pos["trailing_armed"]:
+                    trail_sl = pos["highest_price"] * (1 - trail_pct)
+                    if price <= trail_sl:
+                        return {"price": trail_sl, "reason": "trailing_stop"}
 
         return None
 

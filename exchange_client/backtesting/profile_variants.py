@@ -50,6 +50,7 @@ def run_all_variants(
     verbose: bool = False,
     show_trades: bool = False,
     export_csv: str = None,
+    price_source: str = "candle"
 ) -> list:
     """
     Run all variants and return sorted results.
@@ -71,7 +72,7 @@ def run_all_variants(
     for name, config in variant_set.items():
         profile = BacktestProfile.from_dict(name, config)
         engine  = BacktestEngine(db_session, profile, verbose=verbose)
-        result  = engine.run(symbol=symbol, start=start, end=end)
+        result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source)
         results.append(result)
 
     results.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)
