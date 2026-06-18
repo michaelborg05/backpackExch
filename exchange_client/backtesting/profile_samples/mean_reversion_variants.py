@@ -290,4 +290,124 @@ MEAN_REV_VARIANTS = {
         "min_entry_indicators_required": 4,
         "min_volume_ratio": 1.1,
     },
+
+    # =========================================================================
+    # OPTIMIZER-DISCOVERED VARIANTS  (60-day window, 4-iteration search)
+    # =========================================================================
+
+    # ── opt_v1: HTF rsi_oversold turning — ultra-selective, high conviction ──
+    # Novel finding: putting rsi_oversold(require_rising=True) on the 60m trend
+    # filter catches the EXACT turn from oversold, not just the oversold zone.
+    # Very selective (~1-2 trades/month/symbol) but excellent quality when it fires.
+    # Backtest (60d, 6 symbols): 7 trades, WR=71%, PF=2.41x, avg_pnl=+0.28%
+    # Best exit found: TP=1.5%, SL=0.8%, no trailing (avg_pnl +0.53%)
+    "mr_opt_v1_rsioversold_turn": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct":       1.5,
+        "stop_loss_pct":         0.8,
+        "trailing_stop_pct":     0.0,
+        "arm_trailing_stop_pct": 0.0,
+        "use_trailing_stop":     False,
+        "use_trend_filter":      True,
+        "trend_timeframe":       "60",
+        "trend_indicators": [
+            # Price 1.5–3.5% below EMA50 (displacement confirmed)
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.5, "max_gap_pct": -3.5}},
+            # 60m RSI was below 38 AND is now rising (catches the exact turn, not just the bottom)
+            {"type": "rsi_oversold", "params": {"max_value": 38, "require_rising": True, "min_momentum": 0.3}},
+        ],
+        "min_indicators_required": 2,
+        "entry_indicators": [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 8, "oversold_threshold": 30, "current_min": 30,
+                "min_jump": 3.0, "require_sustained": False, "sustained_rise_mode": "net",
+                "hard_stop": True,
+            }},
+            {"type": "price_below_vwap",  "params": {"min_gap_pct": -0.5, "max_gap_pct": -10.0}},
+            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.3}},
+            {"type": "rsi_overbought",    "params": {"min_value": 40}},
+            {"type": "volume_spike",      "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_volume_ratio": 1.0,
+    },
+
+    # ── opt_v2: dual RSI confirmation — best balance of volume and quality ────
+    # Entry requires BOTH rsi_oversold(turning up) AND rsi_reversal_momentum.
+    # Two independent RSI reversal signals must agree = much higher conviction.
+    # Simpler trend filter than v3 (just displacement + RSI ceiling) but stronger entry.
+    # Backtest (60d, 6 symbols): 38 trades, WR=55%, PF=1.85x, avg_pnl=+0.22%
+    "mr_opt_v2_dual_rsi_confirm": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct":       1.5,
+        "stop_loss_pct":         0.8,
+        "trailing_stop_pct":     0.0,
+        "arm_trailing_stop_pct": 0.0,
+        "use_trailing_stop":     False,
+        "use_trend_filter":      True,
+        "trend_timeframe":       "60",
+        "trend_indicators": [
+            # Shallower displacement window vs v3: catches more setup conditions
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.0, "max_gap_pct": -2.5}},
+            # Simple RSI ceiling: blocks entries if 60m RSI >= 42 (not yet recovering)
+            {"type": "rsi_overbought", "params": {"min_value": 42, "hard_stop": True}},
+        ],
+        "min_indicators_required": 2,
+        "entry_indicators": [
+            # Gate 1: 15m RSI currently below 38 AND turning up (direct oversold confirmation)
+            {"type": "rsi_oversold", "params": {
+                "max_value": 38, "require_rising": True, "min_momentum": 0.5,
+            }},
+            # Gate 2: RSI bounced from deep oversold (complementary — oversold_threshold=25 is looser)
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 10, "oversold_threshold": 25, "current_min": 32,
+                "min_jump": 3.0, "require_sustained": False, "hard_stop": True,
+            }},
+            {"type": "bollinger_bands",  "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.35}},
+            # Hard ceiling: don't enter if 15m RSI already above 45 (bounce already happened)
+            {"type": "rsi_overbought",   "params": {"min_value": 45, "hard_stop": True}},
+            {"type": "price_below_vwap", "params": {"min_gap_pct": -0.3, "max_gap_pct": -10.0}},
+        ],
+        "min_entry_indicators_required": 3,
+        "min_volume_ratio": 1.0,
+    },
+
+    # ── opt_v3: HTF BB lower band + engulfing candle — highest win rate ───────
+    # Novel trend filter: requires price near/below lower BB on 60m (pct_b -0.1 to 0.2)
+    # in addition to EMA50 displacement. Double-filters for genuine oversold on HTF.
+    # Entry uses engulfing candle as reversal signal instead of pure RSI momentum.
+    # Backtest (60d, 6 symbols): 35 trades, WR=66%, PF=1.42x, avg_pnl=+0.09%
+    "mr_opt_v3_bb_engulf": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct":       0.8,
+        "stop_loss_pct":         0.6,
+        "trailing_stop_pct":     0.3,
+        "arm_trailing_stop_pct": 0.4,
+        "use_trailing_stop":     True,
+        "use_trend_filter":      True,
+        "trend_timeframe":       "60",
+        "trend_indicators": [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.5, "max_gap_pct": -3.0}},
+            # 60m price in the lower BB zone (pct_b -0.1 to 0.2): confirms HTF genuinely oversold
+            {"type": "bollinger_bands", "params": {
+                "band": "lower", "mode": "pct_b", "min_pct_b": -0.1, "max_pct_b": 0.2,
+            }},
+            {"type": "rsi_overbought", "params": {"min_value": 38, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+        "entry_indicators": [
+            # Engulfing candle: previous candle was bearish, current bullish engulfs it
+            {"type": "reversal_candle",       "params": {"pattern": "engulfing"}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 8, "oversold_threshold": 30, "current_min": 28,
+                "min_jump": 2.5, "hard_stop": True,
+            }},
+            {"type": "bollinger_bands",  "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.35}},
+            {"type": "rsi_overbought",   "params": {"min_value": 40, "hard_stop": True}},
+            {"type": "price_below_vwap", "params": {"min_gap_pct": -0.5, "max_gap_pct": -10.0}},
+            {"type": "volume_spike",     "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_volume_ratio": 1.0,
+    },
 }

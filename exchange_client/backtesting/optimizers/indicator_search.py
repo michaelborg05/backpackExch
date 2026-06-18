@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtesting.backtest_engine import BacktestEngine, BacktestProfile, BacktestResult
@@ -37,8 +37,8 @@ from db.utils import get_db_session
 # Config
 # ---------------------------------------------------------------------------
 
-STATE_FILE   = str(PROJECT_ROOT / "backtesting" / "optimizer_state.json")
-RESULTS_FILE = str(PROJECT_ROOT / "backtesting" / "optimizer_results.json")
+STATE_FILE   = str(Path(__file__).resolve().parent / "optimizer_state.json")
+RESULTS_FILE = str(Path(__file__).resolve().parent / "optimizer_results.json")
 SYMBOLS      = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "HYPE_USDC", "BNB_USDC", "XRP_USDC"]
 SCAN_DAYS    = 60
 MIN_TRADES   = 6   # minimum total trades across all symbols to qualify

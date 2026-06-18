@@ -1614,6 +1614,13 @@ class BacktestProfile:
         "trend_indicator_groups":     None,
         "entry_indicator_groups":     None,
         "trading_hours":              None,
+        # Trend invalidation exit controls (mirrors production position_manager logic)
+        "use_trend_invalidation_exit":        True,
+        "trend_invalidation_indicators":      "trend",   # "trend" | "entry" | "exit"
+        "min_position_age_for_trend_check":   0,         # minutes; 0 = check immediately
+        "exit_indicators":                    None,
+        "min_exit_indicators_required":       1,
+        "exit_timeframe":                     None,
     }
 
     def __init__(self, name: str, config: dict):
@@ -2018,11 +2025,23 @@ class BacktestEngine:
         symbol: str,
         start: datetime,
         end: datetime,
-        price_mode: str = "both",
+        price_mode: str = "auto",
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
         is_short = "short" in getattr(self.profile, "strategy_type", "")
+
+        # Strategy-aware price mode:
+        #   mean_reversion: signals fire mid-candle when price hits the extreme (low),
+        #                   so evaluate indicators and enter at candle low.
+        #   trend_following / others: signals fire at candle close, so use close.
+        # Callers can override by passing price_mode explicitly.
+        if price_mode == "auto":
+            strategy_type = getattr(self.profile, "strategy_type", "trend_following")
+            if "mean_reversion" in strategy_type:
+                price_mode = "low"
+            else:
+                price_mode = "close"
 
         result = BacktestResult(
             profile_name=self.profile.name,
@@ -2119,6 +2138,53 @@ class BacktestEngine:
                                 if not open_pos["trailing_armed"]:
                                     if open_pos["highest_price"] >= open_pos["entry_price"] * (1 + arm_pct):
                                         open_pos["trailing_armed"] = True
+
+                    # Trend invalidation: exit if the chosen indicator set flips negative
+                    use_ti = getattr(self.profile, "use_trend_invalidation_exit", True)
+                    if use_ti:
+                        min_age_mins = getattr(self.profile, "min_position_age_for_trend_check", 0)
+                        position_age_mins = (row_time - open_pos["entry_time"]).total_seconds() / 60
+                        if position_age_mins >= min_age_mins:
+                            ti_mode = getattr(self.profile, "trend_invalidation_indicators", "trend")
+                            if ti_mode == "exit":
+                                exit_inds = getattr(self.profile, "exit_indicators", None)
+                                ti_inds = exit_inds or getattr(self.profile, "entry_indicators", None)
+                                ti_min  = getattr(self.profile, "min_exit_indicators_required", 1)
+                                ti_tf   = getattr(self.profile, "exit_timeframe", None) or self.profile.entry_timeframe
+                            elif ti_mode == "entry":
+                                ti_inds = getattr(self.profile, "entry_indicators", None)
+                                ti_min  = max(1, self.profile.min_entry_indicators_required - 1)
+                                ti_tf   = self.profile.entry_timeframe
+                            else:  # "trend" (default)
+                                ti_inds = self.profile.trend_indicators
+                                ti_min  = self.profile.min_indicators_required
+                                ti_tf   = self.profile.trend_timeframe
+
+                            if ti_inds:
+                                trend_still_ok, ti_reason = cache.is_bullish(
+                                    symbol,
+                                    ti_tf,
+                                    indicators_config=ti_inds,
+                                    min_indicators_required=ti_min,
+                                    groups_config=getattr(self.profile, "trend_indicator_groups", None),
+                                    price_mode="close",
+                                )
+                                if not trend_still_ok:
+                                    exit_price = float(row.close)
+                                    if is_short:
+                                        pnl = (open_pos["entry_price"] - exit_price) / open_pos["entry_price"] * 100
+                                    else:
+                                        pnl = (exit_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
+                                    open_pos["trade"].exit_price  = exit_price
+                                    open_pos["trade"].exit_time   = row_time
+                                    open_pos["trade"].exit_reason = "trend_invalidation"
+                                    open_pos["trade"].pnl_pct     = pnl
+                                    open_pos["trade"].won         = pnl > 0
+                                    if self.verbose:
+                                        print(f"[{row_time}] TREND_INVALIDATION ({ti_mode}) exit @ {exit_price:.4f} pnl={pnl:+.2f}% — {ti_reason}")
+                                    open_pos = None
+                                    continue
+
                     continue  # still in trade — skip signal logic
 
             # ---- Signal generation ----
@@ -2149,6 +2215,8 @@ class BacktestEngine:
                     continue
 
             # Run trend filter (HTF)
+            # Always use close for the trend timeframe: when the 15m signal fires,
+            # the HTF context is the last *completed* 60m candle, not its intra-candle wick.
             if self.profile.use_trend_filter:
                 trend_ok, _ = cache.is_bullish(
                     symbol,
@@ -2156,7 +2224,7 @@ class BacktestEngine:
                     indicators_config=self.profile.trend_indicators,
                     min_indicators_required=self.profile.min_indicators_required,
                     groups_config=getattr(self.profile, "trend_indicator_groups", None),
-                    price_mode=price_mode,
+                    price_mode="close",
                 )
                 if not trend_ok:
                     if self.verbose:
@@ -2164,6 +2232,8 @@ class BacktestEngine:
                     continue
 
             # Run entry filter (execution TF)
+            # For MR: check conditions against candle low (conditions are met at the wick
+            # when the mid-candle webhook fires). Entry price is still at close — see below.
             if self.profile.use_entry_filter:
                 entry_ok, entry_reason = cache.is_bullish(
                     symbol,
@@ -2218,6 +2288,11 @@ class BacktestEngine:
 
             # SIGNAL — open position
             result.signals_fired += 1
+            # Always enter at candle close regardless of price_mode.
+            # price_mode controls WHEN the signal condition is checked (e.g. candle low
+            # for MR to catch mid-candle wicks), but entry itself happens after the candle
+            # closes. This is slightly pessimistic vs reality (you'd have entered earlier
+            # at a better price) but avoids the hindsight bias of entering at the exact low.
             entry_price = float(row.close)
 
             _bb_pct_b = None

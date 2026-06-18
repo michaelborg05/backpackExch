@@ -5,27 +5,46 @@ _SWING_BASE = {
     "trend_timeframe": "240",
     "take_profit_pct": 3,
     "stop_loss_pct": 2,
-    "trailing_stop_pct": 1.2,
-    "arm_trailing_stop_pct": 1.2,
+    "trailing_stop_pct": 1,
+    "arm_trailing_stop_pct": 1.0,
     "use_trailing_stop": True,
-    "signal_cooldown_minutes": 120,
+    "signal_cooldown_minutes": 241,
     "min_signal_confidence": 74.0,
     "min_volume_ratio": 1.3,
     "use_trend_filter": True,
     "use_entry_filter": True,
     "max_position_hours": 72,
     "use_market_regime_filter": False,
-    "trading_hours": [
-        {"day_of_week": 0, "start_time": "05:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 0, "start_time": "15:00", "end_time": "21:00", "enabled": True},
-        {"day_of_week": 1, "start_time": "02:00", "end_time": "23:00", "enabled": True},
-        {"day_of_week": 2, "start_time": "01:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 2, "start_time": "14:00", "end_time": "23:00", "enabled": True},
-        {"day_of_week": 3, "start_time": "03:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 3, "start_time": "14:00", "end_time": "21:00", "enabled": True},
-        {"day_of_week": 4, "start_time": "03:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 4, "start_time": "14:00", "end_time": "21:00", "enabled": True},
+    # Trend invalidation exit — mirrors production position_manager behaviour.
+    # mode "trend": re-check 4hr trend indicators (catches big structural reversals).
+    # mode "entry": re-check 1hr entry conditions (faster but noisier).
+    # mode "exit":  use dedicated exit_indicators (most targeted).
+    "use_trend_invalidation_exit":      True,
+    "trend_invalidation_indicators":    "exit",  # default: 4hr trend indicators
+    "min_position_age_for_trend_check": 61,        # minutes; 0 = check immediately
+    # Exit indicators: "has the trade broken down?" rather than "can I enter?"
+    # These are used when trend_invalidation_indicators="exit".
+    "exit_indicators": [
+        # RSI drops back below 48 → 1hr momentum is gone
+        {"type": "rsi_overbought", "params": {"min_value": 48, "hard_stop": True}},
+        # Price closes below 1hr EMA20 → short-term structure broken
+        {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -100.0, "max_gap_pct": 0.0, "hard_stop": True}},
+        # BB %B drops below 0.35 → price retreating to lower half of bands
+        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.35, "hard_stop": True}},
     ],
+    "min_exit_indicators_required": 2,
+    "exit_timeframe": "60",
+    # "trading_hours": [
+    #     {"day_of_week": 0, "start_time": "05:00", "end_time": "12:00", "enabled": True},
+    #     {"day_of_week": 0, "start_time": "15:00", "end_time": "21:00", "enabled": True},
+    #     {"day_of_week": 1, "start_time": "02:00", "end_time": "23:00", "enabled": True},
+    #     {"day_of_week": 2, "start_time": "01:00", "end_time": "12:00", "enabled": True},
+    #     {"day_of_week": 2, "start_time": "14:00", "end_time": "23:00", "enabled": True},
+    #     {"day_of_week": 3, "start_time": "03:00", "end_time": "12:00", "enabled": True},
+    #     {"day_of_week": 3, "start_time": "14:00", "end_time": "21:00", "enabled": True},
+    #     {"day_of_week": 4, "start_time": "03:00", "end_time": "12:00", "enabled": True},
+    #     {"day_of_week": 4, "start_time": "14:00", "end_time": "21:00", "enabled": True},
+    # ],
     "trend_indicators": [
         {"type": "rsi_reversal_momentum", "params": {
             "lookback_candles":    6,
@@ -222,6 +241,132 @@ SWING_VARIANTS = {
             },
         ],
         "min_entry_indicators_required": 3,
+    },
+
+    # ── Optimizer winner: Score=138, WR=80%, PF=5.90x ─────────────────────────
+    # Core insight vs v19: 4hr trend filter requires RSI *reversal momentum* —
+    # the 4hr RSI must have been recently oversold (below 42) and be recovering.
+    # This prevents entries in mid-range chop or downtrends where EMA cross alone
+    # is a false signal. Also widens TP to 2% (gives the bounce room to develop).
+    "p3_v22_recovery_pullback": {
+        **_SWING_BASE,
+
+        "take_profit_pct":       2.0,
+        "stop_loss_pct":         1.0,
+        "trailing_stop_pct":     0.7,
+        "arm_trailing_stop_pct": 1.0,
+        "use_trailing_stop":     True,
+        "max_position_hours":    36,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 60,
+
+        # ── 4HR TREND FILTER ──────────────────────────────────────────────────
+        # Requires 4hr RSI to have been oversold (≤42) and bouncing.
+        # EMA cross confirms price momentum turned up.
+        # RSI ceiling (63) prevents chasing extended moves.
+        "trend_indicators": [
+            {
+                "type": "rsi_reversal_momentum",
+                "params": {
+                    "lookback_candles":   6,
+                    "oversold_threshold": 42,
+                    "current_min":        38,
+                    "min_jump":           2.0,
+                    "require_sustained":  False,
+                    "hard_stop":          True,
+                }
+            },
+            {
+                "type": "ema_cross",
+                "params": {},
+                "hard_stop": True,
+            },
+            {
+                "type": "rsi_overbought",
+                "params": {"min_value": 63, "hard_stop": True}
+            },
+        ],
+        "min_indicators_required": 3,
+
+        # ── 1HR ENTRY FILTER ──────────────────────────────────────────────────
+        # 1hr RSI in 35-52 (genuine cooling, not just "not overbought").
+        # BB upper pct_b 0.1-0.58 (price in lower half of band = pullback confirmed).
+        # Volume soft gate (1.2x) — confirms some buying interest on dip.
+        "entry_indicators": [
+            {
+                "type": "rsi_range",
+                "params": {"min": 35, "max": 52, "invert": True, "hard_stop": True}
+            },
+            {
+                "type": "bollinger_bands",
+                "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.1, "max_pct_b": 0.58}
+            },
+            {
+                "type": "price_vs_ema",
+                "params": {"ema": 20, "min_gap_pct": -4.0, "max_gap_pct": 2.5}
+            },
+            {
+                "type": "volume_spike",
+                "params": {"min_ratio": 1.2, "max_ratio": 8.0}
+            },
+        ],
+        "min_entry_indicators_required": 2,
+    },
+
+    # ── Optimizer #3 winner (more trades): Score=118, WR=69%, PF=5.53x ────────
+    # Same 4hr RSI recovery trend filter but with a looser 1hr entry (just RSI
+    # ceiling + BB band) — fires more often (13 vs 10 trades) with similar quality.
+    "p3_v23_recovery_loose": {
+        **_SWING_BASE,
+
+        "take_profit_pct":       2.0,
+        "stop_loss_pct":         1.0,
+        "trailing_stop_pct":     0.7,
+        "arm_trailing_stop_pct": 1.0,
+        "use_trailing_stop":     True,
+        "max_position_hours":    36,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 60,
+
+        "trend_indicators": [
+            {
+                "type": "rsi_reversal_momentum",
+                "params": {
+                    "lookback_candles":   6,
+                    "oversold_threshold": 42,
+                    "current_min":        38,
+                    "min_jump":           2.0,
+                    "require_sustained":  False,
+                    "hard_stop":          True,
+                }
+            },
+            {
+                "type": "ema_cross",
+                "params": {},
+                "hard_stop": True,
+            },
+            {
+                "type": "rsi_overbought",
+                "params": {"min_value": 60, "hard_stop": True}
+            },
+        ],
+        "min_indicators_required": 3,
+
+        "entry_indicators": [
+            {
+                "type": "rsi_overbought",
+                "params": {"min_value": 56, "hard_stop": True}
+            },
+            {
+                "type": "bollinger_bands",
+                "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.0, "max_pct_b": 0.7}
+            },
+            {
+                "type": "price_vs_ema",
+                "params": {"ema": 20, "min_gap_pct": -5.0, "max_gap_pct": 3.0}
+            },
+        ],
+        "min_entry_indicators_required": 2,
     },
 
     "p3_v21_tight_pullback-groups2": {
