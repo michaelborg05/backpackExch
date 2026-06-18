@@ -480,8 +480,8 @@ class TrendCache:
         """Check if trend is bullish for a single timeframe. Returns (is_bullish, reason).
 
         price_mode:
-          "tick"  — use live tick price from PriceCache (original behaviour)
-          "close" — use the candle close stored in TrendData (more stable, recommended for trend TF)
+          "tick"  — live price from PriceCache (Backpack exchange API, most current — use for entry TF)
+          "close" — previous completed candle close from prev_candle.prev_close (matches backtest — use for trend TF)
         """
         trend = self.get(symbol, timeframe)
 
@@ -591,14 +591,18 @@ class TrendCache:
         - Both work identically
 
         price_mode:
-          "tick"  — live tick price from PriceCache (original behaviour, used for entry TF)
-          "close" — candle close from TrendData (recommended for trend/HTF checks)
+          "tick"  — live price from PriceCache (Backpack exchange API, most current — use for entry TF)
+          "close" — previous completed candle close via prev_candle.prev_close (matches backtest — use for trend TF)
         """
         results = []
         hard_stop_failures = []
 
         if price_mode == "close":
-            current_price = trend.price
+            # Use previous completed candle close (matches backtest row_to_trend_data).
+            # Falls back to trend.price (live TV webhook price) if prev_candle not populated.
+            prev = getattr(trend, "prev_candle", None)
+            prev_close = getattr(prev, "prev_close", None) if prev else None
+            current_price = float(prev_close) if prev_close is not None else trend.price
         else:
             from cache.price_cache import get_price_cache
             price_cache = get_price_cache()
