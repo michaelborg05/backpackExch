@@ -652,6 +652,7 @@ class SignalGenerator:
             indicators_config=indicators_config,
             min_indicators_required=min_required,
             groups_config=groups_config,
+            price_mode="close",
         )
 
     def _check_entry_filter(self, symbol: str, timeframe: str) -> Tuple[bool, str]:

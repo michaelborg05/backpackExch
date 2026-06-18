@@ -475,8 +475,14 @@ class TrendCache:
         min_indicators_required: int = 2,
         use_hard_stops: bool = True,
         groups_config: dict = None,
+        price_mode: str = "tick",
     ) -> Tuple[bool, str]:
-        """Check if trend is bullish for a single timeframe. Returns (is_bullish, reason)."""
+        """Check if trend is bullish for a single timeframe. Returns (is_bullish, reason).
+
+        price_mode:
+          "tick"  — use live tick price from PriceCache (original behaviour)
+          "close" — use the candle close stored in TrendData (more stable, recommended for trend TF)
+        """
         trend = self.get(symbol, timeframe)
 
         if trend is None:
@@ -492,6 +498,7 @@ class TrendCache:
         return self._validate_timeframe_indicators(
             symbol, timeframe, trend, indicators_config, min_indicators_required, use_hard_stops,
             groups_config=groups_config,
+            price_mode=price_mode,
         )
 
     
@@ -572,6 +579,7 @@ class TrendCache:
         min_indicators_required: int,
         use_hard_stops: bool = True,
         groups_config: dict = None,
+        price_mode: str = "tick",
     ) -> Tuple[bool, str]:
         """
         Validate multiple indicators for a single timeframe.
@@ -581,14 +589,21 @@ class TrendCache:
         - "ema_alignment" (old) → treated as "ema_cross"
         - "ema_cross" (new) → EMA20 > EMA50
         - Both work identically
+
+        price_mode:
+          "tick"  — live tick price from PriceCache (original behaviour, used for entry TF)
+          "close" — candle close from TrendData (recommended for trend/HTF checks)
         """
         results = []
         hard_stop_failures = []
 
-        from cache.price_cache import get_price_cache
-        price_cache = get_price_cache()
-        price = price_cache.get_price(symbol)
-        current_price = float(price) if price is not None else trend.price
+        if price_mode == "close":
+            current_price = trend.price
+        else:
+            from cache.price_cache import get_price_cache
+            price_cache = get_price_cache()
+            price = price_cache.get_price(symbol)
+            current_price = float(price) if price is not None else trend.price
 
         indicator_groups_list = []  # parallel to results: indicator_group per indicator
 
