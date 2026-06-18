@@ -1125,12 +1125,15 @@ def sync_trend_updates(trends):
     trend_cache = get_trend_cache()
     now = datetime.now(timezone.utc)
     ticks = []
+    seen_symbols = set()
     for trend_data in trends:
         if allowed is not None and trend_data.symbol not in allowed:
             apiserver_logger.debug(f"Ignoring trend data for unmonitored symbol: {trend_data.symbol}")
             continue
         trend_cache.update(trend_data)
-        ticks.append(WebhookPriceTick(symbol=trend_data.symbol, timestamp=now, price=trend_data.price))
+        if trend_data.symbol not in seen_symbols:
+            seen_symbols.add(trend_data.symbol)
+            ticks.append(WebhookPriceTick(symbol=trend_data.symbol, timestamp=now, price=trend_data.price))
 
     if ticks:
         try:
