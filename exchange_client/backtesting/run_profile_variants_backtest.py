@@ -10,7 +10,7 @@ from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREN
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 30,
+parser.add_argument("--days",    type=int, default= 10,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
@@ -24,6 +24,8 @@ parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresult
                     help="Export all trades to CSV. Filename is auto-suffixed per set/symbol.")
 parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
+parser.add_argument("--profile", default=None,
+                    help="Run only this variant, e.g. p3_v4_ema50drop")
 args = parser.parse_args()
 
 end   = datetime.now(tz=timezone.utc)
@@ -40,6 +42,19 @@ VARIANT_SETS = {
 
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
+
+# Filter to a single profile variant if requested
+if args.profile:
+    filtered = []
+    for set_name, (variants, syms) in sets_to_run:
+        if args.profile in variants:
+            filtered.append((set_name, ({args.profile: variants[args.profile]}, syms)))
+    if not filtered:
+        all_names = [n for _, (v, _) in sets_to_run for n in v]
+        print(f"ERROR: profile '{args.profile}' not found in set '{args.set}'. Available: {all_names}")
+        sys.exit(1)
+    sets_to_run = filtered
+
 symbols_override = [args.symbol] if args.symbol else None
 
 csv_path = None

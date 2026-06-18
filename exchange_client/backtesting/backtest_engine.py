@@ -1983,6 +1983,7 @@ class BacktestEngine:
         self.db      = db_session
         self.profile = profile
         self.verbose = verbose
+        self._tag    = f"[{profile.name}]"
 
     # ------------------------------------------------------------------
     # Trading hours filter
@@ -2181,7 +2182,7 @@ class BacktestEngine:
                                     open_pos["trade"].pnl_pct     = pnl
                                     open_pos["trade"].won         = pnl > 0
                                     if self.verbose:
-                                        print(f"[{row_time}] TREND_INVALIDATION ({ti_mode}) exit @ {exit_price:.4f} pnl={pnl:+.2f}% — {ti_reason}")
+                                        print(f"{self._tag}[{row_time}] TREND_INVALIDATION ({ti_mode}) exit @ {exit_price:.4f} pnl={pnl:+.2f}% — {ti_reason}")
                                     open_pos = None
                                     continue
 
@@ -2228,7 +2229,7 @@ class BacktestEngine:
                 )
                 if not trend_ok:
                     if self.verbose:
-                        print(f"[{row_time}] Trend filter failed")
+                        print(f"{self._tag}[{row_time}] Trend filter failed")
                     continue
 
             # Run entry filter (execution TF)
@@ -2245,7 +2246,7 @@ class BacktestEngine:
                 )
                 if not entry_ok:
                     if self.verbose:
-                        print(f"[{row_time}] Entry filter failed: {entry_reason}")
+                        print(f"{self._tag}[{row_time}] Entry filter failed: {entry_reason}")
                     continue
             else:
                 entry_reason = "entry filter off"
@@ -2350,7 +2351,7 @@ class BacktestEngine:
 
             if self.verbose:
                 print(
-                    f"[{row_time}] SIGNAL ✅ entry={entry_price:.4f} "
+                    f"{self._tag}[{row_time}] SIGNAL ✅ entry={entry_price:.4f} "
                     f"TP={tp_price:.4f} SL={sl_price:.4f} conf={confidence_pct:.1f}%"
                 )
 

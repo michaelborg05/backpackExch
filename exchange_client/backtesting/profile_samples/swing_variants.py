@@ -26,7 +26,7 @@ _SWING_BASE = {
     # These are used when trend_invalidation_indicators="exit".
     "exit_indicators": [
         # RSI drops back below 48 → 1hr momentum is gone
-        {"type": "rsi_overbought", "params": {"min_value": 48, "hard_stop": True}},
+        {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 45, "use_momentum": False, "hard_stop": True}},
         # Price closes below 1hr EMA20 → short-term structure broken
         {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -100.0, "max_gap_pct": 0.0, "hard_stop": True}},
         # BB %B drops below 0.35 → price retreating to lower half of bands
