@@ -1959,6 +1959,20 @@ class BacktestResult:
         print(f"[CSV] Trade log saved → {filepath}")
 
 
+def _exit_cooldown_mins(
+    reason: str,
+    default_mins: int,
+    tp_mins: int,
+    sl_mins: int,
+) -> int:
+    """Return cooldown duration matching prod ReEntryManager logic."""
+    if reason == "take_profit":
+        return tp_mins
+    if reason == "stop_loss":
+        return sl_mins
+    return default_mins
+
+
 # ===========================================================================
 # BacktestEngine
 # ===========================================================================
@@ -2106,7 +2120,40 @@ class BacktestEngine:
             else None
         )
         open_pos  = None   # currently open simulated position (dict)
-        cooldown_until: Optional[datetime] = None
+        # Two independent cooldown timers (mirrors prod behaviour):
+        #   fire_cooldown_until  — set at entry; prevents re-signalling too soon after a buy
+        #   reentry_cooldown_until — set at close; reason-based post-trade wait (ReEntryManager)
+        # A new signal is blocked if *either* timer is still active.
+        fire_cooldown_until:    Optional[datetime] = None
+        reentry_cooldown_until: Optional[datetime] = None
+
+        fire_cooldown_mins = getattr(self.profile, "signal_cooldown_minutes", 15)
+
+        # Load re-entry cooldown durations from DB settings (mirrors ReEntryManager logic)
+        cooldown_default_mins = 15
+        cooldown_tp_mins      = 35
+        cooldown_sl_mins      = 35
+        try:
+            from db.models import Settings as _Settings
+            rows_settings = (
+                self.db.query(_Settings)
+                .filter(_Settings.profile_name == '0',
+                        _Settings.setting_name.in_([
+                            'cooldown_default_mins',
+                            'cooldown_take_profit_mins',
+                            'cooldown_stop_loss_mins',
+                        ]))
+                .all()
+            )
+            for s in rows_settings:
+                if s.setting_name == 'cooldown_default_mins':
+                    cooldown_default_mins = int(s.value)
+                elif s.setting_name == 'cooldown_take_profit_mins':
+                    cooldown_tp_mins = int(s.value)
+                elif s.setting_name == 'cooldown_stop_loss_mins':
+                    cooldown_sl_mins = int(s.value)
+        except Exception:
+            pass  # fall through to defaults
 
         # We replay ALL rows in timestamp order, feeding each timeframe into cache.
         for idx, row in enumerate(all_rows):
@@ -2148,6 +2195,9 @@ class BacktestEngine:
                     open_pos["trade"].exit_reason = exit_result["reason"]
                     open_pos["trade"].pnl_pct     = pnl
                     open_pos["trade"].won         = pnl > 0
+                    reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
+                        exit_result["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
+                    ))
                     open_pos = None
                 else:
                     # Candle mode: update trailing stop water mark from candle high/low.
@@ -2208,6 +2258,7 @@ class BacktestEngine:
                                     open_pos["trade"].exit_reason = "trend_invalidation"
                                     open_pos["trade"].pnl_pct     = pnl
                                     open_pos["trade"].won         = pnl > 0
+                                    reentry_cooldown_until = row_time + timedelta(minutes=cooldown_default_mins)
                                     if self.verbose:
                                         print(f"{self._tag}[{row_time}] TREND_INVALIDATION ({ti_mode}) exit @ {exit_price:.4f} pnl={pnl:+.2f}% — {ti_reason}")
                                     open_pos = None
@@ -2222,9 +2273,10 @@ class BacktestEngine:
                     print(f"[{row_time}] Outside trading hours — skipping")
                 continue
 
-            # Check cooldown
-            cooldown_sec = getattr(self.profile, "signal_cooldown_minutes", 15) * 60
-            if cooldown_until and row_time < cooldown_until:
+            # Check cooldowns (fire cooldown OR re-entry cooldown blocks the next signal)
+            if fire_cooldown_until and row_time < fire_cooldown_until:
+                continue
+            if reentry_cooldown_until and row_time < reentry_cooldown_until:
                 continue
 
             # Run market regime filter
@@ -2383,7 +2435,8 @@ class BacktestEngine:
                 "is_short":        is_short,
             }
 
-            cooldown_until = row_time + timedelta(seconds=cooldown_sec)
+            # Fire cooldown: block re-signalling the same symbol too soon after a buy
+            fire_cooldown_until = row_time + timedelta(minutes=fire_cooldown_mins)
 
             if self.verbose:
                 print(
@@ -2409,6 +2462,9 @@ class BacktestEngine:
                         trade.exit_reason = same_candle_exit["reason"]
                         trade.pnl_pct     = pnl
                         trade.won         = pnl > 0
+                        reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
+                            same_candle_exit["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
+                        ))
                         open_pos = None
                         if self.verbose:
                             print(f"{self._tag}[{row_time}] SAME-CANDLE EXIT {same_candle_exit['reason']} @ {sx_price:.4f} pnl={pnl:+.2f}%")
