@@ -46,37 +46,26 @@ from db.utils import get_db_session
 STATE_FILE   = str(Path(__file__).resolve().parent / "swing_optimizer_state.json")
 RESULTS_FILE = str(Path(__file__).resolve().parent / "swing_optimizer_results.json")
 SYMBOLS      = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "XRP_USDC", "BNB_USDC"]
-SCAN_DAYS    = 75
+SCAN_DAYS    = 60
 MIN_TRADES   = 8   # swing profiles fire less often — lower bar than MR
 
-# Fixed base settings — 4hr/1hr swing
+# Fixed base settings — 4hr/1hr swing (mirrors production profiles)
 BASE_SETTINGS = {
     "strategy_type":            "trend_following",
     "entry_timeframe":          "60",
     "trend_timeframe":          "240",
-    "take_profit_pct":          1.5,
-    "stop_loss_pct":            1.0,
-    "trailing_stop_pct":        0.7,
-    "arm_trailing_stop_pct":    0.9,
+    "take_profit_pct":          3.0,
+    "stop_loss_pct":            2.0,
+    "trailing_stop_pct":        1.2,
+    "arm_trailing_stop_pct":    1.5,
     "use_trailing_stop":        True,
-    "signal_cooldown_minutes":  60,
+    "signal_cooldown_minutes":  241,
     "min_signal_confidence":    74.0,
     "min_volume_ratio":         1.0,
     "use_trend_filter":         True,
     "use_entry_filter":         True,
-    "max_position_hours":       36,
+    "max_position_hours":       72,
     "use_market_regime_filter": False,
-    "trading_hours": [
-        {"day_of_week": 0, "start_time": "05:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 0, "start_time": "15:00", "end_time": "21:00", "enabled": True},
-        {"day_of_week": 1, "start_time": "02:00", "end_time": "23:00", "enabled": True},
-        {"day_of_week": 2, "start_time": "01:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 2, "start_time": "14:00", "end_time": "23:00", "enabled": True},
-        {"day_of_week": 3, "start_time": "03:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 3, "start_time": "14:00", "end_time": "21:00", "enabled": True},
-        {"day_of_week": 4, "start_time": "03:00", "end_time": "12:00", "enabled": True},
-        {"day_of_week": 4, "start_time": "14:00", "end_time": "21:00", "enabled": True},
-    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -282,6 +271,97 @@ TREND_TEMPLATES = {
             {"type": "adx_regime",   "params": {"min_adx": 20, "max_adx": 32}},
             {"type": "rsi_range",    "params": {"min": 48, "max": 64, "invert": True}},
         ], 3),
+
+    # ── EMA50 drop + RSI recovering (ema50drop profile style) ──────────────
+    # Targets sudden drops where price crashes -3.5% to -10% below EMA50,
+    # with 4hr RSI recovering from an oversold print. Classic snap-back setup.
+    "T_ema50drop_recovery": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -3.5, "max_gap_pct": -10.0}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   6,
+                "oversold_threshold": 35,
+                "current_min":        30,
+                "min_jump":           2.5,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+            {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
+        ], 3),
+
+    # ── EMA50 drop strict: deeper crash, sharper recovery required ──────────
+    "T_ema50drop_strict": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -4.5, "max_gap_pct": -15.0}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   6,
+                "oversold_threshold": 32,
+                "current_min":        27,
+                "min_jump":           3.0,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+            {"type": "rsi_overbought", "params": {"min_value": 58, "hard_stop": True}},
+        ], 3),
+
+    # ── EMA50 drop loose: shallower drop, captures more setups ─────────────
+    "T_ema50drop_loose": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -2.5, "max_gap_pct": -8.0}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   5,
+                "oversold_threshold": 42,
+                "current_min":        33,
+                "min_jump":           2.0,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+        ], 2),
+
+    # ── EMA50 drop + ADX confirmation (low ADX = panic, not trend) ──────────
+    "T_ema50drop_adx": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -3.0, "max_gap_pct": -12.0}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   6,
+                "oversold_threshold": 38,
+                "current_min":        30,
+                "min_jump":           2.5,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+            {"type": "adx_regime", "params": {"min_adx": 0, "max_adx": 28}},
+            {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
+        ], 3),
+
+    # ── Pure oversold recovery (4hr RSI from deep oversold, no EMA condition)
+    "T_deep_oversold_recovery": (
+        [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   6,
+                "oversold_threshold": 32,
+                "current_min":        28,
+                "min_jump":           3.0,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+            {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
+        ], 2),
+
+    # ── Oversold recovery + EMA cross (structural + momentum) ───────────────
+    "T_oversold_cross": (
+        [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   8,
+                "oversold_threshold": 38,
+                "current_min":        32,
+                "min_jump":           2.5,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+            {"type": "ema_cross", "params": {}, "hard_stop": True},
+            {"type": "rsi_overbought", "params": {"min_value": 60, "hard_stop": True}},
+        ], 3),
 }
 
 # ---------------------------------------------------------------------------
@@ -436,6 +516,60 @@ ENTRY_TEMPLATES = {
             {"type": "bollinger_bands","params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.0, "max_pct_b": 0.60}},
             {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -5.0, "max_gap_pct": 2.0}},
         ], 3),
+
+    # ── Recovery confirmed: 1hr RSI already bouncing up significantly ────────
+    # For ema50drop setups: by the time 4hr confirms, 1hr RSI is already rising.
+    # Require RSI to have turned decisively up from a dip (reversal momentum).
+    "E_recovery_rsi_confirmed": (
+        [
+            {"type": "rsi_overbought", "params": {"min_value": 58, "hard_stop": True}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":    5,
+                "oversold_threshold":  45,
+                "current_min":         33,
+                "min_jump":            3.0,
+                "require_sustained":   True,
+                "sustained_rise_mode": "net",
+                "hard_stop":           True,
+            }},
+            {"type": "price_vs_ema", "params": {"ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 2.0}},
+        ], 3),
+
+    # ── Recovery with low ADX gate (fresh trend, not exhausted) ─────────────
+    "E_recovery_adx_low": (
+        [
+            {"type": "rsi_overbought", "params": {"min_value": 55, "hard_stop": True}},
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":   5,
+                "oversold_threshold": 48,
+                "current_min":        30,
+                "min_jump":           2.5,
+                "require_sustained":  False,
+                "hard_stop":          True,
+            }},
+            {"type": "adx_regime", "params": {"min_adx": 0, "max_adx": 30, "hard_stop": True}},
+        ], 3),
+
+    # ── Oversold bounce: mirrors p3_base entry (RSI up + wide EMA gap + BB) ─
+    # Looser than recovery_confirmed — for oversold recovery profile where
+    # 1hr RSI hasn't yet fully recovered but is above 54 and trend is intact.
+    "E_oversold_bounce": (
+        [
+            {"type": "rsi_overbought", "params": {"min_value": 54, "hard_stop": True}},
+            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 5.0}},
+            {"type": "bollinger_bands","params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.88, "hard_stop": True}},
+            {"type": "volume_spike",   "params": {"min_ratio": 0.5, "max_ratio": 8.0}},
+        ], 3),
+
+    # ── Post-crash EMA recovery: price still below EMA20 but RSI turning ────
+    # Catches the entry before price has fully recovered — early positioning.
+    "E_pre_recovery_ema": (
+        [
+            {"type": "rsi_overbought", "params": {"min_value": 52, "hard_stop": True}},
+            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -10.0, "max_gap_pct": 0.5}},
+            {"type": "bollinger_bands","params": {"band": "lower", "mode": "pct_b", "min_pct_b": -0.1, "max_pct_b": 0.65}},
+            {"type": "volume_spike",   "params": {"min_ratio": 0.8, "max_ratio": 8.0}},
+        ], 3),
 }
 
 # ---------------------------------------------------------------------------
@@ -533,6 +667,12 @@ def _mutate_indicator(ind: dict, rng: random.Random) -> dict:
     elif itype == "price_extended_above_ema":
         p["min_gap_pct"] = rng.choice([-1.0, -0.5, 0.0, 0.5])
         p["max_gap_pct"] = rng.choice([3.0, 4.0, 5.0, 6.0])
+
+    elif itype == "price_extended_below_ema":
+        p["min_gap_pct"] = rng.choice([-2.5, -3.0, -3.5, -4.0, -4.5, -5.0])
+        p["max_gap_pct"] = rng.choice([-7.0, -8.0, -10.0, -12.0, -15.0])
+        if p["max_gap_pct"] >= p["min_gap_pct"]:
+            p["max_gap_pct"] = p["min_gap_pct"] - 5.0
 
     elif itype == "volume_spike":
         p["min_ratio"] = rng.choice([0.8, 1.0, 1.2, 1.5])
@@ -750,7 +890,7 @@ def run_variants(db, variants: Dict[str, dict], start: datetime, end: datetime) 
         for sym in SYMBOLS:
             profile = BacktestProfile.from_dict(name, config)
             engine  = BacktestEngine(db, profile)
-            r       = engine.run(symbol=sym, start=start, end=end)
+            r       = engine.run(symbol=sym, start=start, end=end, price_source="ticks")
             sym_results.append(r)
             done += 1
 
@@ -850,7 +990,7 @@ def main():
     parser.add_argument("--top-carry", type=int, default=8)
     parser.add_argument("--days",      type=int, default=SCAN_DAYS)
     parser.add_argument("--rand-n",    type=int, default=80)
-    parser.add_argument("--mode",      default="tight", choices=["tight", "swing"],
+    parser.add_argument("--mode",      default="swing", choices=["tight", "swing"],
                         help="tight=TP1.5/SL1.0, swing=TP3/SL2")
     parser.add_argument("--reset",     action="store_true")
     parser.add_argument("--no-save",   action="store_true")

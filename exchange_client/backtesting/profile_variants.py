@@ -31,7 +31,7 @@ from backtesting.profile_samples.swing_variants import SWING_VARIANTS
 from backtesting.profile_samples.mean_reversion_variants import MEAN_REV_VARIANTS
 from  backtesting.profile_samples.range_variants import RANGE_VARIANTS
 from backtesting.profile_samples.trend_variants import TREND_VARIANTS
-from backtesting.profile_samples.mean_reversion_short_variants import MEAN_REV_SHORT_VARIANTS
+from backtesting.profile_samples.mean_reversion_short_variants import MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS
 from backtesting.profile_samples.trend_short_variants import TREND_SHORT_VARIANTS
 # =============================================================================
 # Convenience: all variants in one dict
