@@ -3352,6 +3352,7 @@ async function executePasteImport() {
       body: JSON.stringify({ sections }),
     });
     closePasteImportModal();
+    _currentProfile = await api('/profiles/' + _currentProfile.name);
     await loadIndicatorsP();
     showToast(result.message || `Imported ${result.created} indicator(s)`);
   } catch (e) {
