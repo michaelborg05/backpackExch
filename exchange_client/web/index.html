@@ -2036,7 +2036,7 @@ function renderSidebar() {
     if (activeOnly && !p.is_active) return false;
     if (q) {
       if (useRegex && regexObj) {
-        if (!regexObj.test(p.display_name) && !regexObj.test(p.name)) return false;
+        if (!regexObj.test(p.display_name)) return false;
       } else if (useRegex) {
         return false; // invalid regex — show nothing
       } else {
