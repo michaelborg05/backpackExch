@@ -9,7 +9,7 @@ _SWING_BASE = {
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 241,
     "min_signal_confidence": 74.0,
-    "min_volume_ratio": 1.3,
+    "min_volume_ratio": 1.0,
     "use_trend_filter": True,
     "use_entry_filter": True,
     "max_position_hours": 72,
@@ -19,7 +19,7 @@ _SWING_BASE = {
     # mode "entry": re-check 1hr entry conditions (faster but noisier).
     # mode "exit":  use dedicated exit_indicators (most targeted).
     "use_trend_invalidation_exit":      True,
-    "trend_invalidation_indicators":    "entry",  # default: 4hr trend indicators
+    "trend_invalidation_indicators":    "exit",  # default: 4hr trend indicators
     "min_position_age_for_trend_check": 241,        # minutes; 0 = check immediately
     # Exit indicators: "has the trade broken down?" rather than "can I enter?"
     # These are used when trend_invalidation_indicators="exit".
@@ -135,6 +135,12 @@ SWING_VARIANTS = {
         "use_trailing_stop": True,
         "min_signal_confidence": 74.0,
         "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        # "trend" mode re-checks 4hr trend indicators (EMA cross + RSI zone) on open positions.
+        # Do NOT use "entry" mode here — 1hr RSI climbing above 50 as the trade wins would
+        # incorrectly trigger an exit since the entry RSI range (28-50) would then "fail".
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
 
         # 4hr: EMA bullish cross (hard) + RSI in bullish zone 52-63 (both ranges hard-stop)
         "trend_indicators": [
@@ -167,6 +173,11 @@ SWING_VARIANTS = {
         "use_trailing_stop": True,
         "min_signal_confidence": 74.0,
         "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        # "trend" mode: same reasoning as p3_v7 — volume_spike in entry indicators won't
+        # persist after entry candle, so "entry" mode would exit the position almost immediately.
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
 
         # 4hr: EMA bullish cross (hard) + ADX trend strength 20-32 (hard) + RSI 48-65
         "trend_indicators": [
