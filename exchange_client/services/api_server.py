@@ -3395,6 +3395,130 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
         return _serialize_cb(cb)
 
 # ---------------------------------------------------------------------------
+# GET /profiles/{profile_name}/export-python
+# ---------------------------------------------------------------------------
+
+@app.get("/profiles/{profile_name}/export-python", dependencies=[Depends(require_read_permission)])
+async def export_profile_python(profile_name: str):
+    """
+    Export a profile as a Python dict string matching the prod_profiles.py format.
+    Returns a plain-text response you can paste directly into prod_profiles.py.
+    """
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours
+    from fastapi.responses import PlainTextResponse
+    import json
+
+    def _py_val(v):
+        if v is True:  return "True"
+        if v is False: return "False"
+        if v is None:  return "None"
+        if isinstance(v, str): return json.dumps(v)
+        return repr(v)
+
+    def _format_params(params: dict) -> str:
+        if not params:
+            return "{}"
+        items = ", ".join(f'"{k}": {_py_val(v)}' for k, v in params.items())
+        return "{" + items + "}"
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        indicators = (
+            db.query(IndicatorDB)
+            .filter(IndicatorDB.profile_id == p.id, IndicatorDB.enabled == True)
+            .order_by(IndicatorDB.category, IndicatorDB.id)
+            .all()
+        )
+        hours = (
+            db.query(ProfileTradingHours)
+            .filter(ProfileTradingHours.profile_id == p.id)
+            .order_by(ProfileTradingHours.day_of_week)
+            .all()
+        )
+
+    def _ind_line(ind) -> str:
+        params = dict(ind.params or {})
+        grp = ind.indicator_group
+        parts = [f'"type": "{ind.indicator_type}"', f'"params": {_format_params(params)}']
+        if grp:
+            parts.append(f'"indicator_group": "{grp}"')
+        return "{" + ", ".join(parts) + "}"
+
+    def _ind_block(cat: str, key: str) -> str:
+        inds = [i for i in indicators if i.category == cat]
+        if not inds:
+            return f'    "{key}": [],'
+        lines = [f'    "{key}": [']
+        for ind in inds:
+            lines.append(f'        {_ind_line(ind)},')
+        lines.append('    ],')
+        return "\n".join(lines)
+
+    hours_lines = []
+    if hours:
+        hours_lines.append('    "trading_hours": [')
+        for h in hours:
+            hours_lines.append(
+                f'        {{"day_of_week": {h.day_of_week}, "start_time": "{h.start_time}", "end_time": "{h.end_time}", "enabled": {_py_val(h.enabled)}}},'
+            )
+        hours_lines.append('    ],')
+    else:
+        hours_lines.append('    "trading_hours": [],')
+
+    def _field(key, val):
+        return f'    "{key}": {_py_val(val)},'
+
+    fields = [
+        f'# Exported from profile: {p.name}',
+        f'_{profile_name.upper()} = {{',
+        _field("display_name", p.display_name or p.name),
+        _field("symbols", ["SOL_USDC", "ETH_USDC", "BTC_USDC"]),
+        _field("strategy_type", p.strategy_type or "trend_following"),
+        _field("entry_timeframe", p.entry_timeframe or "15"),
+        _field("trend_timeframe", p.trend_timeframe or "60"),
+        _field("take_profit_pct", float(p.take_profit_pct) if p.take_profit_pct else 1.0),
+        _field("stop_loss_pct", float(p.stop_loss_pct) if p.stop_loss_pct else 0.7),
+        _field("trailing_stop_pct", float(p.trailing_stop_pct) if p.trailing_stop_pct else 0.5),
+        _field("arm_trailing_stop_pct", float(p.arm_trailing_stop_pct) if p.arm_trailing_stop_pct else 0.5),
+        _field("use_trailing_stop", bool(p.use_trailing_stop)),
+        _field("signal_cooldown_minutes", p.signal_cooldown_minutes or 15),
+        _field("min_signal_confidence", float(p.min_signal_confidence) if p.min_signal_confidence else 70.0),
+        _field("min_volume_ratio", float(p.min_volume_ratio) if p.min_volume_ratio else 1.0),
+        _field("use_trend_filter", bool(p.use_trend_filter)),
+        _field("use_entry_filter", bool(p.use_entry_filter)),
+        _field("max_position_hours", p.max_position_hours or 12),
+        _field("use_market_regime_filter", bool(p.use_market_regime_filter)),
+    ]
+
+    if p.use_trend_invalidation_exit:
+        fields.append(_field("use_trend_invalidation_exit", bool(p.use_trend_invalidation_exit)))
+    if p.trend_invalidation_indicators:
+        fields.append(_field("trend_invalidation_indicators", p.trend_invalidation_indicators))
+    if p.min_position_age_for_trend_check is not None:
+        fields.append(_field("min_position_age_for_trend_check", p.min_position_age_for_trend_check))
+
+    fields.append("\n".join(hours_lines))
+    fields.append(_ind_block("trend", "trend_indicators"))
+    fields.append(_field("min_indicators_required", p.min_indicators_required or 2))
+    fields.append(_ind_block("entry", "entry_indicators"))
+    fields.append(_field("min_entry_indicators_required", p.min_entry_indicators_required or 2))
+
+    exit_inds = [i for i in indicators if i.category == "exit"]
+    if exit_inds:
+        fields.append(_ind_block("exit", "exit_indicators"))
+        fields.append(_field("min_exit_indicators_required", p.min_exit_indicators_required or 2))
+
+    fields.append("}")
+
+    output = "\n".join(fields)
+    return PlainTextResponse(content=output)
+
+
+# ---------------------------------------------------------------------------
 # GET/PUT /profiles/{profile_name}/trading-hours
 # ---------------------------------------------------------------------------
 

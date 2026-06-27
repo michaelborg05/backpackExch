@@ -553,6 +553,7 @@
               <span id="ind-count-p" style="font-size:10px;color:var(--txd)"></span>
               <button class="btn-sm" onclick="openCopyIndicatorsModal()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Copy From</button>
               <button class="btn-sm" onclick="openPasteImportModal()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Paste Import</button>
+              <button class="btn-sm" onclick="openExportProfileModal()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Export Profile</button>
               <button id="adv-mode-btn" class="btn-sm" onclick="toggleAdvancedMode()" style="font-size:10px;padding:4px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--txd)">⚙ Advanced</button>
               <button class="btn-new" onclick="openAddIndicatorP()">+ Add</button>
             </div>
@@ -781,6 +782,29 @@
         <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
           <button onclick="closePasteImportModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Cancel</button>
           <button id="paste-import-confirm" onclick="executePasteImport()" disabled style="padding:6px 14px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600;opacity:.5">Import</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Export Profile Modal ─────────────────────────────────────────── -->
+    <div class="modal-overlay" id="export-profile-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeExportProfileModal()">
+      <div class="modal-box" style="max-width:700px;width:92vw">
+        <div class="modal-header">
+          <span class="modal-title">Export Profile — <span id="export-profile-name">—</span></span>
+          <button class="modal-close" onclick="closeExportProfileModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--txd);margin-bottom:10px;line-height:1.5">
+            Copy the block below and paste it into <code>prod_profiles.py</code> (or any variant file).
+            Edit the <code>"symbols"</code> list as needed before running.
+          </div>
+          <textarea id="export-profile-code" rows="22" readonly spellcheck="false"
+            style="width:100%;box-sizing:border-box;font-family:'Space Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;resize:vertical;outline:none;line-height:1.45"></textarea>
+          <div id="export-profile-status" style="font-size:11px;color:var(--txd);margin-top:6px"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
+          <button onclick="closeExportProfileModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Close</button>
+          <button onclick="copyExportedProfile()" style="padding:6px 16px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600">Copy</button>
         </div>
       </div>
     </div>
@@ -3335,6 +3359,45 @@ async function executePasteImport() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Import';
+  }
+}
+
+// ── Export Profile ────────────────────────────────────────────────────────────
+
+async function openExportProfileModal() {
+  if (!_currentProfile) { showToast('Select a profile first', true); return; }
+  const name = _currentProfile.name;
+  document.getElementById('export-profile-name').textContent = name;
+  document.getElementById('export-profile-code').value = 'Loading…';
+  document.getElementById('export-profile-status').textContent = '';
+  document.getElementById('export-profile-modal').style.display = 'flex';
+  try {
+    const k = akey();
+    const r = await fetch(BASE + `/profiles/${encodeURIComponent(name)}/export-python`, {
+      credentials: 'include',
+      headers: { 'X-API-Key': k || '', 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const code = await r.text();
+    document.getElementById('export-profile-code').value = code;
+  } catch (e) {
+    document.getElementById('export-profile-code').value = '';
+    document.getElementById('export-profile-status').textContent = 'Error: ' + (e.message || 'Failed to export');
+  }
+}
+
+function closeExportProfileModal() {
+  document.getElementById('export-profile-modal').style.display = 'none';
+}
+
+async function copyExportedProfile() {
+  const code = document.getElementById('export-profile-code').value;
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('Copied to clipboard');
+  } catch {
+    document.getElementById('export-profile-status').textContent = 'Select all and copy manually (Ctrl+A, Ctrl+C)';
   }
 }
 
