@@ -7,6 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, run_all_variants
+from backtesting.backtest_engine import CandleEntryCap
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
@@ -14,7 +15,7 @@ parser.add_argument("--days",    type=int, default= 60,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
+parser.add_argument("--set",     default="mr", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
@@ -93,6 +94,16 @@ with get_db_session() as db:
             label   = "TREND FOLLOWING SHORT"
 
 
+        # Build per-variant cluster caps once, shared across all symbol runs for this set.
+        # Each cap accumulates entries across symbols so the limit is enforced globally
+        # within the same candle period (e.g. SOL entering at 04:00 counts against ETH's slot).
+        cluster_caps = {}
+        for name, config in variants.items():
+            max_cluster = config.get("max_cluster_entries")
+            if max_cluster:
+                tf_mins = int(config.get("trend_timeframe", "60"))
+                cluster_caps[name] = CandleEntryCap(max_cluster, tf_mins)
+
         for symbol in symbols:
 
             print(f"\n{'='*60}")
@@ -108,7 +119,8 @@ with get_db_session() as db:
                 verbose=args.verbose,
                 show_trades=args.trades,
                 export_csv=csv_path,
-                price_source="ticks"
+                price_source="ticks",
+                cluster_caps=cluster_caps,
             )
 
             for r in symbol_results:
@@ -117,6 +129,7 @@ with get_db_session() as db:
                 else:
                     all_results_by_variant[r.profile_name].trades.extend(r.trades)
                     all_results_by_variant[r.profile_name].signals_fired += r.signals_fired
+                    all_results_by_variant[r.profile_name].cluster_blocked += r.cluster_blocked
 
     if all_results_by_variant:
         merged = list(all_results_by_variant.values())

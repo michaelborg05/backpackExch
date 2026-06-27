@@ -14,6 +14,7 @@ _MEAN_REV_BASE = {
     "arm_trailing_stop_pct": 0.5,
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 20,
+    "max_cluster_entries": 2,
     "min_signal_confidence": 66.0,
     "min_volume_ratio": 1.2,
     "use_trend_filter": True,
@@ -380,7 +381,7 @@ MEAN_REV_VARIANTS = {
     # Novel trend filter: requires price near/below lower BB on 60m (pct_b -0.1 to 0.2)
     # in addition to EMA50 displacement. Double-filters for genuine oversold on HTF.
     # Entry uses engulfing candle as reversal signal instead of pure RSI momentum.
-    # Backtest (60d, 6 symbols): 35 trades, WR=66%, PF=1.42x, avg_pnl=+0.09%
+    # Backtest (60d, 4 symbols): 35 trades, WR=66%, PF=1.42x, avg_pnl=+0.09%
     "mr_opt_v3_bb_engulf": {
         **_MEAN_REV_BASE,
         "take_profit_pct":       0.8,
@@ -412,6 +413,136 @@ MEAN_REV_VARIANTS = {
             {"type": "volume_spike",     "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
         ],
         "min_entry_indicators_required": 4,
+        "min_volume_ratio": 1.0,
+    },
+
+    # =========================================================================
+    # ITERATION-3 OPTIMIZER RESULTS  (3-iteration search, 60d, 4 symbols)
+    # All three profiles target the same root fix: block knife-catching in
+    # sustained downtrends. The old prod profile (mr_v3_htf_gated) fired when
+    # 60m RSI < 38, but RSI stays below 38 for weeks in strong downtrends.
+    # These profiles add displacement depth or active RSI reversal confirmation
+    # at the trend level so we only enter genuine mean-reversion setups.
+    # =========================================================================
+
+    # ── opt_v4: deep displacement + hard RSI bounce — ALL-TIME BEST ──────────
+    # Trend (60m): price must be 2–5% below EMA50 (deep crash only) AND RSI < 38
+    # (hard gate — blocks knife-catching in gradual declines that stay below 38).
+    # Entry (15m): RSI must have jumped 5+ points from below 28 in 6 candles
+    # (sharp bounce from genuine panic) + VWAP below (hard) + BB lower zone + volume.
+    # Backtest (60d, 4 symbols): 11 trades, WR=73%, PF=2.47x, avg_pnl=+0.28%
+    # The 2% depth floor is the key change vs v3 — kills all "shallow" knife catches.
+    "mr_opt_v4_deep_disp_rsi_bounce": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct":       1.0,
+        "stop_loss_pct":         0.7,
+        "trailing_stop_pct":     0.5,
+        "arm_trailing_stop_pct": 0.5,
+        "use_trailing_stop":     True,
+        "use_trend_filter":      True,
+        "trend_timeframe":       "60",
+        # Optimizer used default mode ("trend") not "entry" — strict entry indicators
+        # (RSI<42 hard, VWAP hard, volume hard) must NOT be used as exit triggers
+        # or they'll cut trades the moment the mean reversion bounce starts.
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+        "trend_indicators": [
+            # Deep crash gate: price must be 2–5% below EMA50 (not just touching)
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -2.0, "max_gap_pct": -5.0}},
+            # Hard RSI cap: blocks entries when 60m RSI >= 38 (gradual downtrend filter)
+            {"type": "rsi_overbought", "params": {"min_value": 38, "hard_stop": True}},
+        ],
+        "min_indicators_required": 2,
+        "entry_indicators": [
+            # Strict bounce: RSI jumped 5+ points from below 28 → confirms panic exhaustion
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 6, "oversold_threshold": 28, "current_min": 32,
+                "min_jump": 5.0, "require_sustained": False, "hard_stop": True,
+            }},
+            # Hard VWAP gate: price must be below VWAP (not just soft signal)
+            {"type": "price_below_vwap",  "params": {"min_gap_pct": -0.5, "max_gap_pct": -10.0, "hard_stop": True}},
+            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.25}},
+            # Hard RSI ceiling: don't enter if 15m RSI already climbed above 42
+            {"type": "rsi_overbought",    "params": {"min_value": 42, "hard_stop": True}},
+            {"type": "volume_spike",      "params": {"min_ratio": 1.2, "max_ratio": 8.0, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_volume_ratio": 1.0,
+    },
+
+    # ── opt_v5: tight SL variant — highest total PnL in 60d window ──────────
+    # Same deep-displacement signal as v4 but SL cut to 0.6% and TSL tightened
+    # to 0.4%. Losers get cut faster, which pushed total PnL to +3.29% over 60d
+    # (highest of any config). Trade-off: tighter SL may stop out more in chop.
+    # Backtest (60d, 4 symbols): 12 trades, WR=67%, PF=2.49x, avg_pnl=+0.27%
+    "mr_opt_v5_deep_disp_tight_sl": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct":       1.0,
+        "stop_loss_pct":         0.6,
+        "trailing_stop_pct":     0.4,
+        "arm_trailing_stop_pct": 0.5,
+        "use_trailing_stop":     True,
+        "use_trend_filter":      True,
+        "trend_timeframe":       "60",
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+        "trend_indicators": [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -2.0, "max_gap_pct": -5.0}},
+            {"type": "rsi_overbought", "params": {"min_value": 38, "hard_stop": True}},
+        ],
+        "min_indicators_required": 2,
+        "entry_indicators": [
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 6, "oversold_threshold": 28, "current_min": 32,
+                "min_jump": 5.0, "require_sustained": False, "hard_stop": True,
+            }},
+            {"type": "price_below_vwap",  "params": {"min_gap_pct": -0.5, "max_gap_pct": -10.0}},
+            {"type": "bollinger_bands",   "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.25}},
+            {"type": "rsi_overbought",    "params": {"min_value": 42, "hard_stop": True}},
+            {"type": "volume_spike",      "params": {"min_ratio": 1.2, "max_ratio": 8.0, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 4,
+        "min_volume_ratio": 1.0,
+    },
+
+    # ── opt_v6: moderate displacement + RSI actively turning — 80% win rate ──
+    # Different trigger family vs v4/v5: shallower displacement (1.5–3.5% below EMA50)
+    # but adds an active RSI momentum requirement at the trend level — 60m RSI must
+    # be below 38 AND actively rising (min_momentum=0.3), catching the exact turn.
+    # Entry uses rsi_range cap (max 45) to avoid entering after the bounce happened.
+    # Quick exit (TP=0.7%, SL=0.5%) preserves the high WR by not holding through noise.
+    # Backtest (60d, 4 symbols): 10 trades, WR=80%, PF=3.79x, avg_pnl=+0.20%
+    "mr_opt_v6_mod_disp_oversold_turn": {
+        **_MEAN_REV_BASE,
+        "take_profit_pct":       0.7,
+        "stop_loss_pct":         0.5,
+        "trailing_stop_pct":     0.3,
+        "arm_trailing_stop_pct": 0.35,
+        "use_trailing_stop":     True,
+        "use_trend_filter":      True,
+        "trend_timeframe":       "60",
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+        "trend_indicators": [
+            # Moderate displacement: 1.5–3.5% below EMA50 (broader than v4, but RSI turn required)
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.5, "max_gap_pct": -3.5}},
+            # Key differentiator: 60m RSI must be oversold AND actively rising (not just below threshold)
+            {"type": "rsi_oversold", "params": {"max_value": 38, "require_rising": True, "min_momentum": 0.3}},
+        ],
+        "min_indicators_required": 2,
+        "entry_indicators": [
+            # Range cap: prevents entry if 15m RSI already above 45 (bounce already priced in)
+            {"type": "rsi_range",            "params": {"min": 20, "max": 45, "invert": True}},
+            # Bounce confirmation: RSI jumped 3+ points from below 30 in 8 candles
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles": 8, "oversold_threshold": 30, "current_min": 28,
+                "min_jump": 3.0, "hard_stop": True,
+            }},
+            {"type": "bollinger_bands",  "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.35}},
+            {"type": "price_below_vwap", "params": {"min_gap_pct": -0.3, "max_gap_pct": -10.0}},
+            {"type": "volume_spike",     "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 3,
         "min_volume_ratio": 1.0,
     },
 }

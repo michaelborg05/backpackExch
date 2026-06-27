@@ -39,9 +39,9 @@ from db.utils import get_db_session
 
 STATE_FILE   = str(Path(__file__).resolve().parent / "mr_optimizer_state.json")
 RESULTS_FILE = str(Path(__file__).resolve().parent / "mr_optimizer_results.json")
-SYMBOLS      = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "HYPE_USDC", "BNB_USDC", "XRP_USDC"]
+SYMBOLS      = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "XRP_USDC", "HYPE_USDC", "BNB_USDC"]
 SCAN_DAYS    = 60
-MIN_TRADES   = 6
+MIN_TRADES   = 10
 
 # Fixed base settings — mean reversion specific
 BASE_SETTINGS = {
@@ -250,6 +250,117 @@ TREND_TEMPLATES = {
             {"type": "price_below_vwap", "params": {"min_gap_pct": -0.5, "max_gap_pct": -10.0}},
             {"type": "rsi_overbought",   "params": {"min_value": 40, "hard_stop": True}},
         ], 2),
+
+    # =========================================================================
+    # NEW TEMPLATE FAMILIES — addressing "catching falling knives" failure mode
+    # Root cause: prior templates fire when HTF RSI is low but trend still
+    # falling. Fixes: (1) EMA slope gate — refuse entry if EMA20 steeply
+    # falling, (2) uptrend pullback — only trade MR when macro trend is UP,
+    # (3) confirmed turn — RSI must already be rising off the bottom.
+    # =========================================================================
+
+    # ── UPTREND PULLBACK: 60m EMA20 slope NOT steeply falling + shallow dip ─
+    # Core idea: mean reversion works best when the macro trend is UP and price
+    # temporarily dips. Refuses entries when EMA20 is cascading downward.
+    # min_slope_pct 0.03 = blocks entries when EMA20 falls >0.03% per candle.
+    "T_uptrend_pullback": (
+        [
+            # EMA20 must not be falling steeply — blocks sustained downtrends
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.03}},
+            # Shallow pullback 0.5–2.5% below EMA20 (not below EMA50 — that's too deep)
+            {"type": "price_extended_below_ema", "params": {"ema": 20, "min_gap_pct": -0.5, "max_gap_pct": -2.5}},
+            # RSI in pullback zone — oversold but not crashed (35-50 range)
+            {"type": "rsi_overbought",           "params": {"min_value": 38, "hard_stop": True}},
+        ], 3),
+
+    # ── UPTREND PULLBACK LOOSER: Not steeply falling + medium dip + RSI ─────
+    "T_uptrend_pullback_loose": (
+        [
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.02}},
+            {"type": "price_extended_below_ema", "params": {"ema": 20, "min_gap_pct": -0.3, "max_gap_pct": -3.0}},
+            {"type": "rsi_overbought",           "params": {"min_value": 42, "hard_stop": True}},
+        ], 3),
+
+    # ── SLOPE GATE ON EMA50 DISPLACEMENT: existing logic + slope filter ──────
+    # Keeps the displacement concept but adds slope gate to block free-falls.
+    # Key test: does blocking "EMA20 falling > 0.03%" kill knife-catchers?
+    "T_disp_slope_ok": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.0, "max_gap_pct": -3.0}},
+            # Block entries when EMA20 is steeply falling (cascading down)
+            {"type": "ema_slope",                "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.03}},
+            {"type": "rsi_overbought",           "params": {"min_value": 38, "hard_stop": True}},
+        ], 3),
+
+    # ── SLOPE GATE STRICT: Tighter slope + moderate displacement ─────────────
+    "T_disp_slope_strict": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.5, "max_gap_pct": -3.5}},
+            {"type": "ema_slope",                "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.02}},
+            {"type": "rsi_overbought",           "params": {"min_value": 35, "hard_stop": True}},
+        ], 3),
+
+    # ── SLOPE + RSI TURN: Slope gate + confirmed RSI recovery ────────────────
+    # Best of both worlds: EMA20 not cascading AND RSI has already turned up.
+    # More permissive on displacement (0.5-2%) since we confirm the bounce.
+    "T_slope_rsi_turn": (
+        [
+            {"type": "ema_slope",                "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.02}},
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -0.5, "max_gap_pct": -3.0}},
+            # RSI was oversold and is now RISING — confirmed turn
+            {"type": "rsi_oversold",             "params": {"max_value": 40, "require_rising": True, "min_momentum": 0.3}},
+        ], 3),
+
+    # ── SLOPE + BB LOWER: EMA slope ok + price near lower BB ─────────────────
+    # Tests if EMA slope gate alone with BB lower is sufficient HTF context.
+    "T_slope_bb_lower": (
+        [
+            {"type": "ema_slope",       "params": {"ema": 20, "direction": "not_falling", "min_slope_pct": 0.02}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b",
+                "min_pct_b": -0.3, "max_pct_b": 0.20}},
+            {"type": "rsi_overbought",  "params": {"min_value": 42, "hard_stop": True}},
+        ], 3),
+
+    # ── RSI MOMENTUM POSITIVE: RSI is actively RISING on 60m (not just low) ──
+    # rsi_momentum requires RSI to have risen by min_momentum over lookback.
+    # Combines with displacement to catch confirmed bounces off deep lows.
+    "T_disp_rsi_mom_positive": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.0, "max_gap_pct": -4.0}},
+            # RSI has risen by at least 2 points over last 2 candles (actively bouncing)
+            {"type": "rsi_momentum",             "params": {"min_momentum": 2.0, "lookback_candles": 2}},
+            # Still in oversold zone (ceiling — don't enter if bounce already run)
+            {"type": "rsi_overbought",           "params": {"min_value": 42, "hard_stop": True}},
+        ], 3),
+
+    # ── RSI MOMENTUM POSITIVE STRICT: Stronger RSI bounce required ──────────
+    "T_disp_rsi_mom_strong": (
+        [
+            {"type": "price_extended_below_ema", "params": {"ema": 50, "min_gap_pct": -1.5, "max_gap_pct": -4.0}},
+            {"type": "rsi_momentum",             "params": {"min_momentum": 3.0, "lookback_candles": 3}},
+            {"type": "rsi_overbought",           "params": {"min_value": 40, "hard_stop": True}},
+        ], 3),
+
+    # ── BB PCT_B TURNING UP: 60m %B is rising (price moving toward middle) ──
+    # bb_pct_b_momentum "not_falling" means %B is flat or rising = price
+    # stabilizing or recovering toward BB middle. Combines with RSI gate.
+    "T_bb_pctb_turning": (
+        [
+            {"type": "bollinger_bands",     "params": {"band": "lower", "mode": "pct_b",
+                "min_pct_b": -0.3, "max_pct_b": 0.30}},
+            # %B must be rising or flat (price moving toward BB middle)
+            {"type": "bb_pct_b_momentum",   "params": {"required_direction": "not_falling", "lookback": 2}},
+            {"type": "rsi_overbought",      "params": {"min_value": 40, "hard_stop": True}},
+        ], 3),
+
+    # ── BB RECOVERY + SLOPE: BB lower touch + price stabilising ─────────────
+    "T_bb_recovery_slope": (
+        [
+            {"type": "bollinger_bands",  "params": {"band": "lower", "mode": "pct_b",
+                "min_pct_b": -0.3, "max_pct_b": 0.25}},
+            {"type": "ema_slope",        "params": {"ema": 50, "direction": "not_falling", "min_slope_pct": 0.01}},
+            {"type": "rsi_overbought",   "params": {"min_value": 38, "hard_stop": True}},
+        ], 3),
 }
 
 # ---------------------------------------------------------------------------
@@ -485,6 +596,87 @@ ENTRY_TEMPLATES = {
             {"type": "bollinger_bands",       "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.50}},
             {"type": "rsi_overbought",        "params": {"min_value": 50, "hard_stop": True}},
         ], 2),
+
+    # =========================================================================
+    # NEW ENTRY TEMPLATES — momentum-confirmed entries for uptrend pullback
+    # =========================================================================
+
+    # ── 15m EMA slope rising + reversal momentum ─────────────────────────────
+    # For uptrend pullback templates: 15m EMA20 must be turning UP + RSI bounce.
+    # Confirms the entry TF is recovering, not just that HTF is ok.
+    "E_slope_rising_revmom": (
+        [
+            # 15m EMA20 must be rising (entry momentum confirmed)
+            {"type": "ema_slope",             "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01}},
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 8, "oversold_threshold": 30,
+                "current_min": 28, "min_jump": 2.5, "hard_stop": True}},
+            {"type": "bollinger_bands",       "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.40}},
+            {"type": "rsi_overbought",        "params": {"min_value": 45, "hard_stop": True}},
+            {"type": "volume_spike",          "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ], 4),
+
+    # ── 15m RSI momentum positive + BB + volume ───────────────────────────────
+    # rsi_momentum checks the raw RSI change — more precise than revmom.
+    # Combined with tight BB (near lower band) to confirm pullback context.
+    "E_rsi_mom_bb_vol": (
+        [
+            # 15m RSI has risen by at least 2 points (actively recovering)
+            {"type": "rsi_momentum",     "params": {"min_momentum": 2.0, "lookback_candles": 2}},
+            {"type": "bollinger_bands",  "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.35}},
+            {"type": "rsi_overbought",   "params": {"min_value": 42, "hard_stop": True}},
+            {"type": "price_below_vwap", "params": {"min_gap_pct": -0.3, "max_gap_pct": -10.0}},
+            {"type": "volume_spike",     "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ], 4),
+
+    # ── 15m RSI momentum strong + tight BB + reversal candle ─────────────────
+    # For uptrend pullbacks: strong RSI bounce (3+ points) + bull candle.
+    # Higher conviction for shallower pullbacks where vol filter isn't key.
+    "E_rsi_mom_strong_candle": (
+        [
+            {"type": "rsi_momentum",    "params": {"min_momentum": 3.0, "lookback_candles": 2}},
+            {"type": "reversal_candle", "params": {"pattern": "bull_close", "min_close_pct": 0.45,
+                "require_bull": True}},
+            {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.40}},
+            {"type": "rsi_overbought",  "params": {"min_value": 48, "hard_stop": True}},
+            {"type": "volume_spike",    "params": {"min_ratio": 0.8, "max_ratio": 8.0}},
+        ], 3),
+
+    # ── BB %B turning up on 15m + reversal momentum ──────────────────────────
+    # Requires 15m BB %B to be rising (price recovering within BB) + revmom.
+    # Catches the beginning of the bounce more precisely than pct_b level alone.
+    "E_bb_pctb_rising_revmom": (
+        [
+            {"type": "bb_pct_b_momentum",     "params": {"required_direction": "not_falling", "lookback": 2}},
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 8, "oversold_threshold": 30,
+                "current_min": 28, "min_jump": 2.5, "hard_stop": True}},
+            {"type": "bollinger_bands",       "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.35}},
+            {"type": "rsi_overbought",        "params": {"min_value": 42, "hard_stop": True}},
+            {"type": "volume_spike",          "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ], 4),
+
+    # ── Uptrend pullback entry: loose RSI + EMA slope up + volume ───────────
+    # For shallow pullbacks in uptrends — RSI doesn't need to be very oversold,
+    # just needs to be below 45 and showing positive momentum.
+    "E_pullback_rsi_slope_vol": (
+        [
+            {"type": "ema_slope",        "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.005}},
+            {"type": "rsi_overbought",   "params": {"min_value": 48, "hard_stop": True}},
+            {"type": "rsi_momentum",     "params": {"min_momentum": 1.5, "lookback_candles": 2}},
+            {"type": "bollinger_bands",  "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.50}},
+            {"type": "volume_spike",     "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ], 4),
+
+    # ── EMA cross recovery: 15m EMA20 crossed above EMA20 short ─────────────
+    # Simple: reversal momentum + loose BB + price below VWAP but vol required
+    # This is the "volume confirms the turn" approach for any pullback type.
+    "E_vol_confirm_revmom": (
+        [
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 32,
+                "current_min": 28, "min_jump": 3.0, "hard_stop": True}},
+            {"type": "volume_spike",          "params": {"min_ratio": 1.5, "max_ratio": 8.0, "hard_stop": True}},
+            {"type": "bollinger_bands",       "params": {"band": "lower", "mode": "pct_b", "max_pct_b": 0.40}},
+            {"type": "rsi_overbought",        "params": {"min_value": 45, "hard_stop": True}},
+        ], 3),
 }
 
 # ---------------------------------------------------------------------------
@@ -579,6 +771,20 @@ def _mutate_indicator(ind: dict, rng: random.Random) -> dict:
         p["max_adx"]  = rng.choice([50, 55, 60, 65])
         p["hard_stop"] = rng.choice([True, False, False])
 
+    elif itype == "ema_slope":
+        ema_choices = [20, 20, 50]  # bias toward ema20
+        p["ema"] = rng.choice(ema_choices)
+        p["direction"] = rng.choice(["not_falling", "not_falling", "rising", "flat"])
+        p["min_slope_pct"] = rng.choice([0.01, 0.02, 0.03, 0.04, 0.05])
+
+    elif itype == "rsi_momentum":
+        p["min_momentum"]    = rng.choice([1.0, 1.5, 2.0, 2.5, 3.0, 4.0])
+        p["lookback_candles"] = rng.choice([1, 2, 2, 3])
+
+    elif itype == "bb_pct_b_momentum":
+        p["required_direction"] = rng.choice(["not_falling", "not_falling", "falling"])
+        p["lookback"] = rng.choice([2, 2, 3])
+
     ind["params"] = {k: v for k, v in p.items() if v is not None}
     return ind
 
@@ -591,20 +797,29 @@ def generate_variants_random(n: int = 100, seed: int = None) -> Dict[str, dict]:
     e_names = list(ENTRY_TEMPLATES.keys())
 
     # TP/SL combos — mean reversion focused (tighter, faster exits)
+    # Note: optimizer now uses tick-level SL/TP evaluation, so wider SL is needed
+    # to avoid getting stopped on intracandle wicks before the bounce completes.
     tp_sl_trailing = [
         # (tp, sl, trailing, arm, use_trailing)
-        (1.0, 0.7, 0.5, 0.5, True),   # v3/v9 baseline
-        (1.0, 0.6, 0.4, 0.5, True),   # tighter SL
-        (1.2, 0.7, 0.5, 0.6, True),   # higher TP
-        (1.2, 0.8, 0.5, 0.7, True),
-        (0.8, 0.6, 0.3, 0.4, True),   # smaller TP/SL
-        (1.0, 0.7, 0.0, 0.0, False),  # fixed TP/SL only
+        (1.0, 0.8, 0.5, 0.5, True),   # baseline with wider SL for tick-level eval
+        (1.0, 0.9, 0.5, 0.5, True),   # even wider SL
+        (1.2, 0.9, 0.5, 0.6, True),   # higher TP wider SL
+        (1.2, 1.0, 0.5, 0.7, True),
+        (1.5, 1.0, 0.0, 0.0, False),  # wide fixed TP/SL
+        (1.5, 1.0, 0.5, 0.8, True),   # wide with TSL
+        (1.0, 0.8, 0.0, 0.0, False),  # fixed TP/SL only
         (1.2, 0.8, 0.0, 0.0, False),
         (1.5, 0.8, 0.0, 0.0, False),  # stretch TP
-        (1.5, 1.0, 0.0, 0.0, False),  # wide TP/SL
-        (1.5, 0.8, 0.5, 0.8, True),
-        (0.8, 0.5, 0.3, 0.4, True),   # quick TP
-        (1.0, 0.8, 0.4, 0.6, True),
+        (1.0, 1.0, 0.5, 0.6, True),   # 1:1 risk/reward with TSL
+        (0.8, 0.8, 0.3, 0.4, True),   # quick TP equal SL
+        (1.2, 0.8, 0.4, 0.6, True),
+        # Uptrend pullback — shallower targets suit shallower dips
+        (0.7, 0.6, 0.3, 0.35, True),  # tight pullback wider SL
+        (0.8, 0.7, 0.0, 0.0, False),  # fixed small wider SL
+        (1.0, 0.7, 0.4, 0.6, True),   # moderate
+        (1.2, 0.8, 0.4, 0.7, True),
+        (1.5, 0.9, 0.5, 0.8, True),   # max stretch with TSL
+        (2.0, 1.0, 0.5, 1.0, True),   # wide target deep mean reversion
     ]
 
     attempts = 0
@@ -710,18 +925,22 @@ def generate_variants_focused(top_results: list, n_per_winner: int = 8) -> Dict[
                 if len(variants) >= len(top_results) * n_per_winner * 2:
                     return variants
 
-        # TP/SL sweep on each winner's indicators
+        # TP/SL sweep on each winner's indicators (tick-level evaluation — wider SL needed)
         tp_sl_combos = [
-            (1.0, 0.7, 0.5, 0.5, True),
-            (1.0, 0.6, 0.4, 0.5, True),
-            (1.2, 0.7, 0.5, 0.6, True),
-            (0.8, 0.6, 0.3, 0.4, True),
-            (1.0, 0.7, 0.0, 0.0, False),
+            (1.0, 0.8, 0.5, 0.5, True),
+            (1.0, 0.9, 0.5, 0.5, True),
+            (1.2, 0.9, 0.5, 0.6, True),
+            (1.5, 1.0, 0.5, 0.8, True),
+            (1.0, 0.8, 0.0, 0.0, False),
             (1.2, 0.8, 0.0, 0.0, False),
             (1.5, 0.8, 0.0, 0.0, False),
-            (1.5, 0.8, 0.5, 0.8, True),
+            (1.5, 1.0, 0.0, 0.0, False),
             (1.2, 0.8, 0.5, 0.7, True),
-            (0.8, 0.5, 0.3, 0.4, True),
+            (0.8, 0.8, 0.3, 0.4, True),
+            (0.7, 0.6, 0.3, 0.35, True),
+            (1.0, 0.7, 0.4, 0.6, True),
+            (1.5, 0.9, 0.5, 0.8, True),
+            (2.0, 1.0, 0.5, 1.0, True),
         ]
         for tp, sl, trl, arm, use_trl in tp_sl_combos:
             tp_tag = f"tp{int(tp*10)}sl{int(sl*10)}{'trl' if use_trl else 'fix'}"
@@ -755,7 +974,9 @@ def score_merged(trades: float, win_rate: float, total_pnl: float,
     wr  = win_rate
     pnl = min(total_pnl, 30.0)
     # avg_pnl is the primary objective (net of fees matters most for MR)
-    return avg_pnl * 200 + pf * 0.30 + wr * 100 * 0.25 + pnl * 0.10
+    # trade_bonus: reward configs with more trades (up to 60), don't penalize
+    trade_bonus = min(trades / 40.0, 1.0) * 5.0
+    return avg_pnl * 200 + pf * 0.30 + wr * 100 * 0.25 + pnl * 0.10 + trade_bonus
 
 
 def merge_symbol_results(sym_results: List[BacktestResult], name: str, config: dict) -> dict:
@@ -805,7 +1026,7 @@ def run_variants(db, variants: Dict[str, dict], start: datetime, end: datetime) 
         for sym in SYMBOLS:
             profile = BacktestProfile.from_dict(name, config)
             engine  = BacktestEngine(db, profile)
-            r       = engine.run(symbol=sym, start=start, end=end)
+            r       = engine.run(symbol=sym, start=start, end=end, price_source="ticks")
             sym_results.append(r)
             done += 1
 

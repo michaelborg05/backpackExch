@@ -8,6 +8,7 @@ _SWING_BASE = {
     "arm_trailing_stop_pct": 1.0,
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 241,
+    "max_cluster_entries": 2,
     "min_signal_confidence": 74.0,
     "min_volume_ratio": 1.0,
     "use_trend_filter": True,
@@ -71,52 +72,42 @@ _SWING_BASE = {
 SWING_VARIANTS = {
     "p3_base" : _SWING_BASE,
    
-    # Actual profile in use
-    "p3_v4_ema50drop": {
+    # ── Profile 9: Refined RSI Pullback ───────────────────────────────────────
+    # Derived from p3_v7_rsi_pullback with three fixes:
+    #   1. Collapsed two overlapping trend RSI ranges (48-63 ∩ 52-65) into one rsi_range(52-63)
+    #   2. Collapsed two overlapping entry RSI ranges (30-52 ∩ 28-50) into one rsi_range(30-50)
+    #   3. Added ema_slope to trend layer — filters stale EMA crosses (no slope requirement in v7
+    #      means a cross from weeks ago still passes even as price drifts lower)
+    #   4. Replaced redundant second RSI in entry with volume_spike — structural confirmation
+    #      that buyers are actually returning into the pullback, not just RSI drifting down
+    "p3_v9_refined_pullback": {
         **_SWING_BASE,
-        "take_profit_pct": 3.5,
-        "stop_loss_pct": 2,
-        "trailing_stop_pct": 1.3,
+        "take_profit_pct": 3.0,
+        "stop_loss_pct": 2.0,
+        "trailing_stop_pct": 1.2,
         "arm_trailing_stop_pct": 1.5,
-        "use_trailing_stop": False,
-        "min_signal_confidence": 70.0,
-        "trend_indicators": [
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles": 6,     # 24h — captures full slow-grind pattern
-                "oversold_threshold": 35,  # SUI 240m hit 32.9
-                "current_min": 30,
-                "min_jump": 2.5,           # SUI only had 3.1 max jump across 4h candles
-                "require_sustained": False,
-                "sustained_rise_mode": "net",  # net allows dip-then-higher (ETH pattern)
-                "hard_stop": True,
-            }},
-            {"type": "price_extended_below_ema", "params": {
-                "ema": 50, "min_gap_pct": -3.5, "max_gap_pct": -10.0,
-            }},
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
 
-            {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
+        # 4hr: EMA cross bullish (hard) + EMA20 slope actively rising ≥0.05%/candle (hard)
+        # + RSI in bullish zone 52-63 (hard). ema_slope is the key addition over v7.
+        "trend_indicators": [
+            {"type": "ema_cross", "params": {"hard_stop": True}},
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.05, "hard_stop": True}},
+            {"type": "rsi_range", "params": {"min": 52, "max": 63, "invert": True, "hard_stop": True}},
         ],
         "min_indicators_required": 3,
+
+        # 1hr: ADX in momentum zone (22-40) + RSI pulled back to 30-50 (hard)
+        # + volume spike (1.2x+) confirms buyers re-entering, not just passive RSI drift.
         "entry_indicators": [
-            {"type": "rsi_overbought", "params": {"min_value": 60, "hard_stop": True}},
-            {"type": "rsi_reversal_momentum", "params": {
-                "lookback_candles":    5,   # SOL fix: need to reach across 4h candle boundary
-                "oversold_threshold":  45,
-                "current_min":         33,
-                "min_jump":            3.0,
-                "require_sustained":   True,
-                "sustained_rise_mode": "net",
-                "hard_stop":           True,
-            }},
-            {"type": "price_vs_ema", "params": {
-                "ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 2.0,
-            }},
-            { "type": "adx_regime",
-                "params": {
-                    "min_adx": 0,
-                    "max_adx": 30,    
-                    "hard_stop":           True
-                }},
+            {"type": "adx_regime",   "params": {"min_adx": 22, "max_adx": 40}},
+            {"type": "rsi_range",    "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
+            {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
         ],
         "min_entry_indicators_required": 3,
     },
@@ -197,5 +188,247 @@ SWING_VARIANTS = {
         ],
         "min_entry_indicators_required": 3,
     },
+
+    # ── Profile 11: v9 with relaxed ema_slope (0.02%) ─────────────────────────
+    # v9 at 0.05% slope was too restrictive — 10 trades total, 0 fires on SOL/XRP/ZEC.
+    # Dropping to 0.02% should recover trade count while still filtering stale EMA crosses
+    # (a 0.02% per-candle slope on 4hr is still a genuinely rising EMA, just less steep).
+    # If WR/PF stay near v9 but trades recover toward v7 levels, this is the keeper.
+    "p3_v11_slope_relaxed": {
+        **_SWING_BASE,
+        "take_profit_pct": 3.5,
+        "stop_loss_pct": 2.0,
+        "trailing_stop_pct": 0.6,
+        "arm_trailing_stop_pct": 1.5,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+
+        # 4hr: same as v9 but slope threshold halved — 0.02% filters flat/stale crosses
+        # without blocking gently-rising trends that v9 was missing (SOL, XRP, ZEC)
+        "trend_indicators": [
+            {"type": "ema_cross", "params": {"hard_stop": True}},
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.02, "hard_stop": True}},
+            {"type": "rsi_range", "params": {"min": 52, "max": 63, "invert": True, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+
+        # 1hr: identical to v9
+        "entry_indicators": [
+            {"type": "adx_regime",   "params": {"min_adx": 22, "max_adx": 40}},
+            {"type": "rsi_range",    "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
+            {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 3,
+    },
+
+
+    # ── Profile 12: v7 trend + v8 rich entry (hybrid) ─────────────────────────
+    # Combines the best structural element of each champion:
+    #   Trend: v7's permissive trend layer (ema_cross + single RSI zone 52-63, no ADX gate)
+    #          — keeps BNB/ZEC accessible where v8's ADX 20-32 fails
+    #   Entry: v8's multi-indicator entry structure (4 indicators, 3-of-4 must pass)
+    #          — BB + price_vs_ema + RSI + soft volume for richer pullback confirmation
+    # Goal: v7's trade frequency with v8's entry quality. Volume remains soft (non-blocking).
+    "p3_v12_hybrid": {
+        **_SWING_BASE,
+        "take_profit_pct": 3.0,
+        "stop_loss_pct": 2.0,
+        "trailing_stop_pct": 1.2,
+        "arm_trailing_stop_pct": 1.5,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+
+        # 4hr: v7 trend structure — no ADX required, just EMA cross + RSI zone
+        # Single collapsed RSI range (was two overlapping in v7)
+        "trend_indicators": [
+            {"type": "ema_cross", "params": {"hard_stop": True}},
+            {"type": "rsi_range", "params": {"min": 52, "max": 63, "invert": True, "hard_stop": True}},
+        ],
+        "min_indicators_required": 2,
+
+        # 1hr: v8-style rich entry — RSI pullback + BB position + price near EMA + soft volume
+        # 3 of 4 must pass; no hard_stop on any so signal confidence can arbitrate
+        "entry_indicators": [
+            {"type": "rsi_range",      "params": {"min": 28, "max": 50, "invert": True, "hard_stop": True}},
+            {"type": "bollinger_bands","params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.0, "max_pct_b": 0.5}},
+            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -5.0, "max_gap_pct": 2.0}},
+            {"type": "volume_spike",   "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 3,
+    },
+
+    # ── Profile 13: Wide trend RSI + clean entry (no ADX in trend) ────────────
+    # SOL diagnosis: v7 misses SOL because RSI zone 52-63 is too tight (SOL sits 48-52
+    # when pullback conditions align). Widening to 48-65 (same as v8) should recapture SOL
+    # while skipping the ADX-in-trend gate that kills BNB in v8.
+    # Entry stays clean (v9 style): ADX + collapsed RSI + volume.
+
+    "p3_v13_wide_rsi_trend": {
+        **_SWING_BASE,
+        "take_profit_pct": 3.0,
+        "stop_loss_pct": 2.0,
+        "trailing_stop_pct": 0.6,
+        "arm_trailing_stop_pct": 1.5,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+
+        # 4hr: ema_cross + wider RSI 48-65 (no ADX gate, keeping BNB accessible)
+        "trend_indicators": [
+            {"type": "ema_cross", "params": {"hard_stop": True}},
+            {"type": "rsi_range", "params": {"min": 48, "max": 65, "invert": True, "hard_stop": True}},
+        ],
+        "min_indicators_required": 2,
+
+        # 1hr: v9-style clean entry — ADX momentum + RSI pullback + volume confirmation
+        "entry_indicators": [
+            {"type": "adx_regime",   "params": {"min_adx": 22, "max_adx": 40}},
+            {"type": "rsi_range",    "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
+            {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 3,
+    },
+
+    # ── Profile 14: v8 with ADX range widened (18-40) ─────────────────────────
+    # v8 BNB diagnosis: ADX 20-32 gate blocks BNB (2T, 0% WR) while v7 (no ADX in trend)
+    # gets 8T/62% WR there. Widening to 18-40 keeps the ADX-based trend quality filter
+    # but allows stronger-trending markets (BNB) through.
+    # All other v8 settings preserved — this is an isolated ADX range test.
+    "p3_v14_wider_adx": {
+        **_SWING_BASE,
+        "take_profit_pct": 3.0,
+        "stop_loss_pct": 2.0,
+        "trailing_stop_pct": 1.2,
+        "arm_trailing_stop_pct": 1.5,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+
+        # 4hr: v8 trend but ADX widened 20-32 → 18-40
+        "trend_indicators": [
+            {"type": "ema_cross",  "params": {"hard_stop": True}},
+            {"type": "adx_regime", "params": {"min_adx": 18, "max_adx": 40, "hard_stop": True}},
+            {"type": "rsi_range",  "params": {"min": 48, "max": 65, "invert": True}},
+        ],
+        "min_indicators_required": 3,
+
+        # 1hr: identical to v8
+        "entry_indicators": [
+            {"type": "volume_spike",   "params": {"min_ratio": 1.2, "max_ratio": 8.0, "hard_stop": True}},
+            {"type": "rsi_range",      "params": {"min": 28, "max": 50, "invert": True}},
+            {"type": "bollinger_bands","params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.0, "max_pct_b": 0.5}},
+            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -5.0, "max_gap_pct": 2.0}},
+        ],
+        "min_entry_indicators_required": 3,
+    },
+
+    # ── Profile 15: v13 + ema_slope (premium quality filter) ──────────────────
+    # Tests if v11's slope gate + v13's wider RSI zone = better than either alone.
+    # v11 (narrow RSI 52-63 + slope) = 91% WR but only fires on ETH/BTC/BNB.
+    # v13 (wide RSI 48-65, no slope) = 71% WR, fires on SOL too.
+    # v15 combines both: wide RSI keeps SOL/XRP accessible, slope filters stale crosses.
+    # If trade count stays near v13 (21T) but WR lifts toward v11 (91%), this is the keeper.
+    "p3_v15_wide_rsi_slope": {
+        **_SWING_BASE,
+        "take_profit_pct": 3.0,
+        "stop_loss_pct": 2.0,
+        "trailing_stop_pct": 1.2,
+        "arm_trailing_stop_pct": 1.5,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+
+        # 4hr: ema_cross + ema_slope (filters stale crosses) + wider RSI 48-65
+        "trend_indicators": [
+            {"type": "ema_cross", "params": {"hard_stop": True}},
+            {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.02, "hard_stop": True}},
+            {"type": "rsi_range", "params": {"min": 48, "max": 65, "invert": True, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+
+        # 1hr: identical to v13
+        "entry_indicators": [
+            {"type": "adx_regime",   "params": {"min_adx": 22, "max_adx": 40}},
+            {"type": "rsi_range",    "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
+            {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 3,
+    },
+    "P3_V11_CAPITULATION_REVERSAL": {
+        **_SWING_BASE,
+        # inherits _SWING_BASE in your file via **_SWING_BASE
+        "strategy_type":   "trend_following",
+        "entry_timeframe": "60",
+        "trend_timeframe": "240",
+    
+        "take_profit_pct":        3.5,   # reversals ran further than 3.0 when they worked (SOL +8-10%)
+        "stop_loss_pct":          2.0,
+        "trailing_stop_pct":      1.0,   # tighter trail than v7/v8 (1.2) — lock the snap-back fast,
+        "arm_trailing_stop_pct":  2.0,   # but arm LATE at +2.0% so we don't strangle the runners.
+        "use_trailing_stop":      True,  # (directly addresses the 31%-capture problem from prod week.)
+    
+        "min_signal_confidence":  74.0,
+        "signal_cooldown_minutes": 241,
+        "min_volume_ratio":        1.0,
+    
+        # Falling-knife protection: re-check 4hr trend on the open position. If the deep-oversold
+        # flush keeps going (RSI fails to hold its reversal), invalidate fast. age=0 = check immediately.
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+    
+        # ── 4hr TREND: define the capitulation regime ──────────────────────────────
+        # Deep oversold (RSI < 40) AND high momentum (ADX >= 28). Both hard.
+        # This is the inversion of v8: we REQUIRE the high ADX that v8 forbids.
+        "trend_indicators": [
+            # RSI must be in the deep-oversold zone. invert:True => PASS inside [25,40].
+            {"type": "rsi_range",   "params": {"min": 25, "max": 40, "invert": True, "hard_stop": True}},
+            # ADX must show real momentum behind the flush. Floor at 28 is the edge boundary
+            # from the data; ceiling 48 guards against a parabolic, un-reversible collapse.
+            {"type": "adx_regime",  "params": {"min_adx": 28, "max_adx": 48, "hard_stop": True}},
+        ],
+        "min_indicators_required": 2,
+    
+        # ── 1hr ENTRY: confirm the snap-back has actually begun ────────────────────
+        # We do NOT enter on the 4hr condition alone (that's still falling). We wait for the
+        # faster timeframe to turn up, so we buy the reversal, not the continuation.
+        "entry_indicators": [
+            # 1hr RSI lifting off its low: reversal_momentum requires an actual upturn.
+            # min_jump low (2.0) on purpose — 60m turns before 240m does.
+            {"type": "rsi_reversal_momentum", "params": {
+                "lookback_candles":    6,
+                "oversold_threshold":  40,
+                "current_min":         32,
+                "min_jump":            2.0,
+                "require_sustained":   True,
+                "sustained_rise_mode": "net",
+                "hard_stop":           True,
+            }},
+            # Price reclaiming structure: back near/above 1hr EMA20 after the flush.
+            {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -6.0, "max_gap_pct": 2.0}},
+            # BB %B lifting off the lower band confirms price leaving the extreme.
+            {"type": "bollinger_bands","params": {"band": "lower", "mode": "pct_b",
+                                                "min_pct_b": 0.15, "max_pct_b": 0.6}},
+            # Volume confirmation that the flush is being bought, not just drifting. Soft.
+            {"type": "volume_spike",   "params": {"min_ratio": 1.0, "max_ratio": 8.0}},
+        ],
+        "min_entry_indicators_required": 3,   # 3 of 4 — rsi_reversal is the hard gate
+    },    
 
 }

@@ -63,41 +63,40 @@ _PROD_15M_TREND = {
 }
 
 # =============================================================================
-# 4hr Swing — Profile A  (first swing profile)
-# =============================================================================
-# Exported from profile: profile3
-_PROD_4HR_SWING_Simple = {
-    "display_name": "swing_4h1h_simple",
-    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
+# Exported from profile: 4hr_ema50drop
+_4HR_v8 = {
+    "display_name": "4hr_p3_v8_vol_pullbackAI",
+    "symbols": ['BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC'],
     "strategy_type": "trend_following",
     "entry_timeframe": "60",
     "trend_timeframe": "240",
     "take_profit_pct": 3.0,
     "stop_loss_pct": 2.0,
-    "trailing_stop_pct": 1.0,
-    "arm_trailing_stop_pct": 1.0,
+    "trailing_stop_pct": 1.2,
+    "arm_trailing_stop_pct": 1.5,
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 241,
     "min_signal_confidence": 74.0,
-    "min_volume_ratio": 1.3,
+    "min_volume_ratio": 1.0,
     "use_trend_filter": True,
     "use_entry_filter": True,
     "max_position_hours": 72,
     "use_market_regime_filter": False,
     "use_trend_invalidation_exit": True,
-    "trend_invalidation_indicators": "entry",
-    "min_position_age_for_trend_check": 250,
+    "trend_invalidation_indicators": "trend",
+    "min_position_age_for_trend_check": 241,
     "trading_hours": [],
     "trend_indicators": [
-        {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 36, "current_min": 34, "min_jump": 2.5, "require_sustained": True, "sustained_rise_mode": "net", "hard_stop": True}},
-        {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
+        {"type": "ema_cross", "params": {"hard_stop": True}},
+        {"type": "adx_regime", "params": {"min_adx": 20, "max_adx": 32, "hard_stop": True}},
+        {"type": "rsi_range", "params": {"min": 48, "max": 65, "invert": True}},
     ],
-    "min_indicators_required": 2,
+    "min_indicators_required": 3,
     "entry_indicators": [
-        {"type": "rsi_overbought", "params": {"min_value": 54, "hard_stop": True}},
-        {"type": "price_vs_ema", "params": {"ema": 20, "min_gap_pct": -8, "max_gap_pct": 5}},
-        {"type": "volume_spike", "params": {"min_ratio": 0.5, "max_ratio": 8}},
-        {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "max_pct_b": 0.88, "hard_stop": True}},
+        {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8, "hard_stop": True}},
+        {"type": "rsi_range", "params": {"min": 28, "max": 50, "invert": True}},
+        {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0, "max_pct_b": 0.5}},
+        {"type": "price_vs_ema", "params": {"ema": 20, "min_gap_pct": -5, "max_gap_pct": 2}},
     ],
     "min_entry_indicators_required": 3,
 }
@@ -105,57 +104,80 @@ _PROD_4HR_SWING_Simple = {
 # =============================================================================
 # 4hr Swing — Profile B  (second swing profile — adjust if different from A)
 # =============================================================================
-_PROD_4HR_EMA50Drop = {
-    **_PROD_4HR_SWING_Simple,
-    "display_name": "prod_4hr_ema50drop",
-    "symbols": ["SOL_USDC", "ETH_USDC", "BTC_USDC", "XRP_USDC", "BNB_USDC", "ZEC_USDC"],
-    "take_profit_pct": 3.5,
-    "stop_loss_pct": 2,
-    "trailing_stop_pct": 1.3,
-    "arm_trailing_stop_pct": 1.5,
-    "use_trailing_stop": False,
-    "min_signal_confidence": 70.0,
-    "trend_indicators": [
-        {"type": "rsi_reversal_momentum", "params": {
-            "lookback_candles": 6,     # 24h — captures full slow-grind pattern
-            "oversold_threshold": 35,  # SUI 240m hit 32.9
-            "current_min": 30,
-            "min_jump": 2.5,           # SUI only had 3.1 max jump across 4h candles
-            "require_sustained": False,
-            "sustained_rise_mode": "net",  # net allows dip-then-higher (ETH pattern)
-            "hard_stop": True,
-        }},
-        {"type": "price_extended_below_ema", "params": {
-            "ema": 50, "min_gap_pct": -3.5, "max_gap_pct": -10.0,
-        }},
 
-        {"type": "rsi_overbought", "params": {"min_value": 56, "hard_stop": True}},
+# Exported from profile: 4h_v19_tight_pullback
+_4hr_p3_v11_slope_relaxedAI = {
+    "display_name": "4hr_p3_v11_slope_relaxedAI",
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
+    "strategy_type": "trend_following",
+    "entry_timeframe": "60",
+    "trend_timeframe": "240",
+    "take_profit_pct": 3.5,
+    "stop_loss_pct": 2.0,
+    "trailing_stop_pct": 0.6,
+    "arm_trailing_stop_pct": 1.5,
+    "use_trailing_stop": True,
+    "signal_cooldown_minutes": 241,
+    "min_signal_confidence": 74.0,
+    "min_volume_ratio": 1.0,
+    "use_trend_filter": True,
+    "use_entry_filter": True,
+    "max_position_hours": 72,
+    "use_market_regime_filter": False,
+    "use_trend_invalidation_exit": True,
+    "trend_invalidation_indicators": "trend",
+    "min_position_age_for_trend_check": 30,
+    "trading_hours": [],
+    "trend_indicators": [
+        {"type": "ema_cross", "params": {"hard_stop": True}},
+        {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.02, "hard_stop": True}},
+        {"type": "rsi_range", "params": {"min": 52, "max": 63, "invert": True, "hard_stop": True}},
     ],
     "min_indicators_required": 3,
     "entry_indicators": [
-        {"type": "rsi_overbought", "params": {"min_value": 60, "hard_stop": True}},
-        {"type": "rsi_reversal_momentum", "params": {
-            "lookback_candles":    5,   # SOL fix: need to reach across 4h candle boundary
-            "oversold_threshold":  45,
-            "current_min":         33,
-            "min_jump":            3.0,
-            "require_sustained":   True,
-            "sustained_rise_mode": "net",
-            "hard_stop":           True,
-        }},
-        {"type": "price_vs_ema", "params": {
-            "ema": 20, "min_gap_pct": -8.0, "max_gap_pct": 2.0,
-        }},
-        { "type": "adx_regime",
-            "params": {
-                "min_adx": 0,
-                "max_adx": 30,    
-                "hard_stop":           True
-            }},
+        {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 40}},
+        {"type": "rsi_range", "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
+        {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8}},
     ],
     "min_entry_indicators_required": 3,
 }
 
+
+# Exported from profile: profile3
+_4hr_v13 = {
+    "display_name": "4hr_p3_v13_wide_rsi_trendAI",
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC'],
+    "strategy_type": "trend_following",
+    "entry_timeframe": "60",
+    "trend_timeframe": "240",
+    "take_profit_pct": 3.0,
+    "stop_loss_pct": 2.0,
+    "trailing_stop_pct": 0.6,
+    "arm_trailing_stop_pct": 1.5,
+    "use_trailing_stop": True,
+    "signal_cooldown_minutes": 241,
+    "min_signal_confidence": 74.0,
+    "min_volume_ratio": 0.9,
+    "use_trend_filter": True,
+    "use_entry_filter": True,
+    "max_position_hours": 72,
+    "use_market_regime_filter": False,
+    "use_trend_invalidation_exit": True,
+    "trend_invalidation_indicators": "trend",
+    "min_position_age_for_trend_check": 5,
+    "trading_hours": [],
+    "trend_indicators": [
+        {"type": "ema_cross", "params": {"hard_stop": True}},
+        {"type": "rsi_range", "params": {"min": 48, "max": 65, "invert": True, "hard_stop": True}},
+    ],
+    "min_indicators_required": 2,
+    "entry_indicators": [
+        {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 40}},
+        {"type": "rsi_range", "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
+        {"type": "volume_spike", "params": {"min_ratio": 1.2, "max_ratio": 8}},
+    ],
+    "min_entry_indicators_required": 3,
+}
 # =============================================================================
 # Mean Reversion (long, 15m entry / 60m trend)
 # =============================================================================
@@ -281,8 +303,9 @@ _PROD_TREND_SHORT = {
 # =============================================================================
 PROD_PROFILES = {
     "prod_15m_trend":      _PROD_15M_TREND,
-    "_PROD_4HR_SWING_Simple":    _PROD_4HR_SWING_Simple,
-    "_PROD_4HR_EMA50Drop":    _PROD_4HR_EMA50Drop,
+    "4HR_v8":    _4HR_v8,
+    "4hr_V11":    _4hr_p3_v11_slope_relaxedAI,
+    "4hr_v13": _4hr_v13,
     "_PROD_MEAN_REV_v3":       _PROD_MEAN_REV_v3,
     "prod_mean_rev_short": _PROD_MEAN_REV_SHORT,
     "prod_trend_short":    _PROD_TREND_SHORT,

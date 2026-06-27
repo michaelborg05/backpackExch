@@ -1583,6 +1583,46 @@ class ReplayRegimeFilter:
 
 
 # ===========================================================================
+# CandleEntryCap
+# ===========================================================================
+
+class CandleEntryCap:
+    """
+    Shared state object passed across per-symbol engine runs to enforce a
+    per-candle-period entry limit (mirrors the production cluster cap).
+
+    Each symbol run calls can_enter() before opening a trade and record_entry()
+    after. Because the backtest processes symbols sequentially, whichever symbol
+    runs first in the list gets priority for a given candle period.
+    """
+
+    def __init__(self, max_entries: int, tf_minutes: int = 60):
+        self.max_entries = max_entries
+        self.tf_minutes  = tf_minutes
+        self._counts: Dict[datetime, int] = {}
+        self._blocked: int = 0
+
+    def _candle_ts(self, row_time: datetime) -> datetime:
+        total    = row_time.hour * 60 + row_time.minute
+        floored  = (total // self.tf_minutes) * self.tf_minutes
+        return row_time.replace(hour=floored // 60, minute=floored % 60, second=0, microsecond=0)
+
+    def can_enter(self, row_time: datetime) -> bool:
+        return self._counts.get(self._candle_ts(row_time), 0) < self.max_entries
+
+    def record_entry(self, row_time: datetime) -> None:
+        ts = self._candle_ts(row_time)
+        self._counts[ts] = self._counts.get(ts, 0) + 1
+
+    def record_blocked(self) -> None:
+        self._blocked += 1
+
+    @property
+    def blocked_count(self) -> int:
+        return self._blocked
+
+
+# ===========================================================================
 # BacktestProfile
 # ===========================================================================
 
@@ -1615,6 +1655,7 @@ class BacktestProfile:
         "trend_indicator_groups":     None,
         "entry_indicator_groups":     None,
         "trading_hours":              None,
+        "max_cluster_entries":        None,
         # Trend invalidation exit controls (mirrors production position_manager logic)
         "use_trend_invalidation_exit":        True,
         "trend_invalidation_indicators":      "trend",   # "trend" | "entry" | "exit"
@@ -1791,9 +1832,10 @@ class BacktestResult:
     start:           datetime
     end:             datetime
     trades:          List[BacktestTrade] = field(default_factory=list)
-    signals_fired:   int = 0
-    regime_blocked:  int = 0
-    rows_processed:  int = 0
+    signals_fired:    int = 0
+    regime_blocked:   int = 0
+    cluster_blocked:  int = 0
+    rows_processed:   int = 0
     profile_params:  Dict[str, Any] = field(default_factory=dict)
 
     # ---- computed properties ------------------------------------------------
@@ -1847,6 +1889,7 @@ class BacktestResult:
             f"Rows    : {self.rows_processed}",
             f"Signals : {self.signals_fired}",
             f"Regime⛔ : {self.regime_blocked}",
+            f"Cluster⛔: {self.cluster_blocked}",
             f"Trades  : {self.total_trades}",
             f"Win rate: {self.win_rate:.1%}",
             f"Avg P&L : {self.avg_pnl_pct:+.2f}%",
@@ -2043,10 +2086,19 @@ class BacktestEngine:
         end: datetime,
         price_mode: str = "auto",
         price_source: str = "candle",  # "candle" | "ticks"
+        cluster_cap: Optional["CandleEntryCap"] = None,
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
         is_short = "short" in getattr(self.profile, "strategy_type", "")
+
+        # Resolve cluster cap: caller can pass a shared one (multi-symbol run) or we
+        # create a local one from the profile setting (single-symbol run).
+        max_cluster = getattr(self.profile, "max_cluster_entries", None)
+        effective_cap: Optional[CandleEntryCap] = cluster_cap or (
+            CandleEntryCap(max_cluster, int(getattr(self.profile, "trend_timeframe", "60")))
+            if max_cluster else None
+        )
 
         # Strategy-aware price mode:
         #   mean_reversion: signals fire mid-candle when price hits the extreme (low),
@@ -2369,6 +2421,14 @@ class BacktestEngine:
             # SIGNAL — open position
             result.signals_fired += 1
 
+            # Cluster cap: skip if this candle period is already full
+            if effective_cap and not effective_cap.can_enter(row_time):
+                result.cluster_blocked += 1
+                effective_cap.record_blocked()
+                if self.verbose:
+                    print(f"{self._tag}[{row_time}] Cluster cap ({effective_cap.max_entries}) reached — skipping {symbol}")
+                continue
+
             # Determine entry price and (for tick mode) which ticks remain after entry.
             if price_source == "ticks":
                 candle_start_ts  = row_time.timestamp()
@@ -2415,6 +2475,8 @@ class BacktestEngine:
                 },
             )
             result.trades.append(trade)
+            if effective_cap:
+                effective_cap.record_entry(row_time)
 
             if is_short:
                 tp_price = entry_price * (1 - float(self.profile.take_profit_pct) / 100)
