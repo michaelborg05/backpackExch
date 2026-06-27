@@ -38,6 +38,7 @@ class TradingProfileDB(Base):
     signal_cooldown_minutes = Column(Integer, default=15)
     sl_cooldown_minutes = Column(Integer, nullable=True)   # per-profile override; None = use global setting
     tp_cooldown_minutes = Column(Integer, nullable=True)   # per-profile override; None = use global setting
+    max_cluster_entries = Column(Integer, nullable=True)   # max entries per candle period across symbols; None = no cap
     min_signal_confidence = Column(Float, default=72.0)
     min_volume_ratio = Column(Float, default=1.0)
     

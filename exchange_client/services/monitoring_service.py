@@ -54,6 +54,7 @@ class MonitoringService:
         #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
         self._symbol_cache = get_symbol_cache()
         self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
+        self._candle_entry_counts: Dict[tuple, int] = {}  # (profile_name, candle_ts) -> entry count
 
         with get_db_session() as db:
                 self._symbol_cache.refresh(db)
@@ -69,6 +70,10 @@ class MonitoringService:
                     self._load_cooldown_cache_from_db(db)
                 except Exception as e:
                     self.logger.error(f"Error loading cooldown cache from DB: {e}")
+                try:
+                    self._load_candle_entry_cache_from_db(db)
+                except Exception as e:
+                    self.logger.error(f"Error loading candle entry cache from DB: {e}")
 
         self.is_running = False
         self.thread = None
@@ -119,6 +124,48 @@ class MonitoringService:
 
         if rows:
             self.logger.info(f"Cooldown cache restored: {len(rows)} profile+symbol pair(s) from DB")
+
+    def _get_candle_period_start(self, timeframe_str: str):
+        """Floor current UTC time to the nearest candle boundary for the given timeframe (in minutes)."""
+        from datetime import datetime, timezone
+        try:
+            tf_minutes = int(timeframe_str)
+        except (ValueError, TypeError):
+            tf_minutes = 60
+        now = datetime.now(timezone.utc)
+        total_minutes_today = now.hour * 60 + now.minute
+        floored = (total_minutes_today // tf_minutes) * tf_minutes
+        return now.replace(hour=floored // 60, minute=floored % 60, second=0, microsecond=0)
+
+    def _load_candle_entry_cache_from_db(self, db):
+        """Restore _candle_entry_counts from positions opened in the current candle period so cluster cap survives restarts."""
+        from db.models import Position
+        from sqlalchemy import func
+        from services.profile_manager import get_profile_manager
+
+        profiles = get_profile_manager().get_all_profiles()
+        restored = 0
+        for profile in profiles:
+            if not profile.max_cluster_entries:
+                continue
+            candle_start = self._get_candle_period_start(profile.trend_timeframe or "60")
+            count = (
+                db.query(func.count(Position.id))
+                .filter(
+                    Position.profile_name == profile.name,
+                    Position.created_at >= candle_start,
+                )
+                .scalar()
+            ) or 0
+            if count > 0:
+                self._candle_entry_counts[(profile.name, candle_start)] = count
+                restored += 1
+                self.logger.info(
+                    f"[{profile.name}] Cluster cache restored: {count} entr{'y' if count == 1 else 'ies'} "
+                    f"in current candle (since {candle_start.strftime('%H:%M UTC')})"
+                )
+        if restored == 0:
+            self.logger.debug("Candle entry cache: no entries to restore")
 
     @property
     def tickers(self) -> list:
@@ -1187,18 +1234,36 @@ class MonitoringService:
             f"[{profile.name}] Generated {len(signals)} signal(s)"
         )
         
-        # Process each signal
+        # Process each signal (already sorted highest confidence first by scan_symbols)
+        max_cluster = profile.max_cluster_entries
         for signal in signals:
             try:
-                
+                # Cluster cap: limit simultaneous entries per candle period to prevent correlated losses
+                if max_cluster:
+                    candle_ts = self._get_candle_period_start(profile.trend_timeframe or "60")
+                    cache_key = (profile.name, candle_ts)
+                    entries_this_candle = self._candle_entry_counts.get(cache_key, 0)
+                    if entries_this_candle >= max_cluster:
+                        self.logger.info(
+                            f"[{profile.name}] Cluster cap ({max_cluster}) reached for candle "
+                            f"{candle_ts.strftime('%H:%M UTC')} — skipping {signal.symbol} "
+                            f"(confidence {signal.confidence:.1f}%)"
+                        )
+                        continue
+
                 # Execute trade
                 self._execute_signal(signal, profile)
-                
+
                 # Update last signal time
                 cooldown_key = f"{profile.name}_{signal.symbol}"
-
                 self._last_signals[cooldown_key] = time.time()
-                
+
+                # Increment candle entry counter
+                if max_cluster:
+                    candle_ts = self._get_candle_period_start(profile.trend_timeframe or "60")
+                    cache_key = (profile.name, candle_ts)
+                    self._candle_entry_counts[cache_key] = self._candle_entry_counts.get(cache_key, 0) + 1
+
             except Exception as e:
                 self.logger.error(
                     f"[{profile.name}] Error executing signal for {signal.symbol}: {e}",

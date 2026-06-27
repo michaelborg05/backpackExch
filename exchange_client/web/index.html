@@ -475,6 +475,11 @@
                   <input id="f-tp_cooldown_minutes" type="number" step="5" placeholder="Global default">
                   <div class="field-hint">How long to block re-entry after a take profit. Leave blank to use the global setting. Usually shorter than SL cooldown.</div>
                 </div>
+                <div class="field">
+                  <label>Max Cluster Entries</label>
+                  <input id="f-max_cluster_entries" type="number" step="1" min="1" placeholder="No cap">
+                  <div class="field-hint">Max symbols that can enter within the same candle period (e.g. 2 for 4H profiles). Highest-confidence signals take priority. Leave blank to disable.</div>
+                </div>
                 <div class="field"><label>Min Confidence %</label><input id="f-min_signal_confidence" type="number" step="0.5" placeholder="72"><div class="field-hint">0–100; signals below this are skipped</div></div>
                 <div class="field"><label>Min Volume Ratio</label><input id="f-min_volume_ratio" type="number" step="0.1" placeholder="1.0"><div class="field-hint">1.0 = average volume</div></div>
               </div>
@@ -2150,6 +2155,7 @@ function fillSettings(p) {
   set('f-signal_cooldown_minutes', p.signal_cooldown_minutes);
   set('f-sl_cooldown_minutes', p.sl_cooldown_minutes);
   set('f-tp_cooldown_minutes', p.tp_cooldown_minutes);
+  set('f-max_cluster_entries', p.max_cluster_entries);
   set('f-min_signal_confidence', p.min_signal_confidence);
   set('f-min_volume_ratio', p.min_volume_ratio);
   set('f-enable_signal_generation', p.enable_signal_generation);
@@ -2339,6 +2345,7 @@ async function saveSettings() {
     signal_cooldown_minutes:        getInt('f-signal_cooldown_minutes'),
     sl_cooldown_minutes:            getInt('f-sl_cooldown_minutes'),
     tp_cooldown_minutes:            getInt('f-tp_cooldown_minutes'),
+    max_cluster_entries:            getInt('f-max_cluster_entries'),
     min_signal_confidence:          getNum('f-min_signal_confidence'),
     min_volume_ratio:               getNum('f-min_volume_ratio'),
     enable_signal_generation:       getBool('f-enable_signal_generation'),

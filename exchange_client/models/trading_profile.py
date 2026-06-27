@@ -61,6 +61,7 @@ class TradingProfile(BaseModel):
     signal_cooldown_minutes: Optional[int] = 15     # Scan throttle: min minutes between signal evaluations for same symbol
     sl_cooldown_minutes: Optional[int] = None       # Post-SL re-entry pause (None = use global setting)
     tp_cooldown_minutes: Optional[int] = None       # Post-TP re-entry pause (None = use global setting)
+    max_cluster_entries: Optional[int] = None       # Max entries per candle period across symbols (None = no cap)
     min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
     min_volume_ratio: float = 1.5                   # Require 50% above average volume
 
@@ -159,6 +160,7 @@ class ProfileCreateRequest(BaseModel):
     signal_cooldown_minutes: Optional[int] = 15
     sl_cooldown_minutes: Optional[int] = None
     tp_cooldown_minutes: Optional[int] = None
+    max_cluster_entries: Optional[int] = None
     min_signal_confidence: Optional[float] = 72.0
     min_volume_ratio: Optional[float] = 1.0
 
@@ -219,6 +221,7 @@ class ProfileUpdateRequest(BaseModel):
     signal_cooldown_minutes: Optional[int] = None
     sl_cooldown_minutes: Optional[int] = None
     tp_cooldown_minutes: Optional[int] = None
+    max_cluster_entries: Optional[int] = None
     min_signal_confidence: Optional[float] = None
     min_volume_ratio: Optional[float] = None
 
