@@ -3405,7 +3405,7 @@ async def export_profile_python(profile_name: str):
     Returns a plain-text response you can paste directly into prod_profiles.py.
     """
     from db.utils import get_db_session
-    from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours
+    from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours, SymbolConfig
     from fastapi.responses import PlainTextResponse
     import json
 
@@ -3439,9 +3439,19 @@ async def export_profile_python(profile_name: str):
             .order_by(ProfileTradingHours.day_of_week)
             .all()
         )
+        symbol_rows = (
+            db.query(SymbolConfig)
+            .filter(SymbolConfig.profile_name == profile_name, SymbolConfig.enabled == True)
+            .order_by(SymbolConfig.symbol)
+            .all()
+        )
+        symbols = [s.symbol for s in symbol_rows]
 
     def _ind_line(ind) -> str:
         params = dict(ind.params or {})
+        # is_hard_stop is a separate DB column; inject it back into params as hard_stop
+        if ind.is_hard_stop:
+            params["hard_stop"] = True
         grp = ind.indicator_group
         parts = [f'"type": "{ind.indicator_type}"', f'"params": {_format_params(params)}']
         if grp:
@@ -3476,7 +3486,7 @@ async def export_profile_python(profile_name: str):
         f'# Exported from profile: {p.name}',
         f'_{profile_name.upper()} = {{',
         _field("display_name", p.display_name or p.name),
-        _field("symbols", ["SOL_USDC", "ETH_USDC", "BTC_USDC"]),
+        _field("symbols", symbols),
         _field("strategy_type", p.strategy_type or "trend_following"),
         _field("entry_timeframe", p.entry_timeframe or "15"),
         _field("trend_timeframe", p.trend_timeframe or "60"),
