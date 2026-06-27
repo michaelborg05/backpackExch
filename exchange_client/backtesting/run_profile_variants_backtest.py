@@ -34,8 +34,8 @@ start = end - timedelta(days=args.days)
 print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
 
 VARIANT_SETS = {
-    "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","XRP_USDC","BNB_USDC"]),
-    "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","XRP_USDC","BNB_USDC"]),
+    "range": (RANGE_VARIANTS,    ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
+    "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","BNB_USDC","XRP_USDC","ZEC_USDC"]),
     "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","BNB_USDC","ZEC_USDC"]),
     "mr_short":    (MEAN_REV_SHORT_VARIANTS,    ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
@@ -133,7 +133,7 @@ with get_db_session() as db:
 
     if all_results_by_variant:
         merged = list(all_results_by_variant.values())
-        merged.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)
+        merged.sort(key=lambda r: r.profit_factor, reverse=True)
 
         print(f"\n\n{'='*80}")
         print(f"  TOTALS ACROSS ALL SYMBOLS")
