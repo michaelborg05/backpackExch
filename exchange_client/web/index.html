@@ -351,10 +351,16 @@
         <div style="padding:8px 12px;border-bottom:1px solid var(--brd);display:flex;flex-direction:column;gap:6px">
           <input id="profile-filter" type="text" placeholder="Filter profiles…" oninput="renderSidebar()"
             style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;border-radius:3px;outline:none">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd);cursor:pointer;user-select:none">
-            <input type="checkbox" id="profile-active-only" checked onchange="renderSidebar()" style="cursor:pointer">
-            Active only
-          </label>
+          <div style="display:flex;gap:14px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd);cursor:pointer;user-select:none">
+              <input type="checkbox" id="profile-active-only" checked onchange="renderSidebar()" style="cursor:pointer">
+              Active only
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd);cursor:pointer;user-select:none" title="Use regular expression for filtering">
+              <input type="checkbox" id="profile-filter-regex" onchange="renderSidebar()" style="cursor:pointer">
+              Regex
+            </label>
+          </div>
         </div>
         <div class="profile-list" id="profile-list">
           <div style="padding:16px;color:var(--txd);font-size:11px">Loading...</div>
@@ -2019,11 +2025,25 @@ function renderSidebar() {
     el.innerHTML = '<div style="padding:16px;color:var(--txd);font-size:11px">No profiles yet — create one</div>';
     return;
   }
-  const q = (document.getElementById('profile-filter')?.value ?? '').toLowerCase();
+  const q = document.getElementById('profile-filter')?.value ?? '';
   const activeOnly = document.getElementById('profile-active-only')?.checked ?? true;
+  const useRegex = document.getElementById('profile-filter-regex')?.checked ?? false;
+  let regexObj = null;
+  if (q && useRegex) {
+    try { regexObj = new RegExp(q, 'i'); } catch (_) { regexObj = null; }
+  }
   const visible = _allProfiles.filter(p => {
     if (activeOnly && !p.is_active) return false;
-    if (q && !p.display_name.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
+    if (q) {
+      if (useRegex && regexObj) {
+        if (!regexObj.test(p.display_name) && !regexObj.test(p.name)) return false;
+      } else if (useRegex) {
+        return false; // invalid regex — show nothing
+      } else {
+        const ql = q.toLowerCase();
+        if (!p.display_name.toLowerCase().includes(ql) && !p.name.toLowerCase().includes(ql)) return false;
+      }
+    }
     return true;
   });
   if (!visible.length) {
