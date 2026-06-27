@@ -66,6 +66,15 @@ def delete_old_trend_analysis(db: Session, cutoff: datetime) -> int:
     return count
 
 
+def delete_old_webhook_price_ticks(db: Session, cutoff: datetime) -> int:
+    count = db.execute(
+        text("DELETE FROM webhook_price_ticks WHERE timestamp < :cutoff"),
+        {"cutoff": cutoff}
+    ).rowcount
+    db.commit()
+    return count
+
+
 def delete_old_circuit_breaker_events(db: Session, cutoff: datetime) -> int:
     count = db.execute(
         text("DELETE FROM circuit_breaker_events WHERE triggered_at < :cutoff"),
@@ -112,6 +121,7 @@ def run_all_retention(
     results.update(tx)
 
     results["trend_analysis_log"] = delete_old_trend_analysis(db, trend_cutoff)
+    results["webhook_price_ticks"] = delete_old_webhook_price_ticks(db, trend_cutoff)
     results["circuit_breaker_events"] = delete_old_circuit_breaker_events(db, audit_cutoff)
     results["config_audit_log"] = delete_old_config_audit_log(db, audit_cutoff)
     results["daily_balance_snapshots"] = delete_old_daily_balance_snapshots(db, audit_cutoff)
