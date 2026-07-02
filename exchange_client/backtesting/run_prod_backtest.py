@@ -30,13 +30,13 @@ PROD_PROFILES = {c["display_name"]: c for c in _PROD_PROFILES_LIST}
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run prod profile backtests")
-parser.add_argument("--days",    type=int, default=10,
+parser.add_argument("--days",    type=int, default=6,
                     help="Lookback window in days (default: 14)")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")
 parser.add_argument("--profile", default=None,
                     help="Run only one prod profile by name, e.g. prod_mean_rev")
-parser.add_argument("--trades",  action="store_true", default=False,
+parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown under each profile")
 parser.add_argument("--csv",     default="/home/michael/Downloads/prod_backtest.csv",
                     help="Export all trades to CSV (requires --trades)")
