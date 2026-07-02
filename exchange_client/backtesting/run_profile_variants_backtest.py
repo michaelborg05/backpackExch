@@ -15,7 +15,7 @@ parser.add_argument("--days",    type=int, default= 10,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
+parser.add_argument("--set",     default="mr_short", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
