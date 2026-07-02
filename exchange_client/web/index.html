@@ -820,6 +820,28 @@
       </div>
     </div>
 
+    <!-- ── Export All Profiles Modal ────────────────────────────────────── -->
+    <div class="modal-overlay" id="export-all-modal" style="display:none" onclick="if(event.target===this)closeExportAllModal()">
+      <div class="modal-box" style="max-width:760px;width:92vw">
+        <div class="modal-header">
+          <span class="modal-title">Export All Active Profiles</span>
+          <button class="modal-close" onclick="closeExportAllModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--txd);margin-bottom:10px;line-height:1.5">
+            Active profiles with Signal Generation enabled. Paste directly into <code>prod_profiles.py</code> to replace <code>PROD_PROFILES</code>.
+          </div>
+          <textarea id="export-all-code" rows="26" readonly spellcheck="false"
+            style="width:100%;box-sizing:border-box;font-family:'Space Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:8px 10px;resize:vertical;outline:none;line-height:1.45"></textarea>
+          <div id="export-all-status" style="font-size:11px;color:var(--txd);margin-top:6px"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
+          <button onclick="closeExportAllModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Close</button>
+          <button onclick="copyExportAll()" style="padding:6px 16px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600">Copy</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Indicator Modal ───────────────────────────────────────────────── -->
     <div class="modal-overlay" id="ind-modal-p" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeIndModalP()">
       <div class="modal-box">
@@ -912,6 +934,17 @@
       <div id="sys-scan-results" style="padding:0 20px 18px;display:none">
         <div id="sys-scan-summary" style="font-size:11px;color:var(--txd);margin-bottom:10px"></div>
         <div id="sys-scan-body"></div>
+      </div>
+    </div>
+
+    <!-- Export All Profiles -->
+    <div class="card fi" style="margin-bottom:18px">
+      <div class="ch" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span class="ct">Export Profiles</span>
+          <span class="cb">Export all active profiles with Signal Generation enabled as a ready-to-paste <code>prod_profiles.py</code> array</span>
+        </div>
+        <button class="mbtn a" onclick="openExportAllModal()" style="flex-shrink:0">&#8659; Export All Profiles</button>
       </div>
     </div>
 
@@ -3426,6 +3459,40 @@ async function copyExportedProfile() {
     showToast('Copied to clipboard');
   } catch {
     document.getElementById('export-profile-status').textContent = 'Select all and copy manually (Ctrl+A, Ctrl+C)';
+  }
+}
+
+// ── Export All Profiles ───────────────────────────────────────────────────────
+
+async function openExportAllModal() {
+  document.getElementById('export-all-code').value = 'Loading…';
+  document.getElementById('export-all-status').textContent = '';
+  document.getElementById('export-all-modal').style.display = 'flex';
+  try {
+    const r = await fetch(BASE + '/profiles/export-all-python', {
+      credentials: 'include',
+      headers: { 'X-API-Key': akey() || '' },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    document.getElementById('export-all-code').value = await r.text();
+  } catch (e) {
+    document.getElementById('export-all-code').value = '';
+    document.getElementById('export-all-status').textContent = 'Error: ' + (e.message || 'Failed to export');
+  }
+}
+
+function closeExportAllModal() {
+  document.getElementById('export-all-modal').style.display = 'none';
+}
+
+async function copyExportAll() {
+  const code = document.getElementById('export-all-code').value;
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('Copied to clipboard');
+  } catch {
+    document.getElementById('export-all-status').textContent = 'Select all and copy manually (Ctrl+A, Ctrl+C)';
   }
 }
 

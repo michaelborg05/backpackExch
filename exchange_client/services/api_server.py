@@ -3396,18 +3396,10 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
         return _serialize_cb(cb)
 
 # ---------------------------------------------------------------------------
-# GET /profiles/{profile_name}/export-python
+# Profile Python export — shared rendering helper
 # ---------------------------------------------------------------------------
 
-@app.get("/profiles/{profile_name}/export-python", dependencies=[Depends(require_read_permission)])
-async def export_profile_python(profile_name: str):
-    """
-    Export a profile as a Python dict string matching the prod_profiles.py format.
-    Returns a plain-text response you can paste directly into prod_profiles.py.
-    """
-    from db.utils import get_db_session
-    from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours, SymbolConfig
-    from fastapi.responses import PlainTextResponse
+def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
     import json
 
     def _py_val(v):
@@ -3423,34 +3415,8 @@ async def export_profile_python(profile_name: str):
         items = ", ".join(f'"{k}": {_py_val(v)}' for k, v in params.items())
         return "{" + items + "}"
 
-    with get_db_session() as db:
-        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
-        if not p:
-            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
-
-        indicators = (
-            db.query(IndicatorDB)
-            .filter(IndicatorDB.profile_id == p.id, IndicatorDB.enabled == True)
-            .order_by(IndicatorDB.category, IndicatorDB.id)
-            .all()
-        )
-        hours = (
-            db.query(ProfileTradingHours)
-            .filter(ProfileTradingHours.profile_id == p.id)
-            .order_by(ProfileTradingHours.day_of_week)
-            .all()
-        )
-        symbol_rows = (
-            db.query(SymbolConfig)
-            .filter(SymbolConfig.profile_name == profile_name, SymbolConfig.enabled == True)
-            .order_by(SymbolConfig.symbol)
-            .all()
-        )
-        symbols = [s.symbol for s in symbol_rows]
-
     def _ind_line(ind) -> str:
         params = dict(ind.params or {})
-        # is_hard_stop is a separate DB column; inject it back into params as hard_stop
         if ind.is_hard_stop:
             params["hard_stop"] = True
         grp = ind.indicator_group
@@ -3485,7 +3451,7 @@ async def export_profile_python(profile_name: str):
 
     fields = [
         f'# Exported from profile: {p.name}',
-        f'_{profile_name.upper()} = {{',
+        '{',
         _field("display_name", p.display_name or p.name),
         _field("symbols", symbols),
         _field("strategy_type", p.strategy_type or "trend_following"),
@@ -3523,10 +3489,95 @@ async def export_profile_python(profile_name: str):
         fields.append(_ind_block("exit", "exit_indicators"))
         fields.append(_field("min_exit_indicators_required", p.min_exit_indicators_required or 2))
 
-    fields.append("}")
+    fields.append("},")
+    return "\n".join(fields)
 
-    output = "\n".join(fields)
-    return PlainTextResponse(content=output)
+
+# GET /profiles/{profile_name}/export-python
+# ---------------------------------------------------------------------------
+
+@app.get("/profiles/{profile_name}/export-python", dependencies=[Depends(require_read_permission)])
+async def export_profile_python(profile_name: str):
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours, SymbolConfig
+    from fastapi.responses import PlainTextResponse
+
+    with get_db_session() as db:
+        p = db.query(TradingProfileDB).filter(TradingProfileDB.name == profile_name).first()
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+        indicators = (
+            db.query(IndicatorDB)
+            .filter(IndicatorDB.profile_id == p.id, IndicatorDB.enabled == True)
+            .order_by(IndicatorDB.category, IndicatorDB.id)
+            .all()
+        )
+        hours = (
+            db.query(ProfileTradingHours)
+            .filter(ProfileTradingHours.profile_id == p.id)
+            .order_by(ProfileTradingHours.day_of_week)
+            .all()
+        )
+        symbol_rows = (
+            db.query(SymbolConfig)
+            .filter(SymbolConfig.profile_name == profile_name, SymbolConfig.enabled == True)
+            .order_by(SymbolConfig.symbol)
+            .all()
+        )
+        symbols = [s.symbol for s in symbol_rows]
+
+    return PlainTextResponse(content=_render_profile_python_dict(p, indicators, hours, symbols))
+
+
+# GET /profiles/export-all-python
+# ---------------------------------------------------------------------------
+
+@app.get("/profiles/export-all-python", dependencies=[Depends(require_read_permission)])
+async def export_all_profiles_python():
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours, SymbolConfig
+    from fastapi.responses import PlainTextResponse
+    from datetime import datetime, timezone
+
+    with get_db_session() as db:
+        profiles = (
+            db.query(TradingProfileDB)
+            .filter(
+                TradingProfileDB.is_active == True,
+                TradingProfileDB.enable_signal_generation == True,
+            )
+            .order_by(TradingProfileDB.name)
+            .all()
+        )
+
+        blocks = []
+        for p in profiles:
+            indicators = (
+                db.query(IndicatorDB)
+                .filter(IndicatorDB.profile_id == p.id, IndicatorDB.enabled == True)
+                .order_by(IndicatorDB.category, IndicatorDB.id)
+                .all()
+            )
+            hours = (
+                db.query(ProfileTradingHours)
+                .filter(ProfileTradingHours.profile_id == p.id)
+                .order_by(ProfileTradingHours.day_of_week)
+                .all()
+            )
+            symbol_rows = (
+                db.query(SymbolConfig)
+                .filter(SymbolConfig.profile_name == p.name, SymbolConfig.enabled == True)
+                .order_by(SymbolConfig.symbol)
+                .all()
+            )
+            symbols = [s.symbol for s in symbol_rows]
+            blocks.append(_render_profile_python_dict(p, indicators, hours, symbols))
+
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    header = f"# Exported {len(blocks)} active profile(s) with signal generation — {now}\n"
+    body = "PROD_PROFILES = [\n" + "\n".join(blocks) + "\n]"
+    return PlainTextResponse(content=header + body)
 
 
 # ---------------------------------------------------------------------------
