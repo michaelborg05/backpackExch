@@ -157,6 +157,7 @@ SWING_VARIANTS = {
     # Volume spike as hard-stop on entry differentiates this profile from p3_v7.
     "p3_v8_vol_pullback": {
         **_SWING_BASE,
+        "symbols": ['SOL_USDC', 'BTC_USDC', 'ETH_USDC','XRP_USDC'],
         "take_profit_pct": 3.0,
         "stop_loss_pct": 2.0,
         "trailing_stop_pct": 1.2,
@@ -191,6 +192,7 @@ SWING_VARIANTS = {
 
     "p3_v6_vol_pullback_adx": {
         **_SWING_BASE,
+        "symbols": ['SOL_USDC', 'BTC_USDC', 'ETH_USDC','XRP_USDC','ZEC_USDC'],
         "take_profit_pct": 3.0,
         "stop_loss_pct": 2.0,
         "trailing_stop_pct": 1.2,
@@ -307,6 +309,7 @@ SWING_VARIANTS = {
 
     "p3_v13_wide_rsi_trend": {
         **_SWING_BASE,
+        "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC'],
         "take_profit_pct": 3.0,
         "stop_loss_pct": 2.0,
         "trailing_stop_pct": 0.6,

@@ -23,12 +23,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_samples.prod_profiles import PROD_PROFILES
+from backtesting.profile_samples.prod_profiles import PROD_PROFILES as _PROD_PROFILES_LIST
 from backtesting.profile_variants import run_all_variants
+
+PROD_PROFILES = {c["display_name"]: c for c in _PROD_PROFILES_LIST}
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run prod profile backtests")
-parser.add_argument("--days",    type=int, default=5,
+parser.add_argument("--days",    type=int, default=10,
                     help="Lookback window in days (default: 14)")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")

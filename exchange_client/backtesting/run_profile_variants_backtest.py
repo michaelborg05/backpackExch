@@ -15,7 +15,7 @@ parser.add_argument("--days",    type=int, default= 10,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="range", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
+parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown table under each variant")
@@ -104,7 +104,24 @@ with get_db_session() as db:
                 tf_mins = int(config.get("trend_timeframe", "60"))
                 cluster_caps[name] = CandleEntryCap(max_cluster, tf_mins)
 
+        # Warn about profile-level symbols that won't be visited (not in default set)
+        default_symbols_set = set(symbols)
+        for name, config in variants.items():
+            prof_syms = config.get("symbols")
+            if prof_syms:
+                for s in prof_syms:
+                    if s not in default_symbols_set:
+                        print(f"  WARNING: '{name}' lists symbol '{s}' which is not in the default set for '{set_name}' — skipped")
+
         for symbol in symbols:
+
+            # Filter to variants that have no symbol restriction, or explicitly include this symbol
+            active_variants = {
+                name: config for name, config in variants.items()
+                if not config.get("symbols") or symbol in config["symbols"]
+            }
+            if not active_variants:
+                continue
 
             print(f"\n{'='*60}")
             print(f"  {label} -- {symbol}")
@@ -115,7 +132,7 @@ with get_db_session() as db:
                 symbol,
                 start,
                 end,
-                variant_set=variants,
+                variant_set=active_variants,
                 verbose=args.verbose,
                 show_trades=args.trades,
                 export_csv=csv_path,
