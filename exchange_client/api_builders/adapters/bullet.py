@@ -602,6 +602,29 @@ class BulletAdapter(ExchangeAdapter):
                     )
                     order_ns.price = str(actual_price)
                 raw = None
+            elif "invalid ed25519 signature" in err_str.lower():
+                # Chain hash likely changed (network upgrade). Invalidate cache and retry once.
+                self.logger.warning(
+                    f"[Bullet] ed25519 signature rejected — chain hash may have changed. "
+                    "Invalidating cache and retrying with fresh chain hash."
+                )
+                from utils.auth import invalidate_chain_hash_cache
+                invalidate_chain_hash_cache()
+                try:
+                    call_data = self._build_place_order_call(order_ns)
+                    tx_b64 = build_bullet_transaction(
+                        private_key_b64=self.profile.secret,
+                        call_data=call_data,
+                    )
+                    raw = api_request(url, body={"body": tx_b64}, requestType=HttpMethod.POST, ssl_context=_SSL)
+                    self.logger.info(f"[Bullet] Retry with fresh chain hash succeeded for {order_ns.symbol}")
+                except Exception as retry_e:
+                    self.logger.error(
+                        f"[Bullet] /tx/submit still failing after chain hash refresh for "
+                        f"{order_ns.symbol}: {retry_e}"
+                    )
+                    self._send_trade_failure_alert(order_ns.symbol, str(retry_e))
+                    return None
             else:
                 self.logger.error(f"[Bullet] /tx/submit failed for {order_ns.symbol}: {e}")
                 return None
@@ -1053,6 +1076,23 @@ class BulletAdapter(ExchangeAdapter):
         rounded = (q // s) * s
         places = max(0, -s.as_tuple().exponent)
         return f"{rounded:.{places}f}"
+
+    def _send_trade_failure_alert(self, symbol: str, error: str) -> None:
+        """Send a Telegram alert when a Bullet trade fails to submit."""
+        try:
+            from services.telegram_service import get_telegram
+            telegram = get_telegram()
+            if telegram is None:
+                return
+            msg = (
+                f"🚨 <b>Bullet Trade Failed</b>\n\n"
+                f"Profile: <code>{self.profile.name}</code>\n"
+                f"Symbol: <code>{symbol}</code>\n"
+                f"Error: <code>{error[:300]}</code>"
+            )
+            telegram.send_message_sync(msg)
+        except Exception as e:
+            self.logger.error(f"[Bullet] Failed to send trade failure alert: {e}")
 
     def _normalize_ts_ms(self, ts) -> int:
         """Normalize a Bullet trade timestamp to milliseconds regardless of source unit."""

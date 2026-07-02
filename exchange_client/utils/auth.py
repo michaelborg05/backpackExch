@@ -133,6 +133,12 @@ def build_bullet_transaction(
 _cached_chain_info: Dict[str, Any] = {}
 
 
+def invalidate_chain_hash_cache() -> None:
+    """Clear the cached chain_hash so the next call to _fetch_chain_hash() re-fetches it."""
+    global _cached_chain_info
+    _cached_chain_info.pop("chain_hash", None)
+
+
 def _fetch_chain_hash() -> bytes:
     """Fetch chain_hash from Bullet and cache it.
 
