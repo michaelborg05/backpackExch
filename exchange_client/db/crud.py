@@ -802,42 +802,49 @@ def get_snapshot_history(
 def reset_circuit_breaker_baseline(
     db: Session,
     snapshot_id: int,
-    new_baseline: Decimal
+    new_baseline: Decimal,
+    reset_highest_balance: bool = False,
 ) -> DailyBalanceSnapshot:
     """
     Reset the circuit breaker baseline for a snapshot
-    
+
     This updates circuit_breaker_baseline while keeping starting_balance intact
     for historical tracking. Used when profit limits expire to prevent re-triggering.
-    
+
     Args:
         db: Database session
         snapshot_id: Snapshot to update
         new_baseline: New circuit breaker baseline
-        
+        reset_highest_balance: If True, force highest_balance down to new_baseline.
+            Needed for loss-limit resets: the drawdown check measures against
+            highest_balance (the high-water mark), not circuit_breaker_baseline,
+            so without this the high-water mark stays frozen at the pre-drawdown
+            peak and the breaker re-triggers on the very next check.
+
     Returns:
         Updated snapshot
     """
     snapshot = db.query(DailyBalanceSnapshot).filter(
         DailyBalanceSnapshot.id == snapshot_id
     ).first()
-    
+
     if not snapshot:
         raise ValueError(f"Snapshot {snapshot_id} not found")
-    
+
     # Update circuit breaker baseline (starting_balance stays unchanged for historical tracking)
     snapshot.circuit_breaker_baseline = new_baseline
-    
-    # Also update highest/lowest if needed
-    if new_baseline > (snapshot.highest_balance or 0):
+
+    if reset_highest_balance:
         snapshot.highest_balance = new_baseline
-    
+    elif new_baseline > (snapshot.highest_balance or 0):
+        snapshot.highest_balance = new_baseline
+
     if new_baseline < (snapshot.lowest_balance or float('inf')):
         snapshot.lowest_balance = new_baseline
-    
+
     db.commit()
     db.refresh(snapshot)
-    
+
     return snapshot
 
 def get_recently_expired_circuit_breaker(
