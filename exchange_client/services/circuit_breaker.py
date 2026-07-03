@@ -354,6 +354,13 @@ class CircuitBreakerService:
           gains as the new floor).
         - Loss limit reset: baseline is averaged between old baseline and
           balance_at_trigger (partial recovery — softer re-entry).
+
+        The loss-limit check measures drawdown from `highest_balance` (the
+        high-water mark), not from `circuit_breaker_baseline` — that field is
+        only read by the profit-limit check. So on a loss-limit reset we must
+        also pull `highest_balance` down to the new baseline; otherwise the
+        high-water mark stays frozen at the pre-drawdown peak and the breaker
+        re-triggers on the very next check with no recovery having occurred.
         """
         if not event.balance_at_trigger:
             return
@@ -372,8 +379,13 @@ class CircuitBreakerService:
             else (old_baseline + event.balance_at_trigger) / 2
         )
 
-        reset_circuit_breaker_baseline(db, cached_snap.id, new_baseline)
+        reset_circuit_breaker_baseline(
+            db, cached_snap.id, new_baseline,
+            reset_highest_balance=not is_profit_limit,
+        )
         cached_snap.circuit_breaker_baseline = new_baseline
+        if not is_profit_limit:
+            cached_snap.highest_balance = new_baseline
 
         daily_pnl_pct = (
             (new_baseline - cached_snap.starting_balance)
