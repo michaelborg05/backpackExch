@@ -33,10 +33,11 @@ from  backtesting.profile_samples.range_variants import RANGE_VARIANTS
 from backtesting.profile_samples.trend_variants import TREND_VARIANTS
 from backtesting.profile_samples.mean_reversion_short_variants import MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS
 from backtesting.profile_samples.trend_short_variants import TREND_SHORT_VARIANTS
+from backtesting.profile_samples.fade_short_variants import FADE_SHORT_VARIANTS 
 # =============================================================================
 # Convenience: all variants in one dict
 # =============================================================================
-ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS}
+ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS}
 
 # =============================================================================
 # Quick sweep runner — use this to run all variants in one go
@@ -117,6 +118,10 @@ def run_all_variants(
             "rsi", "ema20", "ema50", "adx", "vwap", "bb_pct_b",
             # Trend TF (HTF) indicators at trigger
             "htf_rsi", "htf_ema20", "htf_ema50", "htf_adx",
+            # Entry TF indicators at close (for diagnosing what went wrong)
+            "exit_rsi", "exit_ema20", "exit_ema50", "exit_adx", "exit_vwap", "exit_bb_pct_b",
+            # Trend TF (HTF) indicators at close
+            "exit_htf_rsi", "exit_htf_ema20", "exit_htf_ema50", "exit_htf_adx",
         ]
 
         file_exists = os.path.isfile(export_csv) and os.path.getsize(export_csv) > 0
@@ -131,6 +136,7 @@ def run_all_variants(
             for r in results:
                 for i, t in enumerate(r.trades, 1):
                     d = t.entry_details
+                    e = t.exit_details
                     writer.writerow({
                         "variant":      r.profile_name,
                         "symbol":       r.symbol,
@@ -155,6 +161,16 @@ def run_all_variants(
                         "htf_ema20":    d.get("htf_ema20", ""),
                         "htf_ema50":    d.get("htf_ema50", ""),
                         "htf_adx":      d.get("htf_adx", ""),
+                        "exit_rsi":       e.get("rsi", ""),
+                        "exit_ema20":     e.get("ema20", ""),
+                        "exit_ema50":     e.get("ema50", ""),
+                        "exit_adx":       e.get("adx", ""),
+                        "exit_vwap":      e.get("vwap", ""),
+                        "exit_bb_pct_b":  e.get("bb_pct_b", ""),
+                        "exit_htf_rsi":   e.get("htf_rsi", ""),
+                        "exit_htf_ema20": e.get("htf_ema20", ""),
+                        "exit_htf_ema50": e.get("htf_ema50", ""),
+                        "exit_htf_adx":   e.get("htf_adx", ""),
                     })
         print(f"\n[CSV] Trade log exported -> {export_csv}")
     return results

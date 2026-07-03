@@ -1780,8 +1780,9 @@ class BacktestTrade:
     pnl_pct:       float              = 0.0
     won:           bool               = False
 
-    # Snapshot of indicators at entry (for analysis)
+    # Snapshot of indicators at entry / exit (for analysis)
     entry_details: Dict[str, Any]     = field(default_factory=dict)
+    exit_details:  Dict[str, Any]     = field(default_factory=dict)
 
     @property
     def hold_minutes(self) -> Optional[float]:
@@ -1797,6 +1798,7 @@ class BacktestTrade:
 
     def to_dict(self) -> dict:
         d = self.entry_details
+        e = self.exit_details
         return {
             "entry_time":   self.entry_time.isoformat() if self.entry_time else None,
             "entry_price":  self.entry_price,
@@ -1818,6 +1820,17 @@ class BacktestTrade:
             "htf_ema20":    d.get("htf_ema20"),
             "htf_ema50":    d.get("htf_ema50"),
             "htf_adx":      d.get("htf_adx"),
+            # Indicator snapshot at close (for diagnosing what went wrong)
+            "exit_rsi":       e.get("rsi"),
+            "exit_ema20":     e.get("ema20"),
+            "exit_ema50":     e.get("ema50"),
+            "exit_adx":       e.get("adx"),
+            "exit_vwap":      e.get("vwap"),
+            "exit_bb_pct_b":  e.get("bb_pct_b"),
+            "exit_htf_rsi":   e.get("htf_rsi"),
+            "exit_htf_ema20": e.get("htf_ema20"),
+            "exit_htf_ema50": e.get("htf_ema50"),
+            "exit_htf_adx":   e.get("htf_adx"),
         }
 
 
@@ -1978,11 +1991,15 @@ class BacktestResult:
             "entry_time", "exit_time", "hold_minutes",
             "entry_price", "exit_price", "pnl_pct",
             "exit_reason", "confidence", "volume_ratio", "rsi_at_entry",
+            # Indicator snapshot at close (for diagnosing what went wrong)
+            "exit_rsi", "exit_ema20", "exit_ema50", "exit_adx", "exit_vwap", "exit_bb_pct_b",
+            "exit_htf_rsi", "exit_htf_ema20", "exit_htf_ema50", "exit_htf_adx",
         ]
         with open(filepath, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fields)
             writer.writeheader()
             for i, t in enumerate(self.trades, 1):
+                e = t.exit_details
                 writer.writerow({
                     "profile":       self.profile_name,
                     "symbol":        self.symbol,
@@ -1998,6 +2015,16 @@ class BacktestResult:
                     "confidence":    t.entry_details.get("confidence", ""),
                     "volume_ratio":  t.entry_details.get("volume_ratio", ""),
                     "rsi_at_entry":  t.entry_details.get("rsi", ""),
+                    "exit_rsi":      e.get("rsi", ""),
+                    "exit_ema20":    e.get("ema20", ""),
+                    "exit_ema50":    e.get("ema50", ""),
+                    "exit_adx":      e.get("adx", ""),
+                    "exit_vwap":     e.get("vwap", ""),
+                    "exit_bb_pct_b": e.get("bb_pct_b", ""),
+                    "exit_htf_rsi":  e.get("htf_rsi", ""),
+                    "exit_htf_ema20":e.get("htf_ema20", ""),
+                    "exit_htf_ema50":e.get("htf_ema50", ""),
+                    "exit_htf_adx":  e.get("htf_adx", ""),
                 })
         print(f"[CSV] Trade log saved → {filepath}")
 
@@ -2011,7 +2038,8 @@ def _exit_cooldown_mins(
     """Return cooldown duration matching prod ReEntryManager logic."""
     if reason == "take_profit":
         return tp_mins
-    if reason == "stop_loss":
+    if reason in ("stop_loss", "trend_invalidation"):
+        # Trend invalidation is a signal-failure exit like a stop loss - trigger conditions failed
         return sl_mins
     return default_mins
 
@@ -2207,6 +2235,14 @@ class BacktestEngine:
         except Exception:
             pass  # fall through to defaults
 
+        # Per-profile overrides take priority over global settings (mirrors ReEntryManager logic)
+        profile_sl_cooldown = getattr(self.profile, "sl_cooldown_minutes", None)
+        profile_tp_cooldown = getattr(self.profile, "tp_cooldown_minutes", None)
+        if profile_sl_cooldown is not None:
+            cooldown_sl_mins = profile_sl_cooldown
+        if profile_tp_cooldown is not None:
+            cooldown_tp_mins = profile_tp_cooldown
+
         # We replay ALL rows in timestamp order, feeding each timeframe into cache.
         for idx, row in enumerate(all_rows):
             prev_same_tf = self._find_prev_same_tf(all_rows, idx)
@@ -2242,11 +2278,12 @@ class BacktestEngine:
                         pnl = (open_pos["entry_price"] - exit_result["price"]) / open_pos["entry_price"] * 100
                     else:
                         pnl = (exit_result["price"] - open_pos["entry_price"]) / open_pos["entry_price"] * 100
-                    open_pos["trade"].exit_price  = exit_result["price"]
-                    open_pos["trade"].exit_time   = row_time
-                    open_pos["trade"].exit_reason = exit_result["reason"]
-                    open_pos["trade"].pnl_pct     = pnl
-                    open_pos["trade"].won         = pnl > 0
+                    open_pos["trade"].exit_price   = exit_result["price"]
+                    open_pos["trade"].exit_time    = row_time
+                    open_pos["trade"].exit_reason  = exit_result["reason"]
+                    open_pos["trade"].pnl_pct      = pnl
+                    open_pos["trade"].won          = pnl > 0
+                    open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_result["price"])
                     reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                         exit_result["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                     ))
@@ -2305,12 +2342,15 @@ class BacktestEngine:
                                         pnl = (open_pos["entry_price"] - exit_price) / open_pos["entry_price"] * 100
                                     else:
                                         pnl = (exit_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
-                                    open_pos["trade"].exit_price  = exit_price
-                                    open_pos["trade"].exit_time   = row_time
-                                    open_pos["trade"].exit_reason = "trend_invalidation"
-                                    open_pos["trade"].pnl_pct     = pnl
-                                    open_pos["trade"].won         = pnl > 0
-                                    reentry_cooldown_until = row_time + timedelta(minutes=cooldown_default_mins)
+                                    open_pos["trade"].exit_price   = exit_price
+                                    open_pos["trade"].exit_time    = row_time
+                                    open_pos["trade"].exit_reason  = "trend_invalidation"
+                                    open_pos["trade"].pnl_pct      = pnl
+                                    open_pos["trade"].won          = pnl > 0
+                                    open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_price)
+                                    reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
+                                        "trend_invalidation", cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
+                                    ))
                                     if self.verbose:
                                         print(f"{self._tag}[{row_time}] TREND_INVALIDATION ({ti_mode}) exit @ {exit_price:.4f} pnl={pnl:+.2f}% — {ti_reason}")
                                     open_pos = None
@@ -2445,13 +2485,6 @@ class BacktestEngine:
                 entry_candle_ticks = []
                 entry_tick_idx     = -1
 
-            _bb_pct_b = None
-            if cached_trend and cached_trend.bb is not None:
-                _bb = cached_trend.bb
-                if _bb.bb_upper is not None and _bb.bb_lower is not None:
-                    _bw = _bb.bb_upper - _bb.bb_lower
-                    if _bw > 0:
-                        _bb_pct_b = (entry_price - _bb.bb_lower) / _bw
             trade = BacktestTrade(
                 symbol=symbol,
                 entry_time=row_time,
@@ -2460,18 +2493,7 @@ class BacktestEngine:
                     "confidence":    round(confidence_pct, 2),
                     "volume_ratio":  volume_ratio,
                     "reason":        entry_reason,
-                    # Entry TF indicators
-                    "rsi":           cached_trend.rsi   if cached_trend else None,
-                    "ema20":         cached_trend.ema20  if cached_trend else None,
-                    "ema50":         cached_trend.ema50  if cached_trend else None,
-                    "adx":           cached_trend.adx    if cached_trend else None,
-                    "vwap":          cached_trend.vwap   if cached_trend else None,
-                    "bb_pct_b":      round(_bb_pct_b, 3) if _bb_pct_b is not None else None,
-                    # Trend TF (HTF) indicators
-                    "htf_rsi":       cached_htf.rsi    if cached_htf else None,
-                    "htf_ema20":     cached_htf.ema20   if cached_htf else None,
-                    "htf_ema50":     cached_htf.ema50   if cached_htf else None,
-                    "htf_adx":       cached_htf.adx     if cached_htf else None,
+                    **self._indicator_snapshot(cache, symbol, price=entry_price),
                 },
             )
             result.trades.append(trade)
@@ -2519,11 +2541,12 @@ class BacktestEngine:
                             pnl = (entry_price - sx_price) / entry_price * 100
                         else:
                             pnl = (sx_price - entry_price) / entry_price * 100
-                        trade.exit_price  = sx_price
-                        trade.exit_time   = row_time  # same candle; exact minute unknown
-                        trade.exit_reason = same_candle_exit["reason"]
-                        trade.pnl_pct     = pnl
-                        trade.won         = pnl > 0
+                        trade.exit_price   = sx_price
+                        trade.exit_time    = row_time  # same candle; exact minute unknown
+                        trade.exit_reason  = same_candle_exit["reason"]
+                        trade.pnl_pct      = pnl
+                        trade.won          = pnl > 0
+                        trade.exit_details = self._indicator_snapshot(cache, symbol, price=sx_price)
                         reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                             same_candle_exit["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                         ))
@@ -2545,13 +2568,43 @@ class BacktestEngine:
                 pnl = (open_pos["entry_price"] - last_price) / open_pos["entry_price"] * 100
             else:
                 pnl = (last_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
-            open_pos["trade"].exit_price  = last_price
-            open_pos["trade"].exit_time   = last_time
-            open_pos["trade"].exit_reason = "end_of_window"
-            open_pos["trade"].pnl_pct     = pnl
-            open_pos["trade"].won         = pnl > 0
+            open_pos["trade"].exit_price   = last_price
+            open_pos["trade"].exit_time    = last_time
+            open_pos["trade"].exit_reason  = "end_of_window"
+            open_pos["trade"].pnl_pct      = pnl
+            open_pos["trade"].won          = pnl > 0
+            open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=last_price)
 
         return result
+
+    # ------------------------------------------------------------------
+    # Indicator snapshot — shared by entry and exit trade records so
+    # post-mortem analysis can compare "why it fired" vs "why it closed"
+    # ------------------------------------------------------------------
+    def _indicator_snapshot(self, cache, symbol: str, price: Optional[float] = None) -> Dict[str, Any]:
+        cached_ltf = cache.get(symbol, self.profile.entry_timeframe)
+        cached_htf = cache.get(symbol, self.profile.trend_timeframe)
+
+        bb_pct_b = None
+        if price is not None and cached_ltf and cached_ltf.bb is not None:
+            bb = cached_ltf.bb
+            if bb.bb_upper is not None and bb.bb_lower is not None:
+                bw = bb.bb_upper - bb.bb_lower
+                if bw > 0:
+                    bb_pct_b = round((price - bb.bb_lower) / bw, 3)
+
+        return {
+            "rsi":       cached_ltf.rsi   if cached_ltf else None,
+            "ema20":     cached_ltf.ema20 if cached_ltf else None,
+            "ema50":     cached_ltf.ema50 if cached_ltf else None,
+            "adx":       cached_ltf.adx   if cached_ltf else None,
+            "vwap":      cached_ltf.vwap  if cached_ltf else None,
+            "bb_pct_b":  bb_pct_b,
+            "htf_rsi":   cached_htf.rsi   if cached_htf else None,
+            "htf_ema20": cached_htf.ema20 if cached_htf else None,
+            "htf_ema50": cached_htf.ema50 if cached_htf else None,
+            "htf_adx":   cached_htf.adx   if cached_htf else None,
+        }
 
     # ------------------------------------------------------------------
     # Exit logic — returns {"price": float, "reason": str} or None
