@@ -70,7 +70,8 @@ class ReEntryManager:
             if close_reason == PositionCloseReason.TAKE_PROFIT:
                 mins = tp_cooldown_minutes if tp_cooldown_minutes is not None else self.settings.cooldown_take_profit_mins
                 cooldown = mins * 60
-            elif close_reason == PositionCloseReason.STOP_LOSS:
+            elif close_reason in (PositionCloseReason.STOP_LOSS, PositionCloseReason.TREND_INVALIDATION):
+                # Trend invalidation is a signal-failure exit like a stop loss - trigger conditions failed
                 mins = sl_cooldown_minutes if sl_cooldown_minutes is not None else self.settings.cooldown_stop_loss_mins
                 cooldown = mins * 60
             else:
@@ -97,8 +98,8 @@ class ReEntryManager:
             #if current_price > recent_exit.exit_price:
             #    return False, f"Re-entry rejected. Price higher than exit (Curr: {current_price:.2f} > Exit: {recent_exit.exit_price:.2f})"
             
-            # After exit (TP/Trailing Stop/SL), require momentum reset
-            if close_reason in ["TAKE_PROFIT", "TRAILING_STOP","STOP_LOSS"]:
+            # After exit (TP/Trailing Stop/SL/Trend Invalidation), require momentum reset
+            if close_reason in ["TAKE_PROFIT", "TRAILING_STOP", "STOP_LOSS", "TREND_INVALIDATION"]:
                 reset_ok, reset_reason = self._check_momentum_reset(
                     recent_exit,
                     current_trend,
