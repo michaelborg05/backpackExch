@@ -3505,21 +3505,34 @@ def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
         '{',
         _field("display_name", p.display_name or p.name),
         _field("symbols", symbols),
+        _field("trading_type", p.trading_type or "rules_live"),
         _field("strategy_type", p.strategy_type or "trend_following"),
+        _field("market_type", p.market_type or "SPOT"),
         _field("entry_timeframe", p.entry_timeframe or "15"),
         _field("trend_timeframe", p.trend_timeframe or "60"),
+        _field("exit_timeframe", p.exit_timeframe),
         _field("take_profit_pct", float(p.take_profit_pct) if p.take_profit_pct else 1.0),
         _field("stop_loss_pct", float(p.stop_loss_pct) if p.stop_loss_pct else 0.7),
         _field("trailing_stop_pct", float(p.trailing_stop_pct) if p.trailing_stop_pct else 0.5),
         _field("arm_trailing_stop_pct", float(p.arm_trailing_stop_pct) if p.arm_trailing_stop_pct else 0.5),
         _field("use_trailing_stop", bool(p.use_trailing_stop)),
+        _field("enable_signal_generation", bool(p.enable_signal_generation)),
         _field("signal_cooldown_minutes", p.signal_cooldown_minutes or 15),
+        _field("sl_cooldown_minutes", p.sl_cooldown_minutes),
+        _field("tp_cooldown_minutes", p.tp_cooldown_minutes),
+        _field("max_cluster_entries", p.max_cluster_entries),
         _field("min_signal_confidence", float(p.min_signal_confidence) if p.min_signal_confidence else 70.0),
         _field("min_volume_ratio", float(p.min_volume_ratio) if p.min_volume_ratio else 1.0),
         _field("use_trend_filter", bool(p.use_trend_filter)),
         _field("use_entry_filter", bool(p.use_entry_filter)),
+        _field("use_atr_filter", bool(p.use_atr_filter)),
         _field("max_position_hours", p.max_position_hours or 12),
         _field("use_market_regime_filter", bool(p.use_market_regime_filter)),
+        _field("default_order_size_usdc", float(p.default_order_size_usdc) if p.default_order_size_usdc else 100.0),
+        _field("max_position_size_pct", float(p.max_position_size_pct) if p.max_position_size_pct else 10.0),
+        _field("max_open_positions", p.max_open_positions or 5),
+        _field("max_portfolio_exposure_pct", float(p.max_portfolio_exposure_pct) if p.max_portfolio_exposure_pct else 80.0),
+        _field("leverage_multiplier", float(p.leverage_multiplier) if p.leverage_multiplier else 1.0),
     ]
 
     if p.use_trend_invalidation_exit:
@@ -3530,13 +3543,19 @@ def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
         fields.append(_field("min_position_age_for_trend_check", p.min_position_age_for_trend_check))
 
     fields.append("\n".join(hours_lines))
+    if p.trend_indicator_groups:
+        fields.append(_field("trend_indicator_groups", p.trend_indicator_groups))
     fields.append(_ind_block("trend", "trend_indicators"))
     fields.append(_field("min_indicators_required", p.min_indicators_required or 2))
+    if p.entry_indicator_groups:
+        fields.append(_field("entry_indicator_groups", p.entry_indicator_groups))
     fields.append(_ind_block("entry", "entry_indicators"))
     fields.append(_field("min_entry_indicators_required", p.min_entry_indicators_required or 2))
 
     exit_inds = [i for i in indicators if i.category == "exit"]
     if exit_inds:
+        if p.exit_indicator_groups:
+            fields.append(_field("exit_indicator_groups", p.exit_indicator_groups))
         fields.append(_ind_block("exit", "exit_indicators"))
         fields.append(_field("min_exit_indicators_required", p.min_exit_indicators_required or 2))
 
