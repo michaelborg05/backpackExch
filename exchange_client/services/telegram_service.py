@@ -324,13 +324,27 @@ class TelegramService:
                             # Delete "processing" message
                             await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
                             
-                            # Send each profile's balance
-                            summary_text = f"\n=== Recent Exits for (24h) ==="
-                            for profile in profiles:                    
+                            # Collect exit summaries, skipping profiles with no exits
+                            profile_summaries = []
+                            for profile in profiles:
                                 summary = reentry_mgr.get_recent_exits_summary(profile.name, hours=24)
-                                summary_text += f"\n{profile.display_name} Total exits: {summary['total_exits']}"
-                                for reason, count in summary['by_reason'].items():
-                                    summary_text += f"\n  {reason}: {count}"
+                                if summary['total_exits'] > 0:
+                                    profile_summaries.append((profile.display_name, summary))
+
+                            # Sort so the busiest profiles show up first
+                            profile_summaries.sort(key=lambda p: p[1]['total_exits'], reverse=True)
+
+                            total_exits = sum(s['total_exits'] for _, s in profile_summaries)
+                            summary_text = f"=== Recent Exits (24h) ===\nTotal: {total_exits} exits across {len(profile_summaries)} profile(s)"
+
+                            if not profile_summaries:
+                                summary_text += "\n\nNo exits in the last 24h"
+                            else:
+                                for display_name, summary in profile_summaries:
+                                    summary_text += f"\n\n<b>{display_name}</b>"
+                                    summary_text += f"\n  Total: {summary['total_exits']}"
+                                    for reason, count in summary['by_reason'].items():
+                                        summary_text += f"\n    {reason}: {count}"
 
                             await bot.send_message(
                                 chat_id=chat_id,
