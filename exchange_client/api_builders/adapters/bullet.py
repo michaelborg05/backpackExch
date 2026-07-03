@@ -758,10 +758,14 @@ class BulletAdapter(ExchangeAdapter):
                 )
                 return None
             tx_id = str(raw.get("id", "bullet-unknown"))
-            # Find our Trade event (the taker side — is_maker=False)
-            exec_price = None
-            exec_qty = None
+            # Aggregate every taker Trade event (is_maker=False) — a single order can
+            # fill across multiple resting orders, producing several Trade events that
+            # must all be summed, not just the first one.
+            total_qty = 0.0
+            total_quote = 0.0
             order_id = str(order_ns.__dict__.get("order_id", tx_id))
+            fallback_price = None
+            fallback_qty = None
             for event in raw["events"]:
                 val = event.get("value", {})
                 trade = val.get("trade_v1") or val.get("trade") or val.get("place_order")
@@ -769,23 +773,30 @@ class BulletAdapter(ExchangeAdapter):
                     continue
                 event_key = event.get("key", "")
                 if event_key in ("Exchange/TradeV1", "Exchange/Trade") and not trade.get("is_maker", True):
-                    exec_price = str(trade.get("price", order_ns.price))
-                    exec_qty = str(trade.get("size", order_ns.quantity))
+                    fill_price = float(trade.get("price", order_ns.price))
+                    fill_qty = float(trade.get("size", order_ns.quantity))
+                    total_qty += fill_qty
+                    total_quote += fill_qty * fill_price
                     order_id = str(trade.get("order_id", tx_id))
-                    break
-                if event_key == "Exchange/PlaceOrder" and exec_price is None:
+                elif event_key == "Exchange/PlaceOrder" and fallback_price is None:
                     # Use PlaceOrder as fallback if no Trade event found
-                    exec_price = str(trade.get("price", order_ns.price))
-                    exec_qty = str(trade.get("size", order_ns.quantity))
+                    fallback_price = str(trade.get("price", order_ns.price))
+                    fallback_qty = str(trade.get("size", order_ns.quantity))
                     order_id = str(trade.get("order_id", tx_id))
 
-            if exec_price is None:
+            if total_qty > 0:
+                exec_qty = str(total_qty)
+                exec_price = str(total_quote / total_qty)  # volume-weighted average
+            elif fallback_price is not None:
+                exec_price = fallback_price
+                exec_qty = fallback_qty
+            else:
                 exec_price = str(order_ns.price)
                 exec_qty = str(order_ns.quantity)
 
             executed_quote = str(float(exec_qty) * float(exec_price))
             self.logger.info(
-                f"[Bullet] tx {tx_id} filled: qty={exec_qty} @ {exec_price}"
+                f"[Bullet] tx {tx_id} filled: qty={exec_qty} @ {exec_price} (avg)"
             )
             return OrderResponse(**{
                 "id": order_id,
