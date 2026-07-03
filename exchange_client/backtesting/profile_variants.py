@@ -52,7 +52,7 @@ def run_all_variants(
     show_trades: bool = False,
     export_csv: str = None,
     price_source: str = "candle",
-    cluster_caps: dict = None,  # variant_name -> CandleEntryCap; shared across symbol runs
+    profile_caps: dict = None,  # variant_name -> ProfileOpenPositionCap; shared across symbol runs
 ) -> list:
     """
     Run all variants and return sorted results.
@@ -60,8 +60,8 @@ def run_all_variants(
     Args:
         show_trades:  print per-trade breakdown table under each variant
         export_csv:   filepath to write all trades across all variants as CSV
-        cluster_caps: pre-created CandleEntryCap objects keyed by variant name,
-                      shared across symbol calls to enforce the cross-symbol cluster cap
+        profile_caps: pre-created ProfileOpenPositionCap objects keyed by variant name,
+                      shared across symbol calls to enforce the cross-symbol open-position cap
 
     Example:
         results = run_all_variants(db, "SOL_USDC", start, end, RANGE_VARIANTS,
@@ -76,8 +76,8 @@ def run_all_variants(
     for name, config in variant_set.items():
         profile = BacktestProfile.from_dict(name, config)
         engine  = BacktestEngine(db_session, profile, verbose=verbose)
-        cap     = cluster_caps.get(name) if cluster_caps else None
-        result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source, cluster_cap=cap)
+        cap     = profile_caps.get(name) if profile_caps else None
+        result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source, profile_cap=cap)
         results.append(result)
 
     results.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)

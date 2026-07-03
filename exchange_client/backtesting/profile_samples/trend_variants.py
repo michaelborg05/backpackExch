@@ -9,7 +9,7 @@ _TF_BASE = {
     "arm_trailing_stop_pct": 0.5,
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 15,
-    "max_cluster_entries": 2,
+    "max_open_positions_per_profile": 2,
     "min_signal_confidence": 70.0,
     "min_volume_ratio": 1.1,
     "use_trend_filter": True,

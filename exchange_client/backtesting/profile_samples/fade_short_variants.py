@@ -51,7 +51,7 @@ _MEAN_REV_SHORT_BASE = {
     "signal_cooldown_minutes": 15,
     "sl_cooldown_minutes": 90,
     "tp_cooldown_minutes": 35,
-    "max_cluster_entries": 2,
+    "max_open_positions_per_profile": 2,
     "min_signal_confidence": 75.0,
     "min_volume_ratio": 1.2,
     "use_trend_filter": False,

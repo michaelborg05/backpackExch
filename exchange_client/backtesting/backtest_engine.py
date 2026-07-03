@@ -1583,36 +1583,49 @@ class ReplayRegimeFilter:
 
 
 # ===========================================================================
-# CandleEntryCap
+# ProfileOpenPositionCap
 # ===========================================================================
 
-class CandleEntryCap:
+class ProfileOpenPositionCap:
     """
     Shared state object passed across per-symbol engine runs to enforce a
-    per-candle-period entry limit (mirrors the production cluster cap).
+    max total concurrent open positions across all symbols for a profile
+    (mirrors production max_open_positions_per_profile).
 
-    Each symbol run calls can_enter() before opening a trade and record_entry()
-    after. Because the backtest processes symbols sequentially, whichever symbol
-    runs first in the list gets priority for a given candle period.
+    Since per-symbol backtest runs are simulated sequentially rather than
+    interleaved in real time, this records each executed trade's open/close
+    time interval as it goes, then counts how many recorded intervals are
+    still open at a candidate entry time before allowing a new entry.
+
+    CAVEAT (same class of approximation as the old cluster cap): because each
+    symbol's full date range is simulated in one pass before the next symbol
+    starts, whichever symbol runs first in the list gets unconditional
+    priority — its own trades are never capped against symbols simulated
+    later, even if they'd truly overlap in calendar time. Later symbols ARE
+    capped against everything recorded so far. This makes the blocked-count
+    a directional signal, not an exact concurrent-across-symbols simulation.
+    A fully accurate version would require interleaving all symbols
+    chronologically instead of running each one's full history sequentially.
     """
 
-    def __init__(self, max_entries: int, tf_minutes: int = 60):
-        self.max_entries = max_entries
-        self.tf_minutes  = tf_minutes
-        self._counts: Dict[datetime, int] = {}
+    def __init__(self, max_positions: int):
+        self.max_positions = max_positions
+        self._intervals: List[List[Optional[datetime]]] = []  # [open_time, close_time]
         self._blocked: int = 0
 
-    def _candle_ts(self, row_time: datetime) -> datetime:
-        total    = row_time.hour * 60 + row_time.minute
-        floored  = (total // self.tf_minutes) * self.tf_minutes
-        return row_time.replace(hour=floored // 60, minute=floored % 60, second=0, microsecond=0)
+    def can_enter(self, entry_time: datetime) -> bool:
+        open_count = sum(
+            1 for (open_t, close_t) in self._intervals
+            if open_t <= entry_time and (close_t is None or close_t > entry_time)
+        )
+        return open_count < self.max_positions
 
-    def can_enter(self, row_time: datetime) -> bool:
-        return self._counts.get(self._candle_ts(row_time), 0) < self.max_entries
+    def record_entry(self, entry_time: datetime) -> int:
+        self._intervals.append([entry_time, None])
+        return len(self._intervals) - 1
 
-    def record_entry(self, row_time: datetime) -> None:
-        ts = self._candle_ts(row_time)
-        self._counts[ts] = self._counts.get(ts, 0) + 1
+    def record_exit(self, idx: int, exit_time: datetime) -> None:
+        self._intervals[idx][1] = exit_time
 
     def record_blocked(self) -> None:
         self._blocked += 1
@@ -1655,7 +1668,7 @@ class BacktestProfile:
         "trend_indicator_groups":     None,
         "entry_indicator_groups":     None,
         "trading_hours":              None,
-        "max_cluster_entries":        None,
+        "max_open_positions_per_profile": None,
         # Trend invalidation exit controls (mirrors production position_manager logic)
         "use_trend_invalidation_exit":        True,
         "trend_invalidation_indicators":      "trend",   # "trend" | "entry" | "exit"
@@ -1847,7 +1860,7 @@ class BacktestResult:
     trades:          List[BacktestTrade] = field(default_factory=list)
     signals_fired:    int = 0
     regime_blocked:   int = 0
-    cluster_blocked:  int = 0
+    profile_cap_blocked: int = 0
     rows_processed:   int = 0
     profile_params:  Dict[str, Any] = field(default_factory=dict)
 
@@ -1902,7 +1915,7 @@ class BacktestResult:
             f"Rows    : {self.rows_processed}",
             f"Signals : {self.signals_fired}",
             f"Regime⛔ : {self.regime_blocked}",
-            f"Cluster⛔: {self.cluster_blocked}",
+            f"ProfileCap⛔: {self.profile_cap_blocked}",
             f"Trades  : {self.total_trades}",
             f"Win rate: {self.win_rate:.1%}",
             f"Avg P&L : {self.avg_pnl_pct:+.2f}%",
@@ -2114,18 +2127,19 @@ class BacktestEngine:
         end: datetime,
         price_mode: str = "auto",
         price_source: str = "candle",  # "candle" | "ticks"
-        cluster_cap: Optional["CandleEntryCap"] = None,
+        profile_cap: Optional["ProfileOpenPositionCap"] = None,
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
         is_short = "short" in getattr(self.profile, "strategy_type", "")
 
-        # Resolve cluster cap: caller can pass a shared one (multi-symbol run) or we
-        # create a local one from the profile setting (single-symbol run).
-        max_cluster = getattr(self.profile, "max_cluster_entries", None)
-        effective_cap: Optional[CandleEntryCap] = cluster_cap or (
-            CandleEntryCap(max_cluster, int(getattr(self.profile, "trend_timeframe", "60")))
-            if max_cluster else None
+        # Resolve profile-wide open-position cap: caller can pass a shared one
+        # (multi-symbol run) or we create a local one from the profile setting
+        # (single-symbol run).
+        max_open_per_profile = getattr(self.profile, "max_open_positions_per_profile", None)
+        effective_cap: Optional[ProfileOpenPositionCap] = profile_cap or (
+            ProfileOpenPositionCap(max_open_per_profile)
+            if max_open_per_profile else None
         )
 
         # Strategy-aware price mode:
@@ -2284,6 +2298,8 @@ class BacktestEngine:
                     open_pos["trade"].pnl_pct      = pnl
                     open_pos["trade"].won          = pnl > 0
                     open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_result["price"])
+                    if effective_cap and open_pos["cap_idx"] is not None:
+                        effective_cap.record_exit(open_pos["cap_idx"], row_time)
                     reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                         exit_result["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                     ))
@@ -2348,6 +2364,8 @@ class BacktestEngine:
                                     open_pos["trade"].pnl_pct      = pnl
                                     open_pos["trade"].won          = pnl > 0
                                     open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_price)
+                                    if effective_cap and open_pos["cap_idx"] is not None:
+                                        effective_cap.record_exit(open_pos["cap_idx"], row_time)
                                     reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                                         "trend_invalidation", cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                                     ))
@@ -2461,12 +2479,12 @@ class BacktestEngine:
             # SIGNAL — open position
             result.signals_fired += 1
 
-            # Cluster cap: skip if this candle period is already full
+            # Profile cap: skip if the profile already has max_open_positions_per_profile open
             if effective_cap and not effective_cap.can_enter(row_time):
-                result.cluster_blocked += 1
+                result.profile_cap_blocked += 1
                 effective_cap.record_blocked()
                 if self.verbose:
-                    print(f"{self._tag}[{row_time}] Cluster cap ({effective_cap.max_entries}) reached — skipping {symbol}")
+                    print(f"{self._tag}[{row_time}] Profile cap ({effective_cap.max_positions}) reached — skipping {symbol}")
                 continue
 
             # Determine entry price and (for tick mode) which ticks remain after entry.
@@ -2497,8 +2515,7 @@ class BacktestEngine:
                 },
             )
             result.trades.append(trade)
-            if effective_cap:
-                effective_cap.record_entry(row_time)
+            cap_idx = effective_cap.record_entry(row_time) if effective_cap else None
 
             if is_short:
                 tp_price = entry_price * (1 - float(self.profile.take_profit_pct) / 100)
@@ -2517,6 +2534,7 @@ class BacktestEngine:
                 "lowest_price":    entry_price,  # short trailing low-water mark
                 "entry_time":      row_time,
                 "is_short":        is_short,
+                "cap_idx":         cap_idx,
             }
 
             # Fire cooldown: block re-signalling the same symbol too soon after a buy
@@ -2547,6 +2565,8 @@ class BacktestEngine:
                         trade.pnl_pct      = pnl
                         trade.won          = pnl > 0
                         trade.exit_details = self._indicator_snapshot(cache, symbol, price=sx_price)
+                        if effective_cap and open_pos["cap_idx"] is not None:
+                            effective_cap.record_exit(open_pos["cap_idx"], row_time)
                         reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                             same_candle_exit["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                         ))
@@ -2572,6 +2592,8 @@ class BacktestEngine:
             open_pos["trade"].exit_time    = last_time
             open_pos["trade"].exit_reason  = "end_of_window"
             open_pos["trade"].pnl_pct      = pnl
+            if effective_cap and open_pos["cap_idx"] is not None:
+                effective_cap.record_exit(open_pos["cap_idx"], last_time)
             open_pos["trade"].won          = pnl > 0
             open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=last_price)
 

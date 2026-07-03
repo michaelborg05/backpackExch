@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS,run_all_variants
-from backtesting.backtest_engine import CandleEntryCap
+from backtesting.backtest_engine import ProfileOpenPositionCap
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
@@ -98,15 +98,14 @@ with get_db_session() as db:
         elif set_name == "fade_short":
             label   = "FADE SHORT"
 
-        # Build per-variant cluster caps once, shared across all symbol runs for this set.
-        # Each cap accumulates entries across symbols so the limit is enforced globally
-        # within the same candle period (e.g. SOL entering at 04:00 counts against ETH's slot).
-        cluster_caps = {}
+        # Build per-variant profile caps once, shared across all symbol runs for this set.
+        # Each cap accumulates open positions across symbols so the limit is enforced
+        # globally for the profile (e.g. SOL and ETH share the same open-position budget).
+        profile_caps = {}
         for name, config in variants.items():
-            max_cluster = config.get("max_cluster_entries")
-            if max_cluster:
-                tf_mins = int(config.get("trend_timeframe", "60"))
-                cluster_caps[name] = CandleEntryCap(max_cluster, tf_mins)
+            max_open_per_profile = config.get("max_open_positions_per_profile")
+            if max_open_per_profile:
+                profile_caps[name] = ProfileOpenPositionCap(max_open_per_profile)
 
         # Warn about profile-level symbols that won't be visited (not in default set)
         default_symbols_set = set(symbols)
@@ -141,7 +140,7 @@ with get_db_session() as db:
                 show_trades=args.trades,
                 export_csv=csv_path,
                 price_source="ticks",
-                cluster_caps=cluster_caps,
+                profile_caps=profile_caps,
             )
 
             for r in symbol_results:
@@ -150,7 +149,7 @@ with get_db_session() as db:
                 else:
                     all_results_by_variant[r.profile_name].trades.extend(r.trades)
                     all_results_by_variant[r.profile_name].signals_fired += r.signals_fired
-                    all_results_by_variant[r.profile_name].cluster_blocked += r.cluster_blocked
+                    all_results_by_variant[r.profile_name].profile_cap_blocked += r.profile_cap_blocked
 
     if all_results_by_variant:
         merged = list(all_results_by_variant.values())

@@ -16,7 +16,7 @@ _RANGE_BASE = {
     "arm_trailing_stop_pct": 0.25,
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 10,
-    "max_cluster_entries": 2,
+    "max_open_positions_per_profile": 2,
     "min_signal_confidence": 65.0,
     "min_volume_ratio": 0.8,
     "use_trend_filter": True,

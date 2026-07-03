@@ -484,7 +484,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           </div>
           <div class="frow">
             <div class="field"><label>Default Order (USDC)</label><input id="f-ordsize" type="number" step="1" placeholder="100"></div>
-            <div class="field"><label>Max Open Positions</label><input id="f-maxpos" type="number" step="1" placeholder="5"></div>
+            <div class="field"><label>Max Open (per Symbol)</label><input id="f-maxpos" type="number" step="1" placeholder="5"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Max Open (per Profile)</label><input id="f-maxpos-profile" type="number" step="1" min="1" placeholder="No cap"></div>
           </div>
         </div>
       </div>
@@ -970,6 +973,7 @@ function updateProfileUI(p) {
   setFld('f-conf', p.min_signal_confidence); setFld('f-scancd', p.signal_cooldown_minutes);
   setFld('f-slcd', p.sl_cooldown_minutes); setFld('f-tpcd', p.tp_cooldown_minutes);
   setFld('f-ordsize', p.default_order_size_usdc); setFld('f-maxpos', p.max_open_positions);
+  setFld('f-maxpos-profile', p.max_open_positions_per_profile);
   setChk('f-sig-gen', p.enable_signal_generation); setChk('f-regime', p.use_market_regime_filter);
   setChk('f-trend', p.use_trend_filter); setChk('f-entry', p.use_entry_filter);
   setChk('f-atr', p.use_atr_filter);
@@ -994,6 +998,7 @@ async function saveProfileSettings() {
         tp_cooldown_minutes:     numOrNull('f-tpcd'),
         default_order_size_usdc: numOrNull('f-ordsize'),
         max_open_positions:      numOrNull('f-maxpos'),
+        max_open_positions_per_profile: numOrNull('f-maxpos-profile'),
         enable_signal_generation: chkVal('f-sig-gen'),
         use_market_regime_filter: chkVal('f-regime'),
         use_trend_filter:         chkVal('f-trend'),

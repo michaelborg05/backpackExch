@@ -446,7 +446,8 @@
               <div class="form-grid">
                 <div class="field"><label>Default Order Size (USDC)</label><input id="f-default_order_size_usdc" type="number" step="1" placeholder="100"></div>
                 <div class="field"><label>Max Position Size %</label><input id="f-max_position_size_pct" type="number" step="1" placeholder="40"><div class="field-hint">Max % of portfolio per position</div></div>
-                <div class="field"><label>Max Open Positions</label><input id="f-max_open_positions" type="number" step="1" placeholder="5"></div>
+                <div class="field"><label>Max Open Positions (per Symbol)</label><input id="f-max_open_positions" type="number" step="1" placeholder="5"><div class="field-hint">Max concurrent positions for each symbol independently</div></div>
+                <div class="field"><label>Max Open Positions (per Profile)</label><input id="f-max_open_positions_per_profile" type="number" step="1" min="1" placeholder="No cap"><div class="field-hint">Max total concurrent open positions across all symbols for this profile. Leave blank to disable.</div></div>
                 <div class="field"><label>Max Portfolio Exposure %</label><input id="f-max_portfolio_exposure_pct" type="number" step="1" placeholder="80"></div>
                 <div class="field" id="f-leverage-field">
                   <label>Leverage Multiplier</label>
@@ -474,11 +475,6 @@
                   <label>Post-TP Cooldown (minutes)</label>
                   <input id="f-tp_cooldown_minutes" type="number" step="5" placeholder="Global default">
                   <div class="field-hint">How long to block re-entry after a take profit. Leave blank to use the global setting. Usually shorter than SL cooldown.</div>
-                </div>
-                <div class="field">
-                  <label>Max Cluster Entries</label>
-                  <input id="f-max_cluster_entries" type="number" step="1" min="1" placeholder="No cap">
-                  <div class="field-hint">Max symbols that can enter within the same candle period (e.g. 2 for 4H profiles). Highest-confidence signals take priority. Leave blank to disable.</div>
                 </div>
                 <div class="field"><label>Min Confidence %</label><input id="f-min_signal_confidence" type="number" step="0.5" placeholder="72"><div class="field-hint">0–100; signals below this are skipped</div></div>
                 <div class="field"><label>Min Volume Ratio</label><input id="f-min_volume_ratio" type="number" step="0.1" placeholder="1.0"><div class="field-hint">1.0 = average volume</div></div>
@@ -2180,6 +2176,7 @@ function fillSettings(p) {
   set('f-default_order_size_usdc', p.default_order_size_usdc);
   set('f-max_position_size_pct', p.max_position_size_pct);
   set('f-max_open_positions', p.max_open_positions);
+  set('f-max_open_positions_per_profile', p.max_open_positions_per_profile);
   set('f-max_portfolio_exposure_pct', p.max_portfolio_exposure_pct);
   set('f-leverage_multiplier', p.leverage_multiplier ?? 1.0);
   updateLeverageField(p.market_type);
@@ -2188,7 +2185,6 @@ function fillSettings(p) {
   set('f-signal_cooldown_minutes', p.signal_cooldown_minutes);
   set('f-sl_cooldown_minutes', p.sl_cooldown_minutes);
   set('f-tp_cooldown_minutes', p.tp_cooldown_minutes);
-  set('f-max_cluster_entries', p.max_cluster_entries);
   set('f-min_signal_confidence', p.min_signal_confidence);
   set('f-min_volume_ratio', p.min_volume_ratio);
   set('f-enable_signal_generation', p.enable_signal_generation);
@@ -2371,6 +2367,7 @@ async function saveSettings() {
     default_order_size_usdc:        getNum('f-default_order_size_usdc'),
     max_position_size_pct:          getNum('f-max_position_size_pct'),
     max_open_positions:             getInt('f-max_open_positions'),
+    max_open_positions_per_profile: getInt('f-max_open_positions_per_profile'),
     max_portfolio_exposure_pct:     getNum('f-max_portfolio_exposure_pct'),
     leverage_multiplier:            getNum('f-leverage_multiplier'),
     trend_timeframe:                getStr('f-trend_timeframe'),
@@ -2378,7 +2375,6 @@ async function saveSettings() {
     signal_cooldown_minutes:        getInt('f-signal_cooldown_minutes'),
     sl_cooldown_minutes:            getInt('f-sl_cooldown_minutes'),
     tp_cooldown_minutes:            getInt('f-tp_cooldown_minutes'),
-    max_cluster_entries:            getInt('f-max_cluster_entries'),
     min_signal_confidence:          getNum('f-min_signal_confidence'),
     min_volume_ratio:               getNum('f-min_volume_ratio'),
     enable_signal_generation:       getBool('f-enable_signal_generation'),

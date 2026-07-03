@@ -8,7 +8,7 @@ _SWING_BASE = {
     "arm_trailing_stop_pct": 1.0,
     "use_trailing_stop": True,
     "signal_cooldown_minutes": 241,
-    "max_cluster_entries": 2,
+    "max_open_positions_per_profile": 2,
     "min_signal_confidence": 74.0,
     "min_volume_ratio": 1.0,
     "use_trend_filter": True,

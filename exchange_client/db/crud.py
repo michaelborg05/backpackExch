@@ -441,6 +441,32 @@ def get_open_positions_for_symbol(
         .all()
     )
 
+def get_open_positions_for_profile(
+    db: Session,
+    profile_name: str
+) -> List:
+    """
+    Get all open positions for a profile across all symbols
+
+    Args:
+        db: Database session
+        profile_name: Profile name
+
+    Returns:
+        List of open positions
+    """
+
+    return (
+        db.query(Position)
+        .filter(
+            Position.profile_name == profile_name,
+            Position.status == 'OPEN',
+            Position.remaining_quantity > 0
+        )
+        .order_by(Position.created_at.asc())
+        .all()
+    )
+
 def get_active_orders(db: Session, profile_name: str, symbol: str = None) -> List[Order]:
     """Get all open positions for a profile"""
     active_statuses = ["New", "PartiallyFilled", "TriggerPending"]

@@ -167,12 +167,21 @@ class PositionCalculator:
                     else:
                         reason += f" (limited by available balance ${available:.2f})"
             
-            from db.crud import get_open_positions_for_symbol
+            from db.crud import get_open_positions_for_symbol, get_open_positions_for_profile
 
-            # Check max open positions
+            # Check max open positions per symbol
             open_positions = get_open_positions_for_symbol(db, profile.name, symbol)
             if open_positions and len(open_positions) >= profile.max_open_positions:
                 return None, f"Max open positions reached for symbol {symbol} ({len(open_positions)}/{profile.max_open_positions})"
+
+            # Check max open positions per profile (across all symbols)
+            if profile.max_open_positions_per_profile:
+                profile_open_positions = get_open_positions_for_profile(db, profile.name)
+                if profile_open_positions and len(profile_open_positions) >= profile.max_open_positions_per_profile:
+                    return None, (
+                        f"Max open positions reached for profile {profile.name} "
+                        f"({len(profile_open_positions)}/{profile.max_open_positions_per_profile})"
+                    )
 
             if order_size_usdc < 5:
                 return None, f"USDC amount too low: {order_size_usdc})"

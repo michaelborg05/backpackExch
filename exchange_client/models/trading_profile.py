@@ -61,7 +61,6 @@ class TradingProfile(BaseModel):
     signal_cooldown_minutes: Optional[int] = 15     # Scan throttle: min minutes between signal evaluations for same symbol
     sl_cooldown_minutes: Optional[int] = None       # Post-SL re-entry pause (None = use global setting)
     tp_cooldown_minutes: Optional[int] = None       # Post-TP re-entry pause (None = use global setting)
-    max_cluster_entries: Optional[int] = None       # Max entries per candle period across symbols (None = no cap)
     min_signal_confidence: float = 75.0             # Only trade signals >= 75% confidence
     min_volume_ratio: float = 1.5                   # Require 50% above average volume
 
@@ -81,7 +80,8 @@ class TradingProfile(BaseModel):
     leverage_multiplier: float = Field(1.0, description="Leverage multiplier for perps (e.g. 3.0 = 3x). Scales available balance for position sizing. Always 1.0 for SPOT.")
     
     # Risk management
-    max_open_positions: int = 5                  # Max concurrent positions
+    max_open_positions: int = 5                  # Max concurrent positions per symbol
+    max_open_positions_per_profile: Optional[int] = None  # Max total concurrent open positions across all symbols for this profile (None = no cap)
     max_portfolio_exposure_pct: float = 80.0     # Max % of portfolio in positions
 
     class Config:
@@ -153,6 +153,7 @@ class ProfileCreateRequest(BaseModel):
     default_order_size_usdc: Optional[float] = 100.0
     max_position_size_pct: Optional[float] = 40.0
     max_open_positions: Optional[int] = 5
+    max_open_positions_per_profile: Optional[int] = None
     max_portfolio_exposure_pct: Optional[float] = 80.0
     leverage_multiplier: Optional[float] = 1.0
 
@@ -160,7 +161,6 @@ class ProfileCreateRequest(BaseModel):
     signal_cooldown_minutes: Optional[int] = 15
     sl_cooldown_minutes: Optional[int] = None
     tp_cooldown_minutes: Optional[int] = None
-    max_cluster_entries: Optional[int] = None
     min_signal_confidence: Optional[float] = 72.0
     min_volume_ratio: Optional[float] = 1.0
 
@@ -215,13 +215,13 @@ class ProfileUpdateRequest(BaseModel):
     default_order_size_usdc: Optional[float] = None
     max_position_size_pct: Optional[float] = None
     max_open_positions: Optional[int] = None
+    max_open_positions_per_profile: Optional[int] = None
     max_portfolio_exposure_pct: Optional[float] = None
     leverage_multiplier: Optional[float] = None
 
     signal_cooldown_minutes: Optional[int] = None
     sl_cooldown_minutes: Optional[int] = None
     tp_cooldown_minutes: Optional[int] = None
-    max_cluster_entries: Optional[int] = None
     min_signal_confidence: Optional[float] = None
     min_volume_ratio: Optional[float] = None
 
