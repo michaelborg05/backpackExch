@@ -200,7 +200,12 @@ class CircuitBreakerConfig(Base):
     
     # Tracking window (hours for rolling window)
     tracking_window_hours = Column(Integer, default=24)
-    
+
+    # Consecutive stop-loss breaker (per profile, not per account):
+    # pause new entries after N straight STOP_LOSS closes. NULL/0 = disabled.
+    max_consecutive_stop_losses = Column(Integer, nullable=True)
+    consecutive_sl_lock_hours = Column(Integer, default=24, server_default=text("24"))
+
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

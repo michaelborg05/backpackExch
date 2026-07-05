@@ -1636,6 +1636,60 @@ class ProfileOpenPositionCap:
 
 
 # ===========================================================================
+# ConsecutiveSLBreaker
+# ===========================================================================
+
+class ConsecutiveSLBreaker:
+    """
+    Profile-wide consecutive stop-loss circuit breaker (mirrors the live
+    CircuitBreakerService consecutive-SL breaker).
+
+    After `max_consecutive` stop_loss exits in a row — across every symbol the
+    profile trades — new entries are blocked for `lock_hours`. Any non-SL exit
+    resets the streak, and triggering resets it too, so once the pause expires
+    it takes a fresh full streak to re-trigger.
+
+    Share one instance across all symbol runs for a profile (pass it into
+    BacktestEngine.run via `sl_breaker`, same pattern as profile_cap).
+    Blocking is recomputed chronologically from every close recorded so far,
+    so it carries the same cross-symbol caveat as ProfileOpenPositionCap:
+    symbols simulated later see earlier symbols' closes, but not vice versa.
+    """
+
+    def __init__(self, max_consecutive: int, lock_hours: float = 24.0):
+        self.max_consecutive = max_consecutive
+        self.lock_hours      = lock_hours
+        self._closes: List[Tuple[datetime, str]] = []   # (close_time, exit_reason)
+        self._blocked = 0
+
+    def record_close(self, close_time: datetime, reason: str) -> None:
+        self._closes.append((close_time, reason))
+
+    def is_blocked(self, entry_time: datetime) -> bool:
+        """Replay recorded closes in time order; True if entry_time falls in a pause window."""
+        streak = 0
+        lock_until: Optional[datetime] = None
+        for close_time, reason in sorted(self._closes, key=lambda c: c[0]):
+            if close_time >= entry_time:
+                break
+            if reason == "stop_loss":
+                streak += 1
+                if streak >= self.max_consecutive:
+                    lock_until = close_time + timedelta(hours=self.lock_hours)
+                    streak = 0
+            else:
+                streak = 0
+        return bool(lock_until and entry_time < lock_until)
+
+    def record_blocked(self) -> None:
+        self._blocked += 1
+
+    @property
+    def blocked_count(self) -> int:
+        return self._blocked
+
+
+# ===========================================================================
 # BacktestProfile
 # ===========================================================================
 
@@ -1669,6 +1723,18 @@ class BacktestProfile:
         "entry_indicator_groups":     None,
         "trading_hours":              None,
         "max_open_positions_per_profile": None,
+        "max_position_hours":         None,
+        # Fill realism — prod stop fills average ~0.2% beyond the stop price
+        # (market order fires after price has already crossed the SL level).
+        # taker_fee_pct defaults to 0 because prod's profit_pct is price-based
+        # (fees excluded); set it per-side to model net PnL instead.
+        "stop_loss_slippage_pct":     0.2,
+        "taker_fee_pct":              0.0,
+        # Consecutive stop-loss circuit breaker (mirrors live CircuitBreakerService):
+        # after N straight stop_loss exits, block new entries for lock_hours.
+        # None/0 disables.
+        "max_consecutive_stop_losses": None,
+        "consecutive_sl_lock_hours":   24,
         # Trend invalidation exit controls (mirrors production position_manager logic)
         "use_trend_invalidation_exit":        True,
         "trend_invalidation_indicators":      "trend",   # "trend" | "entry" | "exit"
@@ -1861,6 +1927,7 @@ class BacktestResult:
     signals_fired:    int = 0
     regime_blocked:   int = 0
     profile_cap_blocked: int = 0
+    sl_breaker_blocked:  int = 0
     rows_processed:   int = 0
     profile_params:  Dict[str, Any] = field(default_factory=dict)
 
@@ -1916,6 +1983,7 @@ class BacktestResult:
             f"Signals : {self.signals_fired}",
             f"Regime⛔ : {self.regime_blocked}",
             f"ProfileCap⛔: {self.profile_cap_blocked}",
+            f"SLBreaker⛔: {self.sl_breaker_blocked}",
             f"Trades  : {self.total_trades}",
             f"Win rate: {self.win_rate:.1%}",
             f"Avg P&L : {self.avg_pnl_pct:+.2f}%",
@@ -2128,6 +2196,7 @@ class BacktestEngine:
         price_mode: str = "auto",
         price_source: str = "candle",  # "candle" | "ticks"
         profile_cap: Optional["ProfileOpenPositionCap"] = None,
+        sl_breaker: Optional["ConsecutiveSLBreaker"] = None,
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
@@ -2140,6 +2209,17 @@ class BacktestEngine:
         effective_cap: Optional[ProfileOpenPositionCap] = profile_cap or (
             ProfileOpenPositionCap(max_open_per_profile)
             if max_open_per_profile else None
+        )
+
+        # Resolve consecutive-SL breaker the same way: shared across symbols
+        # when passed in, otherwise local (per-symbol streaks only).
+        max_consec_sl = getattr(self.profile, "max_consecutive_stop_losses", None)
+        effective_sl_breaker: Optional[ConsecutiveSLBreaker] = sl_breaker or (
+            ConsecutiveSLBreaker(
+                int(max_consec_sl),
+                float(getattr(self.profile, "consecutive_sl_lock_hours", 24) or 24),
+            )
+            if max_consec_sl else None
         )
 
         # Strategy-aware price mode:
@@ -2282,16 +2362,16 @@ class BacktestEngine:
                     candle_ticks    = self._get_candle_ticks(tick_times, tick_prices, candle_start_ts, candle_end_ts)
                     if candle_ticks:
                         exit_result = self._check_exit_from_prices(open_pos, candle_ticks)
+                        if exit_result is None:
+                            # Tick path skips _check_exit, so run the stale check here
+                            exit_result = self._check_stale_exit(open_pos, row, row_time)
                     else:
                         exit_result = self._check_exit(open_pos, row)  # fallback: no ticks for this candle
                 else:
                     exit_result = self._check_exit(open_pos, row)
 
                 if exit_result:
-                    if is_short:
-                        pnl = (open_pos["entry_price"] - exit_result["price"]) / open_pos["entry_price"] * 100
-                    else:
-                        pnl = (exit_result["price"] - open_pos["entry_price"]) / open_pos["entry_price"] * 100
+                    pnl = self._net_pnl(open_pos["entry_price"], exit_result["price"], is_short)
                     open_pos["trade"].exit_price   = exit_result["price"]
                     open_pos["trade"].exit_time    = row_time
                     open_pos["trade"].exit_reason  = exit_result["reason"]
@@ -2300,6 +2380,8 @@ class BacktestEngine:
                     open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_result["price"])
                     if effective_cap and open_pos["cap_idx"] is not None:
                         effective_cap.record_exit(open_pos["cap_idx"], row_time)
+                    if effective_sl_breaker:
+                        effective_sl_breaker.record_close(row_time, exit_result["reason"])
                     reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                         exit_result["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                     ))
@@ -2354,10 +2436,7 @@ class BacktestEngine:
                                 )
                                 if not trend_still_ok:
                                     exit_price = float(row.close)
-                                    if is_short:
-                                        pnl = (open_pos["entry_price"] - exit_price) / open_pos["entry_price"] * 100
-                                    else:
-                                        pnl = (exit_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
+                                    pnl = self._net_pnl(open_pos["entry_price"], exit_price, is_short)
                                     open_pos["trade"].exit_price   = exit_price
                                     open_pos["trade"].exit_time    = row_time
                                     open_pos["trade"].exit_reason  = "trend_invalidation"
@@ -2366,6 +2445,8 @@ class BacktestEngine:
                                     open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_price)
                                     if effective_cap and open_pos["cap_idx"] is not None:
                                         effective_cap.record_exit(open_pos["cap_idx"], row_time)
+                                    if effective_sl_breaker:
+                                        effective_sl_breaker.record_close(row_time, "trend_invalidation")
                                     reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                                         "trend_invalidation", cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                                     ))
@@ -2387,6 +2468,14 @@ class BacktestEngine:
             if fire_cooldown_until and row_time < fire_cooldown_until:
                 continue
             if reentry_cooldown_until and row_time < reentry_cooldown_until:
+                continue
+
+            # Consecutive-SL circuit breaker: profile paused after N straight stop losses
+            if effective_sl_breaker and effective_sl_breaker.is_blocked(row_time):
+                result.sl_breaker_blocked += 1
+                effective_sl_breaker.record_blocked()
+                if self.verbose:
+                    print(f"{self._tag}[{row_time}] Consecutive-SL breaker active — skipping {symbol}")
                 continue
 
             # Run market regime filter
@@ -2555,10 +2644,7 @@ class BacktestEngine:
                     same_candle_exit = self._check_exit_from_prices(open_pos, remaining)
                     if same_candle_exit:
                         sx_price = same_candle_exit["price"]
-                        if is_short:
-                            pnl = (entry_price - sx_price) / entry_price * 100
-                        else:
-                            pnl = (sx_price - entry_price) / entry_price * 100
+                        pnl = self._net_pnl(entry_price, sx_price, is_short)
                         trade.exit_price   = sx_price
                         trade.exit_time    = row_time  # same candle; exact minute unknown
                         trade.exit_reason  = same_candle_exit["reason"]
@@ -2567,6 +2653,8 @@ class BacktestEngine:
                         trade.exit_details = self._indicator_snapshot(cache, symbol, price=sx_price)
                         if effective_cap and open_pos["cap_idx"] is not None:
                             effective_cap.record_exit(open_pos["cap_idx"], row_time)
+                        if effective_sl_breaker:
+                            effective_sl_breaker.record_close(row_time, same_candle_exit["reason"])
                         reentry_cooldown_until = row_time + timedelta(minutes=_exit_cooldown_mins(
                             same_candle_exit["reason"], cooldown_default_mins, cooldown_tp_mins, cooldown_sl_mins
                         ))
@@ -2584,10 +2672,7 @@ class BacktestEngine:
                 last_price = float(last_row.close)
                 last_time  = last_row.timestamp.replace(tzinfo=timezone.utc) \
                              if last_row.timestamp.tzinfo is None else last_row.timestamp
-            if is_short:
-                pnl = (open_pos["entry_price"] - last_price) / open_pos["entry_price"] * 100
-            else:
-                pnl = (last_price - open_pos["entry_price"]) / open_pos["entry_price"] * 100
+            pnl = self._net_pnl(open_pos["entry_price"], last_price, is_short)
             open_pos["trade"].exit_price   = last_price
             open_pos["trade"].exit_time    = last_time
             open_pos["trade"].exit_reason  = "end_of_window"
@@ -2629,6 +2714,28 @@ class BacktestEngine:
         }
 
     # ------------------------------------------------------------------
+    # PnL / fill helpers
+    # ------------------------------------------------------------------
+    def _net_pnl(self, entry_price: float, exit_price: float, is_short: bool) -> float:
+        """Percent PnL net of per-side taker fees (taker_fee_pct, default 0)."""
+        if is_short:
+            gross = (entry_price - exit_price) / entry_price * 100
+        else:
+            gross = (exit_price - entry_price) / entry_price * 100
+        return gross - 2.0 * float(getattr(self.profile, "taker_fee_pct", 0.0) or 0.0)
+
+    def _slipped_sl_fill(self, pos: dict) -> float:
+        """
+        Stop-loss fill price including slippage. Prod fires a market order after
+        price has already crossed the SL level, so fills land past the stop
+        (measured avg ~0.2% on bullet_shorts_v15AI, Jun 30 – Jul 5 2026).
+        """
+        slip = float(getattr(self.profile, "stop_loss_slippage_pct", 0.0) or 0.0) / 100
+        if pos.get("is_short", False):
+            return pos["sl_price"] * (1 + slip)
+        return pos["sl_price"] * (1 - slip)
+
+    # ------------------------------------------------------------------
     # Exit logic — returns {"price": float, "reason": str} or None
     # ------------------------------------------------------------------
     def _check_exit(self, pos: dict, row) -> Optional[dict]:
@@ -2640,7 +2747,7 @@ class BacktestEngine:
         if is_short:
             # Stop loss: price rose above SL
             if high >= pos["sl_price"]:
-                return {"price": pos["sl_price"], "reason": "stop_loss", "candle_price": high}
+                return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss", "candle_price": high}
             # Take profit: price fell to TP
             if low <= pos["tp_price"]:
                 return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": low}
@@ -2653,7 +2760,7 @@ class BacktestEngine:
         else:
             # Stop loss: price fell below SL
             if low <= pos["sl_price"]:
-                return {"price": pos["sl_price"], "reason": "stop_loss", "candle_price": low}
+                return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss", "candle_price": low}
             # Take profit: price rose to TP
             if high >= pos["tp_price"]:
                 return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": high}
@@ -2664,16 +2771,33 @@ class BacktestEngine:
                 if low <= trail_sl:
                     return {"price": trail_sl, "reason": "trailing_stop", "candle_price": low}
 
-        # Max position age (hours)
-        max_hours = getattr(self.profile, "max_position_hours", None)
-        if max_hours:
-            row_time = row.timestamp.replace(tzinfo=timezone.utc) \
-                       if row.timestamp.tzinfo is None else row.timestamp
-            age_hours = (row_time - pos["entry_time"]).total_seconds() / 3600
-            if age_hours >= max_hours:
-                return {"price": float(row.close), "reason": "max_age", "candle_price": close}
+        row_time = row.timestamp.replace(tzinfo=timezone.utc) \
+                   if row.timestamp.tzinfo is None else row.timestamp
+        return self._check_stale_exit(pos, row, row_time)
 
-        return None
+    def _check_stale_exit(self, pos: dict, row, row_time: datetime) -> Optional[dict]:
+        """
+        Stale-position exit — mirrors prod PositionManager._check_stale_position:
+        after max_position_hours, exit only if the trade has made <=50% progress
+        toward TP; a trade that is running is left to trail / hit TP.
+        (Prod computes progress long-only; here it is direction-aware.)
+        """
+        max_hours = getattr(self.profile, "max_position_hours", None)
+        if not max_hours:
+            return None
+        age_hours = (row_time - pos["entry_time"]).total_seconds() / 3600
+        if age_hours < max_hours:
+            return None
+
+        close = float(row.close)
+        if pos.get("is_short", False):
+            profit_pct = (pos["entry_price"] - close) / pos["entry_price"] * 100
+        else:
+            profit_pct = (close - pos["entry_price"]) / pos["entry_price"] * 100
+        progress_pct = profit_pct / float(self.profile.take_profit_pct) * 100
+        if progress_pct > 50:
+            return None
+        return {"price": close, "reason": "stale_position", "candle_price": close}
 
     # ------------------------------------------------------------------
     # Tick-based helpers
@@ -2784,7 +2908,7 @@ class BacktestEngine:
             # --- check exits ---
             if is_short:
                 if price >= pos["sl_price"]:
-                    return {"price": pos["sl_price"], "reason": "stop_loss"}
+                    return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss"}
                 if price <= pos["tp_price"]:
                     return {"price": pos["tp_price"], "reason": "take_profit"}
                 if use_ts and pos["trailing_armed"]:
@@ -2793,7 +2917,7 @@ class BacktestEngine:
                         return {"price": trail_sl, "reason": "trailing_stop"}
             else:
                 if price <= pos["sl_price"]:
-                    return {"price": pos["sl_price"], "reason": "stop_loss"}
+                    return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss"}
                 if price >= pos["tp_price"]:
                     return {"price": pos["tp_price"], "reason": "take_profit"}
                 if use_ts and pos["trailing_armed"]:
@@ -2821,6 +2945,8 @@ class BacktestEngine:
             "trailing_stop_pct", "arm_trailing_stop_pct",
             "use_trailing_stop", "min_indicators_required",
             "min_entry_indicators_required",
+            "stop_loss_slippage_pct", "taker_fee_pct",
+            "max_consecutive_stop_losses",
         ]
         return {k: getattr(self.profile, k, None) for k in keys}
 

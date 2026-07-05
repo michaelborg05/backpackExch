@@ -269,5 +269,7 @@ class CircuitBreakerUpdateRequest(BaseModel):
     max_daily_loss_pct: Optional[float] = None
     profit_lock_hours: Optional[int] = None
     loss_lock_hours: Optional[int] = None
+    max_consecutive_stop_losses: Optional[int] = None  # 0 disables the consecutive-SL breaker
+    consecutive_sl_lock_hours: Optional[int] = None
     is_active: Optional[bool] = None
 
