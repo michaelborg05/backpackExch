@@ -718,39 +718,49 @@ class TelegramService:
         return balance_text or "❌ No balance data available"
 
     def get_position_data(self):
-        """Fetch position data from the exchange."""
+        """Fetch position data from the exchange, showing only profiles with open positions."""
         profiles = self.profile_manager.get_all_profiles()
         msg = ""
+        total_positions = 0
+        profiles_with_positions = 0
         try:
             for profile in profiles:
-                msg += f"<b>[{profile.display_name}]</b>\n"
                 with get_db_session() as db:
                     open_positions = get_open_positions(db, profile.name)
                 if open_positions is None or len(open_positions) == 0:
-                    msg += "No open positions found\n"
                     continue
-                
+
+                profiles_with_positions += 1
+                total_positions += len(open_positions)
+                msg += f"<b>[{profile.display_name}]</b>\n"
+
                 for position in open_positions:
                     symbol = position.symbol
                     price_cache = get_price_cache()    # Get price cache instance
-                    price = price_cache.get_price(symbol)
-                    price = float(price)
+                    price = float(price_cache.get_price(symbol))
                     entry_price = float(position.entry_price)
-                    msg += f"{symbol}: ${entry_price}->${price}{"*" if position.trailing_stop_armed else ""}"
                     is_short = getattr(position, 'direction', 'LONG').upper() == 'SHORT'
                     if is_short:
                         profit_pct = ((entry_price - price) / entry_price) * 100
                     else:
                         profit_pct = ((price - entry_price) / entry_price) * 100
-                    msg += f" ({profit_pct:.2f}%)\n"
+                    emoji = "🟢" if profit_pct >= 0 else "🔴"
+                    trail = "*" if position.trailing_stop_armed else ""
+                    msg += (
+                        f"{emoji} {symbol}: ${entry_price:.4f}->${price:.4f}{trail} "
+                        f"({profit_pct:+.2f}%)\n"
+                    )
 
                 msg += "\n"
-            return msg
+
+            if total_positions == 0:
+                return "✅ No open positions across any profile"
+
+            header = f"📊 <b>{total_positions} open position(s) across {profiles_with_positions} profile(s)</b>\n\n"
+            return header + msg
         except Exception as e:
             self.logger.error(f"Error in get_position_data: {e}")
             return "Error in get_position_data"
-        
-        return None
 # Global instance
 _telegram: Optional[TelegramService] = None
 
