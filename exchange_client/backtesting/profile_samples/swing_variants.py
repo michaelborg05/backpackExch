@@ -13,6 +13,7 @@ _SWING_BASE = {
     "min_volume_ratio": 1.0,
     "use_trend_filter": True,
     "use_entry_filter": True,
+    "stop_loss_slippage_pct": 0.05,
     "max_position_hours": 72,
     "use_market_regime_filter": False,
     # Trend invalidation exit — mirrors production position_manager behaviour.
@@ -232,6 +233,7 @@ SWING_VARIANTS = {
     # If WR/PF stay near v9 but trades recover toward v7 levels, this is the keeper.
     "p3_v11_slope_relaxed": {
         **_SWING_BASE,
+        "symbols": ['SOL_USDC', 'BTC_USDC', 'ETH_USDC','XRP_USDC','ZEC_USDC','BNB_USDC'],
         "take_profit_pct": 3.5,
         "stop_loss_pct": 2.0,
         "trailing_stop_pct": 0.6,
