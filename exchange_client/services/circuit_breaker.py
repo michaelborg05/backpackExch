@@ -10,6 +10,9 @@ from db.utils import get_db_session
 from db.crud import (
     get_circuit_breaker_config,
     get_active_circuit_breaker,
+    get_active_consecutive_sl_breaker,
+    get_latest_consecutive_sl_event,
+    get_recent_position_closes,
     create_circuit_breaker_event,
     expire_circuit_breaker,
     manually_expire_event,
@@ -19,6 +22,7 @@ from db.crud import (
     finalize_daily_snapshot,
     reset_circuit_breaker_baseline,
     adjust_snapshot_for_transfer,
+    CONSECUTIVE_SL_REASON_PREFIX,
 )
 from models.circuit_breaker import (
     CachedCircuitBreakerConfig,
@@ -79,6 +83,10 @@ class CircuitBreakerService:
         self._config_cache: Dict[str, CachedCircuitBreakerConfig] = {}   # keyed by profile_name
         self._event_cache: Dict[str, Optional[CachedCircuitBreakerEvent]] = {}   # keyed by cache_key
         self._snapshot_cache: Dict[str, CachedDailySnapshot] = {}                # keyed by cache_key
+        # Consecutive stop-loss breaker state — profile-scoped, unlike the
+        # account-scoped daily PnL breaker above.
+        self._sl_event_cache: Dict[str, Optional[CachedCircuitBreakerEvent]] = {}  # keyed by profile_name
+        self._sl_streaks: Dict[str, int] = {}                                     # keyed by profile_name
         self._initialized = False
 
     # ── Cache helpers ─────────────────────────────────────────────────────────
@@ -103,6 +111,14 @@ class CircuitBreakerService:
         try:
             with get_db_session() as db:
                 for profile in pm.get_all_profiles():
+                    # Consecutive-SL breaker state is profile-scoped — load it
+                    # for every profile, before the account dedup below.
+                    sl_event = get_active_consecutive_sl_breaker(db, profile.name)
+                    self._sl_event_cache[profile.name] = (
+                        _to_cached_event(sl_event) if sl_event else None
+                    )
+                    self._sl_streaks[profile.name] = self._compute_sl_streak(db, profile.name)
+
                     account_id = self._get_account_id(profile.name)
                     if account_id in seen_account_ids:
                         continue
@@ -123,6 +139,8 @@ class CircuitBreakerService:
                             max_daily_loss_pct=config.max_daily_loss_pct,
                             profit_lock_hours=config.profit_lock_hours,
                             loss_lock_hours=config.loss_lock_hours,
+                            max_consecutive_stop_losses=config.max_consecutive_stop_losses,
+                            consecutive_sl_lock_hours=config.consecutive_sl_lock_hours or 24,
                         )
         except Exception as e:
             self.logger.error(
@@ -147,6 +165,8 @@ class CircuitBreakerService:
             max_daily_loss_pct=config.max_daily_loss_pct,
             profit_lock_hours=config.profit_lock_hours,
             loss_lock_hours=config.loss_lock_hours,
+            max_consecutive_stop_losses=config.max_consecutive_stop_losses,
+            consecutive_sl_lock_hours=config.consecutive_sl_lock_hours or 24,
         )
         self._config_cache[profile_name] = cached
         return cached
@@ -188,6 +208,8 @@ class CircuitBreakerService:
         self._config_cache.clear()
         self._event_cache.clear()
         self._snapshot_cache.clear()
+        self._sl_event_cache.clear()
+        self._sl_streaks.clear()
         self._initialized = False
         self._load_state_from_db()
 
@@ -257,6 +279,21 @@ class CircuitBreakerService:
         """
         self._ensure_initialized()
         account_id = self._get_account_id(profile_name)
+
+        # Profile-scoped consecutive-SL breaker first (independent of account)
+        sl_event = self._get_cached_sl_event(profile_name)
+        if sl_event:
+            now = datetime.now(timezone.utc)
+            sl_remaining = (sl_event.reset_at - now).total_seconds()
+            if sl_remaining > 0:
+                reason = (
+                    f"Circuit breaker active: {sl_event.reason} "
+                    f"({int(sl_remaining)}s remaining)"
+                )
+                self.logger.debug(f"[{profile_name}] {reason}")
+                return False, reason
+            else:
+                self._expire_sl_breaker(sl_event, profile_name)
 
         active_event = self._get_cached_event(profile_name, account_id)
         if active_event:
@@ -444,6 +481,115 @@ class CircuitBreakerService:
             f"[{profile_name}] Circuit breaker expired: {event.reason}"
         )
         self._clear_breaker(event, profile_name, account_id, manually_reset=False)
+
+    # ── Consecutive stop-loss breaker (profile-scoped) ────────────────────────
+
+    def _get_cached_sl_event(
+        self, profile_name: str
+    ) -> Optional[CachedCircuitBreakerEvent]:
+        """Active consecutive-SL event from cache; loads from DB on first access."""
+        if profile_name not in self._sl_event_cache:
+            with get_db_session() as db:
+                event = get_active_consecutive_sl_breaker(db, profile_name)
+            self._sl_event_cache[profile_name] = _to_cached_event(event) if event else None
+        return self._sl_event_cache[profile_name]
+
+    def _compute_sl_streak(self, db, profile_name: str) -> int:
+        """
+        Rebuild the consecutive stop-loss streak from recent closed positions
+        (restart recovery). Only closes after the most recent consecutive-SL
+        trigger count, so an old streak can't instantly re-trigger the breaker.
+        """
+        try:
+            cutoff = None
+            last_event = get_latest_consecutive_sl_event(db, profile_name)
+            if last_event:
+                cutoff = last_event.triggered_at
+
+            streak = 0
+            for close_reason, closed_at in get_recent_position_closes(db, profile_name):
+                if cutoff and closed_at and closed_at <= cutoff:
+                    break
+                if (close_reason or "").upper() == "STOP_LOSS":
+                    streak += 1
+                else:
+                    break
+            return streak
+        except Exception as e:
+            self.logger.error(
+                f"[{profile_name}] Error computing SL streak: {e}", exc_info=True
+            )
+            return 0
+
+    def _expire_sl_breaker(
+        self, event: CachedCircuitBreakerEvent, profile_name: str
+    ):
+        """Deactivate an expired consecutive-SL breaker. No baseline changes needed."""
+        self._sl_event_cache[profile_name] = None
+        self._sl_streaks[profile_name] = 0
+        with get_db_session() as db:
+            expire_circuit_breaker(db, event.id)
+        self.logger.info(
+            f"[{profile_name}] Consecutive-SL breaker expired: {event.reason}"
+        )
+
+    def record_position_close(self, profile_name: str, close_reason: str):
+        """
+        Track consecutive stop-loss closes per profile and trigger the
+        consecutive-SL breaker when the configured limit is hit.
+
+        Called from monitoring_service._execute_close after a confirmed close.
+        A STOP_LOSS close extends the streak; any other close resets it.
+        Never raises — a tracking failure must not break the close path.
+        """
+        self._ensure_initialized()
+        try:
+            if (close_reason or "").upper() == "STOP_LOSS":
+                streak = self._sl_streaks.get(profile_name, 0) + 1
+            else:
+                streak = 0
+            self._sl_streaks[profile_name] = streak
+
+            config = self._get_cached_config(profile_name)
+            limit = int(getattr(config, "max_consecutive_stop_losses", 0) or 0) if config else 0
+            if not limit or streak < limit:
+                return
+            if self._get_cached_sl_event(profile_name):
+                return  # already locked
+
+            lock_hours = int(getattr(config, "consecutive_sl_lock_hours", 24) or 24)
+            account_id = self._get_account_id(profile_name)
+            reason = (
+                f"{CONSECUTIVE_SL_REASON_PREFIX} limit: {streak} stop losses "
+                f"in a row (limit: {limit})"
+            )
+            with get_db_session() as db:
+                event = create_circuit_breaker_event(
+                    db=db,
+                    profile_name=profile_name,
+                    account_id=account_id,
+                    reason=reason,
+                    trigger_value_pct=None,
+                    balance_at_trigger=None,
+                    daily_start_balance=None,
+                    lock_hours=lock_hours,
+                )
+                self._sl_event_cache[profile_name] = _to_cached_event(event)
+            # Fresh streak required after the pause expires
+            self._sl_streaks[profile_name] = 0
+            self._send_telegram(
+                f"🚨 CIRCUIT BREAKER TRIGGERED [{profile_name}]\n"
+                f"{streak} consecutive stop losses (limit: {limit})\n"
+                f"New entries paused for {lock_hours}h"
+            )
+            self.logger.warning(
+                f"[{profile_name}] 🚨 CIRCUIT BREAKER TRIGGERED: {reason} "
+                f"(locked for {lock_hours}h)"
+            )
+        except Exception as e:
+            self.logger.error(
+                f"[{profile_name}] record_position_close failed: {e}", exc_info=True
+            )
 
     def _adjust_snapshot_for_transfer(
         self,
@@ -816,14 +962,27 @@ class CircuitBreakerService:
         key = self._cache_key(profile_name, account_id)
 
         cached_event = self._event_cache.get(key)
-        if not cached_event:
+        sl_event = self._sl_event_cache.get(profile_name)
+        if not cached_event and not sl_event:
             return False
 
-        self._clear_breaker(cached_event, profile_name, account_id, manually_reset=True)
-        self.logger.info(
-            f"[{profile_name}] Circuit breaker manually reset: "
-            f"{cached_event.reason}"
-        )
+        if cached_event:
+            self._clear_breaker(cached_event, profile_name, account_id, manually_reset=True)
+            self.logger.info(
+                f"[{profile_name}] Circuit breaker manually reset: "
+                f"{cached_event.reason}"
+            )
+
+        if sl_event:
+            self._sl_event_cache[profile_name] = None
+            self._sl_streaks[profile_name] = 0
+            with get_db_session() as db:
+                manually_expire_event(db, sl_event.id)
+            self.logger.info(
+                f"[{profile_name}] Consecutive-SL breaker manually reset: "
+                f"{sl_event.reason}"
+            )
+
         return True
 
     def get_all_breakers(self) -> dict:
@@ -845,6 +1004,22 @@ class CircuitBreakerService:
 
         for profile in profile_manager.get_all_profiles():
             account_id = self._get_account_id(profile.name)
+
+            # Profile-scoped consecutive-SL breakers (reported per profile,
+            # before the account dedup below)
+            sl_event = self._sl_event_cache.get(profile.name)
+            if sl_event:
+                sl_remaining = max(0, (sl_event.reset_at - now).total_seconds())
+                if sl_remaining > 0:
+                    results[f"sl_breaker_{profile.name}"] = {
+                        "profile":                profile.name,
+                        "account_id":             account_id,
+                        "reason":                 sl_event.reason,
+                        "triggered_at":           sl_event.triggered_at.isoformat(),
+                        "reset_at":               sl_event.reset_at.isoformat(),
+                        "time_remaining_seconds": int(sl_remaining),
+                        "trigger_value":          None,
+                    }
 
             if account_id is not None:
                 if account_id in seen_account_ids:

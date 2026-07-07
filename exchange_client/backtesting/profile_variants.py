@@ -53,6 +53,7 @@ def run_all_variants(
     export_csv: str = None,
     price_source: str = "candle",
     profile_caps: dict = None,  # variant_name -> ProfileOpenPositionCap; shared across symbol runs
+    sl_breakers: dict = None,   # variant_name -> ConsecutiveSLBreaker; shared across symbol runs
 ) -> list:
     """
     Run all variants and return sorted results.
@@ -62,6 +63,9 @@ def run_all_variants(
         export_csv:   filepath to write all trades across all variants as CSV
         profile_caps: pre-created ProfileOpenPositionCap objects keyed by variant name,
                       shared across symbol calls to enforce the cross-symbol open-position cap
+        sl_breakers:  pre-created ConsecutiveSLBreaker objects keyed by variant name,
+                      shared across symbol calls so the consecutive stop-loss pause
+                      spans every symbol the profile trades (mirrors the live breaker)
 
     Example:
         results = run_all_variants(db, "SOL_USDC", start, end, RANGE_VARIANTS,
@@ -77,7 +81,9 @@ def run_all_variants(
         profile = BacktestProfile.from_dict(name, config)
         engine  = BacktestEngine(db_session, profile, verbose=verbose)
         cap     = profile_caps.get(name) if profile_caps else None
-        result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source, profile_cap=cap)
+        breaker = sl_breakers.get(name) if sl_breakers else None
+        result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source,
+                             profile_cap=cap, sl_breaker=breaker)
         results.append(result)
 
     results.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)
