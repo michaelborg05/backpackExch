@@ -604,6 +604,13 @@ def update_circuit_breaker_config(
 
 
 # ===== Circuit Breaker Events =====
+
+# Reason prefix that marks per-profile consecutive stop-loss breaker events.
+# These are excluded from the account-scoped lookup so they only pause the
+# profile that racked up the stop losses, not every sibling on the account.
+CONSECUTIVE_SL_REASON_PREFIX = "Consecutive stop-loss"
+
+
 def get_active_circuit_breaker(
     db: Session,
     profile_name: str,
@@ -612,6 +619,8 @@ def get_active_circuit_breaker(
     """
     Prefer account_id lookup when available, fall back to profile_name.
     This handles rows written before the migration as well as new rows.
+    Consecutive-SL breaker events are profile-scoped and excluded here —
+    use get_active_consecutive_sl_breaker for those.
     """
     if account_id is not None:
         return (
@@ -619,6 +628,7 @@ def get_active_circuit_breaker(
             .filter(
                 CircuitBreakerEvent.account_id == account_id,
                 CircuitBreakerEvent.is_active == True,
+                CircuitBreakerEvent.reason.notlike(f"{CONSECUTIVE_SL_REASON_PREFIX}%"),
             )
             .first()
         )
@@ -628,9 +638,64 @@ def get_active_circuit_breaker(
         .filter(
             CircuitBreakerEvent.profile_name == profile_name,
             CircuitBreakerEvent.is_active == True,
+            CircuitBreakerEvent.reason.notlike(f"{CONSECUTIVE_SL_REASON_PREFIX}%"),
         )
         .first()
     )
+
+
+def get_active_consecutive_sl_breaker(
+    db: Session,
+    profile_name: str,
+) -> Optional[CircuitBreakerEvent]:
+    """Active consecutive-SL breaker event for this profile (profile-scoped)."""
+    return (
+        db.query(CircuitBreakerEvent)
+        .filter(
+            CircuitBreakerEvent.profile_name == profile_name,
+            CircuitBreakerEvent.is_active == True,
+            CircuitBreakerEvent.reason.like(f"{CONSECUTIVE_SL_REASON_PREFIX}%"),
+        )
+        .first()
+    )
+
+
+def get_latest_consecutive_sl_event(
+    db: Session,
+    profile_name: str,
+) -> Optional[CircuitBreakerEvent]:
+    """Most recent consecutive-SL event (active or not) — used as the streak cutoff on restart."""
+    return (
+        db.query(CircuitBreakerEvent)
+        .filter(
+            CircuitBreakerEvent.profile_name == profile_name,
+            CircuitBreakerEvent.reason.like(f"{CONSECUTIVE_SL_REASON_PREFIX}%"),
+        )
+        .order_by(CircuitBreakerEvent.triggered_at.desc())
+        .first()
+    )
+
+
+def get_recent_position_closes(
+    db: Session,
+    profile_name: str,
+    limit: int = 10,
+) -> list:
+    """Recent closed positions for a profile, newest first: [(close_reason, closed_at), ...]"""
+    rows = (
+        db.query(Position.close_reason, Position.closed_at)
+        .filter(
+            Position.profile_name == profile_name,
+            Position.status == "CLOSED",
+            Position.closed_at.isnot(None),
+        )
+        .order_by(Position.closed_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [(r.close_reason, r.closed_at) for r in rows]
+
+
 def create_circuit_breaker_event(
     db: Session,
     profile_name: str,

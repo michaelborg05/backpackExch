@@ -25,6 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtesting.profile_samples.prod_profiles import PROD_PROFILES as _PROD_PROFILES_LIST
 from backtesting.profile_variants import run_all_variants
+from backtesting.backtest_engine import ConsecutiveSLBreaker, ProfileOpenPositionCap
 
 PROD_PROFILES = {c["display_name"]: c for c in _PROD_PROFILES_LIST}
 from db.utils import get_db_session
@@ -85,6 +86,24 @@ with get_db_session() as db:
 
         variant_set = {profile_name: profile_config}
 
+        # One shared open-position cap per profile so the limit applies across
+        # symbols. Without this, each symbol run gets a local cap that can
+        # never bind (the engine holds at most one position per symbol).
+        profile_caps = {}
+        max_open_per_profile = profile_config.get("max_open_positions_per_profile")
+        if max_open_per_profile:
+            profile_caps[profile_name] = ProfileOpenPositionCap(int(max_open_per_profile))
+
+        # One shared consecutive-SL breaker per profile so the pause after
+        # N straight stop losses spans all symbols (mirrors the live CB).
+        sl_breakers = {}
+        max_consec_sl = profile_config.get("max_consecutive_stop_losses")
+        if max_consec_sl:
+            sl_breakers[profile_name] = ConsecutiveSLBreaker(
+                int(max_consec_sl),
+                float(profile_config.get("consecutive_sl_lock_hours", 24) or 24),
+            )
+
         for symbol in symbols:
             print(f"\n{'='*60}")
             print(f"  {profile_name} -- {symbol}")
@@ -100,6 +119,8 @@ with get_db_session() as db:
                 show_trades=args.trades,
                 export_csv=csv_path,
                 price_source="ticks",
+                profile_caps=profile_caps,
+                sl_breakers=sl_breakers,
             )
 
             for r in symbol_results:

@@ -791,8 +791,12 @@ class MonitoringService:
                         closed_at=datetime.now(timezone.utc),
                     )
 
+                # Track consecutive stop losses for the per-profile SL breaker
+                # (never raises — tracking must not break the close path)
+                self.circuit_breaker.record_position_close(profile.name, reason)
+
                 icon = "🟢" if profit_pct >= 0 else "🛑"
-                
+
                 # Send detailed notification
                 self._send_telegram(
                     f"{icon} Position Closed [{profile.display_name if profile.display_name else profile.name}]\n"

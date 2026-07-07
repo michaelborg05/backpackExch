@@ -16,6 +16,8 @@ class CachedCircuitBreakerConfig:
     max_daily_loss_pct: Decimal
     profit_lock_hours: int
     loss_lock_hours: int
+    max_consecutive_stop_losses: Optional[int] = None
+    consecutive_sl_lock_hours: int = 24
 
 
 @dataclass

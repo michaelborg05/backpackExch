@@ -236,6 +236,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 .badge{font-size:9px;letter-spacing:.06em;padding:2px 5px}
 .badge.trend{background:rgba(0,212,255,.08);color:var(--acc);border:1px solid rgba(0,212,255,.2)}
 .badge.entry{background:rgba(255,204,0,.08);color:var(--warn);border:1px solid rgba(255,204,0,.2)}
+.badge.exit{background:rgba(0,255,157,.08);color:var(--grn);border:1px solid rgba(0,255,157,.2)}
 .badge.hard{background:rgba(255,60,90,.08);color:var(--red);border:1px solid rgba(255,60,90,.18)}
 .badge.off{background:rgba(90,122,150,.06);color:var(--txd);border:1px solid var(--brd)}
 .ind-edit-btn{background:transparent;border:1px solid var(--brd);color:var(--txd);
@@ -442,6 +443,33 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         <span class="status-pill inactive" id="prof-status"></span>
         <button class="act-btn" id="prof-act-btn" onclick="toggleActive()"></button>
       </div>
+      <div class="prof-sel-bar" style="margin-top:-4px">
+        <span style="flex:1;font-size:10px;color:var(--txd)">API Key: <span id="key-hint">—</span></span>
+        <button class="act-btn activate" style="border-color:rgba(255,204,0,.4);color:var(--warn)" onclick="openCredsSheet()">🔑 CREDENTIALS</button>
+      </div>
+
+      <!-- Identity & Strategy accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('identity')">
+          <span class="acc-hdr-title">Identity &amp; Strategy</span>
+          <span class="acc-arrow" id="arr-identity">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-identity">
+          <div class="frow single">
+            <div class="field"><label>Display Name</label><input id="f-display-name" type="text" placeholder="e.g. Trend 15m (MB)"></div>
+          </div>
+          <div class="frow single">
+            <div class="field"><label>Internal Name (read-only)</label><input id="f-internal-name" type="text" disabled style="opacity:.5"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Trading Type</label><select id="f-trading-type"><option value="rules_live">Rules Live</option><option value="shadow">Shadow (AI paper)</option><option value="ai_live">AI Live</option></select></div>
+            <div class="field"><label>Strategy Type</label><select id="f-strategy-type"><option value="trend_following">Trend Following</option><option value="mean_reversion">Mean Reversion</option><option value="range_trading">Range Trading</option><option value="short_trend_following">Short Trend Following</option><option value="short_mean_reversion">Short Mean Reversion</option></select></div>
+          </div>
+          <div class="frow single">
+            <div class="field"><label>Market Type</label><select id="f-market-type" onchange="updateLeverageFieldMobile()"><option value="SPOT">Spot</option><option value="PERP">Perpetual (PERP)</option></select></div>
+          </div>
+        </div>
+      </div>
 
       <!-- Risk accordion -->
       <div class="acc">
@@ -467,6 +495,28 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         </div>
       </div>
 
+      <!-- Position Sizing accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('sizing')">
+          <span class="acc-hdr-title">Position Sizing</span>
+          <span class="acc-arrow" id="arr-sizing">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-sizing">
+          <div class="frow">
+            <div class="field"><label>Default Order (USDC)</label><input id="f-ordsize" type="number" step="1" placeholder="100"></div>
+            <div class="field"><label>Max Position Size %</label><input id="f-maxpos-pct" type="number" step="1" placeholder="40"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Max Open (per Symbol)</label><input id="f-maxpos" type="number" step="1" placeholder="5"></div>
+            <div class="field"><label>Max Open (per Profile)</label><input id="f-maxpos-profile" type="number" step="1" min="1" placeholder="No cap"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Max Portfolio Exposure %</label><input id="f-maxexposure" type="number" step="1" placeholder="80"></div>
+            <div class="field" id="f-leverage-field-m"><label>Leverage Multiplier</label><input id="f-leverage" type="number" step="0.5" min="1" max="10" placeholder="1.0"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- Signals accordion -->
       <div class="acc">
         <div class="acc-hdr" onclick="toggleAcc('signals')">
@@ -475,19 +525,19 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         </div>
         <div class="acc-body" id="body-signals">
           <div class="frow">
+            <div class="field"><label>Trend Timeframe (min)</label><input id="f-trend-tf" type="text" placeholder="60"></div>
+            <div class="field"><label>Entry Timeframe (min)</label><input id="f-entry-tf" type="text" placeholder="15"></div>
+          </div>
+          <div class="frow">
             <div class="field"><label>Min Confidence %</label><input id="f-conf" type="number" step="0.5" placeholder="72"></div>
+            <div class="field"><label>Min Volume Ratio</label><input id="f-volratio" type="number" step="0.1" placeholder="1.0"></div>
+          </div>
+          <div class="frow">
             <div class="field"><label>Scan Cooldown (min)</label><input id="f-scancd" type="number" step="1" placeholder="15"></div>
-          </div>
-          <div class="frow">
             <div class="field"><label>Post-SL Cooldown (min)</label><input id="f-slcd" type="number" step="5" placeholder="Global"></div>
+          </div>
+          <div class="frow single">
             <div class="field"><label>Post-TP Cooldown (min)</label><input id="f-tpcd" type="number" step="5" placeholder="Global"></div>
-          </div>
-          <div class="frow">
-            <div class="field"><label>Default Order (USDC)</label><input id="f-ordsize" type="number" step="1" placeholder="100"></div>
-            <div class="field"><label>Max Open (per Symbol)</label><input id="f-maxpos" type="number" step="1" placeholder="5"></div>
-          </div>
-          <div class="frow">
-            <div class="field"><label>Max Open (per Profile)</label><input id="f-maxpos-profile" type="number" step="1" min="1" placeholder="No cap"></div>
           </div>
         </div>
       </div>
@@ -509,8 +559,95 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         </div>
       </div>
 
+      <!-- Position Exit Logic accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('exit')">
+          <span class="acc-hdr-title">Position Exit Logic</span>
+          <span class="acc-arrow" id="arr-exit">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-exit">
+          <div class="tgl-list">
+            <div class="tgl-row">
+              <div class="tgl-info"><div class="tgl-name">Trend Invalidation Exit</div><div class="tgl-sub">Close position when trend indicators turn bearish</div></div>
+              <label class="tgl-sw"><input type="checkbox" id="f-trend-inval"><span class="tgl-track"></span></label>
+            </div>
+          </div>
+          <div class="frow" style="margin-top:11px">
+            <div class="field"><label>Invalidation Indicators</label><select id="f-inval-indicators"><option value="entry">Entry indicators</option><option value="trend">Trend indicators</option><option value="exit">Exit indicators</option><option value="mean_reversion">Mean reversion</option></select></div>
+            <div class="field"><label>Exit Timeframe</label><select id="f-exit-tf"><option value="">Use entry TF</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Min Position Age (min)</label><input id="f-min-age" type="number" step="15" placeholder="120"></div>
+            <div class="field"><label>Max Position Hours</label><input id="f-max-hours" type="number" step="1" placeholder="18"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="save-bar">
         <button class="btn-save" id="save-btn" onclick="saveProfileSettings()">SAVE SETTINGS</button>
+      </div>
+
+      <!-- Circuit Breaker accordion -->
+      <div class="acc" style="margin-top:4px">
+        <div class="acc-hdr" onclick="toggleAcc('cb')">
+          <span class="acc-hdr-title">Circuit Breaker</span>
+          <span class="acc-arrow" id="arr-cb">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-cb">
+          <div id="cb-active-banner-m" style="display:none;background:rgba(255,60,90,.08);border:1px solid rgba(255,60,90,.3);padding:10px 12px;margin-bottom:11px">
+            <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">⚡ Circuit Breaker Active</div>
+            <div style="font-size:10px;color:var(--txd)" id="cb-active-text-m">—</div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Max Daily Profit %</label><input id="f-cb-profit" type="number" step="0.5" placeholder="5.0"></div>
+            <div class="field"><label>Max Daily Loss %</label><input id="f-cb-loss" type="number" step="0.5" placeholder="3.0"></div>
+          </div>
+          <div class="frow">
+            <div class="field"><label>Profit Lock Hours</label><input id="f-cb-profit-hrs" type="number" step="1" placeholder="6"></div>
+            <div class="field"><label>Loss Lock Hours</label><input id="f-cb-loss-hrs" type="number" step="1" placeholder="12"></div>
+          </div>
+          <div class="tgl-list">
+            <div class="tgl-row">
+              <div class="tgl-info"><div class="tgl-name">Circuit Breaker Enabled</div><div class="tgl-sub">Uncheck to disable all daily limits</div></div>
+              <label class="tgl-sw"><input type="checkbox" id="f-cb-active"><span class="tgl-track"></span></label>
+            </div>
+          </div>
+          <div class="save-bar">
+            <button class="btn-save" id="cb-save-btn" onclick="saveCBSettings()">SAVE CIRCUIT BREAKER</button>
+            <button class="act-btn deactivate" style="flex-shrink:0" onclick="resetCBMobile()">RESET</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Symbols accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('symbols')">
+          <span class="acc-hdr-title">Symbols</span>
+          <span class="acc-arrow" id="arr-symbols">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-symbols">
+          <div id="sym-list"><div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">Loading…</div></div>
+          <button class="ind-add-btn" onclick="openAddSymbolMobile()">+ ADD SYMBOL</button>
+        </div>
+      </div>
+
+      <!-- Trading Hours accordion -->
+      <div class="acc">
+        <div class="acc-hdr" onclick="toggleAcc('hours')">
+          <span class="acc-hdr-title">Trading Hours (UTC)</span>
+          <span class="acc-arrow" id="arr-hours">&#8964;</span>
+        </div>
+        <div class="acc-body" id="body-hours">
+          <div style="font-size:10px;color:var(--txd);margin-bottom:10px">No windows = unrestricted (trades any time). Windows ending before their start span midnight.</div>
+          <div id="hours-list"><div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">Loading…</div></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="ind-add-btn" style="margin-top:0;flex:1" onclick="addHoursRowMobile()">+ ADD WINDOW</button>
+            <button class="ind-add-btn" style="margin-top:0;flex:1" onclick="prefillWeekdaysMobile()">PRE-FILL MON&ndash;FRI</button>
+          </div>
+          <div class="save-bar">
+            <button class="btn-save" onclick="saveTradingHoursMobile()">SAVE TRADING HOURS</button>
+          </div>
+        </div>
       </div>
 
       <!-- Indicators accordion -->
@@ -520,6 +657,15 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           <span class="acc-arrow open" id="arr-indicators">&#8964;</span>
         </div>
         <div class="acc-body open" id="body-indicators">
+          <div style="display:flex;gap:8px;align-items:center;padding:8px 0;flex-wrap:wrap;border-bottom:1px solid var(--brd);margin-bottom:10px">
+            <span style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--txd)">Min Required</span>
+            <span style="font-size:10px;color:var(--acc)">Trend</span>
+            <input id="f-min_indicators_required" type="number" step="1" min="1" placeholder="2" style="width:44px;background:var(--bg3);border:1px solid var(--brd);color:var(--tx);padding:4px 6px;font-size:11px;font-family:'Space Mono',monospace;outline:none" onchange="saveMinRequiredMobile()">
+            <span style="font-size:10px;color:var(--acc)">Entry</span>
+            <input id="f-min_entry_indicators_required" type="number" step="1" min="1" placeholder="2" style="width:44px;background:var(--bg3);border:1px solid var(--brd);color:var(--tx);padding:4px 6px;font-size:11px;font-family:'Space Mono',monospace;outline:none" onchange="saveMinRequiredMobile()">
+            <span style="font-size:10px;color:var(--acc)">Exit</span>
+            <input id="f-min_exit_indicators_required" type="number" step="1" min="1" placeholder="2" style="width:44px;background:var(--bg3);border:1px solid var(--brd);color:var(--tx);padding:4px 6px;font-size:11px;font-family:'Space Mono',monospace;outline:none" onchange="saveMinRequiredMobile()">
+          </div>
           <div id="ind-list"><div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">Loading…</div></div>
           <button class="ind-add-btn" onclick="openAddInd()">+ ADD INDICATOR</button>
         </div>
@@ -543,7 +689,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <div class="sheet-body">
     <div class="frow" style="margin-bottom:12px">
       <div class="field"><label>Type</label><select class="pf-sel" id="ind-type" onchange="onIndTypeChange()" style="width:100%"></select></div>
-      <div class="field"><label>Category</label><select class="pf-sel" id="ind-cat" style="width:100%"><option value="trend">Trend</option><option value="entry">Entry</option></select></div>
+      <div class="field"><label>Category</label><select class="pf-sel" id="ind-cat" style="width:100%"><option value="trend">Trend</option><option value="entry">Entry</option><option value="exit">Exit</option></select></div>
     </div>
     <div class="tgl-list" style="margin-bottom:12px">
       <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Enabled</div></div><label class="tgl-sw"><input type="checkbox" id="ind-enabled" checked><span class="tgl-track"></span></label></div>
@@ -557,6 +703,57 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <button class="sbtn dng" id="ind-del-btn" onclick="deleteIndicator()" style="display:none">DELETE</button>
     <button class="sbtn sec" onclick="closeIndSheet()">Cancel</button>
     <button class="sbtn" onclick="saveIndicator()">Save</button>
+  </div>
+</div>
+
+<!-- ── SYMBOL EDIT SHEET ──────────────────────────────────────────── -->
+<div class="sheet-overlay" id="sym-overlay" onclick="closeSymSheet()"></div>
+<div class="sheet" id="sym-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-hdr">
+    <span class="sheet-title" id="sym-sheet-title">Add Symbol</span>
+    <button class="sheet-close" onclick="closeSymSheet()">&#215;</button>
+  </div>
+  <div class="sheet-body">
+    <div class="frow single" style="margin-bottom:12px">
+      <div class="field"><label>Symbol</label><input id="sym-symbol" type="text" placeholder="e.g. SOL_USDC" style="text-transform:uppercase"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Order Size (USDC)</label><input id="sym-ordsize" type="number" step="1" placeholder="100"></div>
+      <div class="field"><label>Max Position %</label><input id="sym-maxpos" type="number" step="1" placeholder="Optional"></div>
+    </div>
+    <div class="tgl-list">
+      <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Enabled</div></div><label class="tgl-sw"><input type="checkbox" id="sym-enabled" checked><span class="tgl-track"></span></label></div>
+    </div>
+    <div id="sym-err" style="color:var(--red);font-size:11px;margin-top:8px;display:none"></div>
+  </div>
+  <div class="sheet-footer">
+    <button class="sbtn dng" id="sym-del-btn" onclick="deleteSymbolMobile()" style="display:none">DELETE</button>
+    <button class="sbtn sec" onclick="closeSymSheet()">Cancel</button>
+    <button class="sbtn" onclick="saveSymbolMobile()">Save</button>
+  </div>
+</div>
+
+<!-- ── CREDENTIALS SHEET ──────────────────────────────────────────── -->
+<div class="sheet-overlay" id="creds-overlay" onclick="closeCredsSheet()"></div>
+<div class="sheet" id="creds-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-hdr">
+    <span class="sheet-title">Change Credentials</span>
+    <button class="sheet-close" onclick="closeCredsSheet()">&#215;</button>
+  </div>
+  <div class="sheet-body">
+    <div class="frow single" style="margin-bottom:12px">
+      <div class="field"><label>API Key</label><input id="cr-apikey" type="text" autocomplete="off" placeholder="New API key"></div>
+    </div>
+    <div class="frow single">
+      <div class="field"><label>API Secret</label><input id="cr-secret" type="password" autocomplete="off" placeholder="New API secret"></div>
+    </div>
+    <div id="creds-err" style="color:var(--red);font-size:11px;margin-top:8px;display:none"></div>
+  </div>
+  <div class="sheet-footer">
+    <button class="sbtn sec" onclick="closeCredsSheet()">Cancel</button>
+    <button class="sbtn" onclick="saveCredentialsMobile()">Save</button>
   </div>
 </div>
 
@@ -951,13 +1148,25 @@ function onProfChange() { setProfile(document.getElementById('prof-select').valu
 async function setProfile(name) {
   try {
     _currentProfile = await safeFetch('/profiles/' + name);
-    if (_currentProfile) { updateProfileUI(_currentProfile); loadIndicators(name); }
+    if (_currentProfile) {
+      updateProfileUI(_currentProfile);
+      loadIndicators(name);
+      loadCircuitBreaker(name);
+      loadSymbols(name);
+      loadTradingHoursMobile(name);
+    }
   } catch {}
 }
 
 async function loadProfileData(name) {
   _currentProfile = await safeFetch('/profiles/' + name);
-  if (_currentProfile) { updateProfileUI(_currentProfile); loadIndicators(name); }
+  if (_currentProfile) {
+    updateProfileUI(_currentProfile);
+    loadIndicators(name);
+    loadCircuitBreaker(name);
+    loadSymbols(name);
+    loadTradingHoursMobile(name);
+  }
 }
 
 function updateProfileUI(p) {
@@ -967,16 +1176,56 @@ function updateProfileUI(p) {
   badge.className = 'status-pill ' + (p.is_active ? 'active' : 'inactive');
   btn.textContent = p.is_active ? 'DEACTIVATE' : 'ACTIVATE';
   btn.className = 'act-btn ' + (p.is_active ? 'deactivate' : 'activate');
+  document.getElementById('key-hint').textContent = p.key_hint ?? '—';
+
+  // Identity & Strategy
+  setFld('f-display-name', p.display_name); setFld('f-internal-name', p.name);
+  setFld('f-trading-type', p.trading_type); setFld('f-strategy-type', p.strategy_type);
+  setFld('f-market-type', p.market_type);
+  updateLeverageFieldMobile();
+
+  // Risk
   setFld('f-tp', p.take_profit_pct); setFld('f-sl', p.stop_loss_pct);
   setFld('f-ts', p.trailing_stop_pct); setFld('f-arm', p.arm_trailing_stop_pct);
   setChk('f-use-ts', p.use_trailing_stop);
-  setFld('f-conf', p.min_signal_confidence); setFld('f-scancd', p.signal_cooldown_minutes);
+
+  // Position sizing
+  setFld('f-ordsize', p.default_order_size_usdc); setFld('f-maxpos-pct', p.max_position_size_pct);
+  setFld('f-maxpos', p.max_open_positions); setFld('f-maxpos-profile', p.max_open_positions_per_profile);
+  setFld('f-maxexposure', p.max_portfolio_exposure_pct); setFld('f-leverage', p.leverage_multiplier);
+
+  // Signal generation
+  setFld('f-trend-tf', p.trend_timeframe); setFld('f-entry-tf', p.entry_timeframe);
+  setFld('f-conf', p.min_signal_confidence); setFld('f-volratio', p.min_volume_ratio);
+  setFld('f-scancd', p.signal_cooldown_minutes);
   setFld('f-slcd', p.sl_cooldown_minutes); setFld('f-tpcd', p.tp_cooldown_minutes);
-  setFld('f-ordsize', p.default_order_size_usdc); setFld('f-maxpos', p.max_open_positions);
-  setFld('f-maxpos-profile', p.max_open_positions_per_profile);
+
+  // Filters
   setChk('f-sig-gen', p.enable_signal_generation); setChk('f-regime', p.use_market_regime_filter);
   setChk('f-trend', p.use_trend_filter); setChk('f-entry', p.use_entry_filter);
   setChk('f-atr', p.use_atr_filter);
+
+  // Exit logic
+  setChk('f-trend-inval', p.use_trend_invalidation_exit);
+  setFld('f-inval-indicators', p.trend_invalidation_indicators || 'entry');
+  setFld('f-exit-tf', p.exit_timeframe || '');
+  setFld('f-min-age', p.min_position_age_for_trend_check); setFld('f-max-hours', p.max_position_hours);
+
+  // Indicator min-required
+  setFld('f-min_indicators_required', p.min_indicators_required);
+  setFld('f-min_entry_indicators_required', p.min_entry_indicators_required);
+  setFld('f-min_exit_indicators_required', p.min_exit_indicators_required);
+}
+
+function updateLeverageFieldMobile() {
+  const input = document.getElementById('f-leverage');
+  const field = document.getElementById('f-leverage-field-m');
+  const mkt = document.getElementById('f-market-type')?.value;
+  if (!input || !field) return;
+  const isPerp = mkt === 'PERP';
+  input.disabled = !isPerp;
+  field.style.opacity = isPerp ? '1' : '0.4';
+  if (!isPerp) input.value = '1';
 }
 
 async function saveProfileSettings() {
@@ -987,28 +1236,50 @@ async function saveProfileSettings() {
     await api('/profiles/' + _currentProfile.name, {
       method: 'PUT',
       body: JSON.stringify({
+        display_name:            strOrNull('f-display-name'),
+        trading_type:            strOrNull('f-trading-type'),
+        strategy_type:           strOrNull('f-strategy-type'),
+        market_type:             strOrNull('f-market-type'),
         take_profit_pct:         numOrNull('f-tp'),
         stop_loss_pct:           numOrNull('f-sl'),
         trailing_stop_pct:       numOrNull('f-ts'),
         arm_trailing_stop_pct:   numOrNull('f-arm'),
         use_trailing_stop:       chkVal('f-use-ts'),
+        default_order_size_usdc: numOrNull('f-ordsize'),
+        max_position_size_pct:   numOrNull('f-maxpos-pct'),
+        max_open_positions:      numOrNull('f-maxpos'),
+        max_open_positions_per_profile: numOrNull('f-maxpos-profile'),
+        max_portfolio_exposure_pct: numOrNull('f-maxexposure'),
+        leverage_multiplier:     numOrNull('f-leverage'),
+        trend_timeframe:         strOrNull('f-trend-tf'),
+        entry_timeframe:         strOrNull('f-entry-tf'),
         min_signal_confidence:   numOrNull('f-conf'),
+        min_volume_ratio:        numOrNull('f-volratio'),
         signal_cooldown_minutes: numOrNull('f-scancd'),
         sl_cooldown_minutes:     numOrNull('f-slcd'),
         tp_cooldown_minutes:     numOrNull('f-tpcd'),
-        default_order_size_usdc: numOrNull('f-ordsize'),
-        max_open_positions:      numOrNull('f-maxpos'),
-        max_open_positions_per_profile: numOrNull('f-maxpos-profile'),
         enable_signal_generation: chkVal('f-sig-gen'),
         use_market_regime_filter: chkVal('f-regime'),
         use_trend_filter:         chkVal('f-trend'),
         use_entry_filter:         chkVal('f-entry'),
         use_atr_filter:           chkVal('f-atr'),
+        use_trend_invalidation_exit: chkVal('f-trend-inval'),
+        trend_invalidation_indicators: strOrNull('f-inval-indicators'),
+        exit_timeframe:          strOrNull('f-exit-tf'),
+        min_position_age_for_trend_check: numOrNull('f-min-age'),
+        max_position_hours:      numOrNull('f-max-hours'),
       })
     });
     showToast('Profile saved');
     _currentProfile = await safeFetch('/profiles/' + _currentProfile.name);
-    if (_currentProfile) updateProfileUI(_currentProfile);
+    if (_currentProfile) {
+      updateProfileUI(_currentProfile);
+      const idx = _profiles.findIndex(pr => pr.name === _currentProfile.name);
+      if (idx >= 0) _profiles[idx] = _currentProfile;
+      const sel = document.getElementById('prof-select');
+      const opt = sel?.querySelector(`option[value="${CSS.escape(_currentProfile.name)}"]`);
+      if (opt) opt.textContent = _currentProfile.display_name || _currentProfile.name;
+    }
   } catch(e) { showToast(e.message || 'Save failed', true); }
   finally { btn.disabled = false; btn.textContent = 'SAVE SETTINGS'; }
 }
@@ -1024,6 +1295,276 @@ async function toggleActive() {
     if (_currentProfile) updateProfileUI(_currentProfile);
   } catch(e) { showToast(e.message || 'Failed', true); }
   finally { btn.disabled = false; }
+}
+
+// ── Circuit Breaker ───────────────────────────────────────────────
+async function loadCircuitBreaker(profName) {
+  try {
+    const cb = await safeFetch('/profiles/' + profName + '/circuit-breaker');
+    if (cb) {
+      setFld('f-cb-profit', cb.max_daily_profit_pct); setFld('f-cb-loss', cb.max_daily_loss_pct);
+      setFld('f-cb-profit-hrs', cb.profit_lock_hours); setFld('f-cb-loss-hrs', cb.loss_lock_hours);
+      setChk('f-cb-active', cb.is_active);
+    }
+  } catch {}
+  try {
+    const s = await safeFetch('/circuit-breaker/daily-summary/' + profName);
+    const banner = document.getElementById('cb-active-banner-m');
+    if (s?.circuit_breaker_active) {
+      banner.style.display = 'block';
+      const reason = s.event_reason ? s.event_reason.split(':')[0] : '';
+      document.getElementById('cb-active-text-m').textContent =
+        `${reason ? reason + ' · ' : ''}Drawdown: ${s.drawdown_pnl_pct ?? '—'} · ${s.hours_remaining}h remaining`;
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch {}
+}
+
+async function saveCBSettings() {
+  if (!_currentProfile) return;
+  const btn = document.getElementById('cb-save-btn');
+  btn.disabled = true; btn.textContent = 'SAVING…';
+  try {
+    await api('/profiles/' + _currentProfile.name + '/circuit-breaker', {
+      method: 'PUT',
+      body: JSON.stringify({
+        max_daily_profit_pct: numOrNull('f-cb-profit'),
+        max_daily_loss_pct:   numOrNull('f-cb-loss'),
+        profit_lock_hours:    numOrNull('f-cb-profit-hrs'),
+        loss_lock_hours:      numOrNull('f-cb-loss-hrs'),
+        is_active:            chkVal('f-cb-active'),
+      })
+    });
+    showToast('Circuit breaker saved');
+    loadCircuitBreaker(_currentProfile.name);
+  } catch(e) { showToast(e.message || 'Save failed', true); }
+  finally { btn.disabled = false; btn.textContent = 'SAVE CIRCUIT BREAKER'; }
+}
+
+async function resetCBMobile() {
+  if (!_currentProfile) return;
+  if (!confirm('Reset circuit breaker for ' + _currentProfile.name + '?\nThis will deactivate the lock and reset the CB baseline.')) return;
+  try {
+    await api('/circuit-breaker/reset/' + _currentProfile.name, { method: 'POST' });
+    showToast('Circuit breaker reset');
+    loadCircuitBreaker(_currentProfile.name);
+  } catch(e) { showToast(e.message || 'Reset failed', true); }
+}
+
+// ── Symbols ───────────────────────────────────────────────────────
+let _symbols = [];
+let _symEditName = null;
+
+async function loadSymbols(profName) {
+  const container = document.getElementById('sym-list');
+  container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">Loading…</div>';
+  try {
+    const data = await safeFetch('/config/symbols/' + profName);
+    _symbols = Array.isArray(data?.configs) ? data.configs : [];
+    renderSymList();
+  } catch { container.innerHTML = '<div style="color:var(--red);font-size:11px;text-align:center;padding:10px">Error loading symbols</div>'; }
+}
+
+function renderSymList() {
+  const container = document.getElementById('sym-list');
+  if (!_symbols.length) {
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">No symbol overrides — using profile defaults</div>';
+    return;
+  }
+  container.innerHTML = _symbols.map(s => {
+    const maxposTxt = s.max_position_size_pct != null ? s.max_position_size_pct + '%' : '—';
+    return `<div class="ind-item">
+      <div class="ind-info">
+        <div class="ind-type">${escHtml(s.symbol)}</div>
+        <div class="ind-badges">
+          <span class="badge trend">$${escHtml(s.order_size_usdc)}</span>
+          <span class="badge entry">max ${maxposTxt}</span>
+          ${!s.enabled ? '<span class="badge off">disabled</span>' : ''}
+        </div>
+      </div>
+      <button class="ind-edit-btn" onclick="openEditSymbolMobile('${escAttr(s.symbol)}')">EDIT</button>
+    </div>`;
+  }).join('');
+}
+
+function openAddSymbolMobile() {
+  _symEditName = null;
+  document.getElementById('sym-sheet-title').textContent = 'Add Symbol';
+  document.getElementById('sym-symbol').value = '';
+  document.getElementById('sym-symbol').disabled = false;
+  document.getElementById('sym-ordsize').value = '';
+  document.getElementById('sym-maxpos').value = '';
+  document.getElementById('sym-enabled').checked = true;
+  document.getElementById('sym-del-btn').style.display = 'none';
+  document.getElementById('sym-err').style.display = 'none';
+  document.getElementById('sym-overlay').classList.add('open');
+  document.getElementById('sym-sheet').classList.add('open');
+}
+
+function openEditSymbolMobile(symbol) {
+  const s = _symbols.find(x => x.symbol === symbol); if (!s) return;
+  _symEditName = symbol;
+  document.getElementById('sym-sheet-title').textContent = 'Edit Symbol';
+  document.getElementById('sym-symbol').value = s.symbol;
+  document.getElementById('sym-symbol').disabled = true;
+  document.getElementById('sym-ordsize').value = s.order_size_usdc != null ? parseFloat(s.order_size_usdc) : '';
+  document.getElementById('sym-maxpos').value = s.max_position_size_pct != null ? parseFloat(s.max_position_size_pct) : '';
+  document.getElementById('sym-enabled').checked = !!s.enabled;
+  document.getElementById('sym-del-btn').style.display = '';
+  document.getElementById('sym-err').style.display = 'none';
+  document.getElementById('sym-overlay').classList.add('open');
+  document.getElementById('sym-sheet').classList.add('open');
+}
+
+function closeSymSheet() {
+  document.getElementById('sym-overlay').classList.remove('open');
+  document.getElementById('sym-sheet').classList.remove('open');
+  _symEditName = null;
+}
+
+async function saveSymbolMobile() {
+  if (!_currentProfile) return;
+  const errEl = document.getElementById('sym-err'); errEl.style.display = 'none';
+  const symbol = _symEditName ?? document.getElementById('sym-symbol').value.trim().toUpperCase();
+  if (!symbol) { errEl.textContent = 'Symbol required'; errEl.style.display = 'block'; return; }
+  const size = document.getElementById('sym-ordsize').value.trim();
+  if (!size) { errEl.textContent = 'Order size required'; errEl.style.display = 'block'; return; }
+  try {
+    await api('/config/symbol/' + _currentProfile.name + '/' + symbol, {
+      method: 'POST',
+      body: JSON.stringify({
+        order_size_usdc: parseFloat(size),
+        max_position_size_pct: numOrNull('sym-maxpos'),
+        enabled: chkVal('sym-enabled'),
+      })
+    });
+    closeSymSheet(); showToast('Symbol config saved'); loadSymbols(_currentProfile.name);
+  } catch(e) { errEl.textContent = e.message || 'Save failed'; errEl.style.display = 'block'; }
+}
+
+async function deleteSymbolMobile() {
+  if (!_symEditName || !_currentProfile) return;
+  if (!confirm('Delete config for ' + _symEditName + '?')) return;
+  try {
+    await api('/config/symbol/' + _currentProfile.name + '/' + _symEditName, { method: 'DELETE' });
+    closeSymSheet(); showToast('Symbol config deleted'); loadSymbols(_currentProfile.name);
+  } catch(e) { showToast(e.message || 'Delete failed', true); }
+}
+
+// ── Trading Hours ─────────────────────────────────────────────────
+const DAY_NAMES_M = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+async function loadTradingHoursMobile(profName) {
+  const container = document.getElementById('hours-list');
+  try {
+    const rows = await safeFetch('/profiles/' + profName + '/trading-hours');
+    renderHoursListMobile(Array.isArray(rows) ? rows : []);
+  } catch { container.innerHTML = '<div style="color:var(--red);font-size:11px;text-align:center;padding:10px">Error loading trading hours</div>'; }
+}
+
+function renderHoursListMobile(rows) {
+  const container = document.getElementById('hours-list');
+  if (!rows.length) {
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">No windows configured — trades any time</div>';
+    return;
+  }
+  container.innerHTML = rows.map((r, i) => hoursRowHtmlMobile(r, i)).join('');
+}
+
+function hoursRowHtmlMobile(r, i) {
+  const dayOpts = DAY_NAMES_M.map((d, idx) => `<option value="${idx}" ${r.day_of_week===idx?'selected':''}>${d}</option>`).join('');
+  return `<div class="ind-item" data-row="${i}" style="flex-wrap:wrap;align-items:flex-end;gap:8px">
+    <div class="field" style="flex:1 1 120px;min-width:110px"><label>Day</label><select class="hr-day-m pf-sel">${dayOpts}</select></div>
+    <div class="field" style="flex:1 1 90px;min-width:90px"><label>Start</label><input class="hr-start-m pf-inp" type="time" value="${r.start_time || '09:00'}"></div>
+    <div class="field" style="flex:1 1 90px;min-width:90px"><label>End</label><input class="hr-end-m pf-inp" type="time" value="${r.end_time || '17:00'}"></div>
+    <label class="tgl-sw" style="margin-left:0"><input type="checkbox" class="hr-enabled-m" ${r.enabled!==false?'checked':''}><span class="tgl-track"></span></label>
+    <button class="ind-edit-btn" onclick="removeHoursRowMobile(this)">&#215;</button>
+  </div>`;
+}
+
+function addHoursRowMobile() {
+  const container = document.getElementById('hours-list');
+  if (container.querySelector('.empty') || !container.querySelector('[data-row]')) container.innerHTML = '';
+  const div = document.createElement('div');
+  div.innerHTML = hoursRowHtmlMobile({ day_of_week: 0, start_time: '09:00', end_time: '17:00', enabled: true }, container.children.length);
+  container.appendChild(div.firstElementChild);
+}
+
+function removeHoursRowMobile(btn) {
+  btn.closest('[data-row]').remove();
+  const container = document.getElementById('hours-list');
+  if (!container.children.length) {
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">No windows configured — trades any time</div>';
+  }
+}
+
+function prefillWeekdaysMobile() {
+  const container = document.getElementById('hours-list');
+  container.innerHTML = '';
+  [[0,'05:00','12:00'],[0,'15:00','21:00'],[1,'02:00','23:00'],[2,'01:00','12:00'],[2,'14:00','23:00'],
+   [3,'03:00','12:00'],[3,'14:00','23:00'],[4,'01:00','20:00']].forEach(([day, start, end], i) => {
+    const div = document.createElement('div');
+    div.innerHTML = hoursRowHtmlMobile({ day_of_week: day, start_time: start, end_time: end, enabled: true }, i);
+    container.appendChild(div.firstElementChild);
+  });
+}
+
+function collectHoursRowsMobile() {
+  const rows = [];
+  document.querySelectorAll('#hours-list [data-row]').forEach(el => {
+    const day = el.querySelector('.hr-day-m');
+    const start = el.querySelector('.hr-start-m');
+    const end = el.querySelector('.hr-end-m');
+    const enabled = el.querySelector('.hr-enabled-m');
+    if (!day || !start || !end) return;
+    rows.push({
+      day_of_week: parseInt(day.value),
+      start_time: start.value || '00:00',
+      end_time: end.value || '23:59',
+      enabled: enabled ? enabled.checked : true,
+    });
+  });
+  return rows;
+}
+
+async function saveTradingHoursMobile() {
+  if (!_currentProfile) return;
+  const body = collectHoursRowsMobile();
+  try {
+    await api('/profiles/' + _currentProfile.name + '/trading-hours', { method: 'PUT', body: JSON.stringify(body) });
+    showToast('Trading hours saved');
+    renderHoursListMobile(body);
+  } catch(e) { showToast(e.message || 'Save failed', true); }
+}
+
+// ── Credentials ───────────────────────────────────────────────────
+function openCredsSheet() {
+  document.getElementById('cr-apikey').value = '';
+  document.getElementById('cr-secret').value = '';
+  document.getElementById('creds-err').style.display = 'none';
+  document.getElementById('creds-overlay').classList.add('open');
+  document.getElementById('creds-sheet').classList.add('open');
+}
+function closeCredsSheet() {
+  document.getElementById('creds-overlay').classList.remove('open');
+  document.getElementById('creds-sheet').classList.remove('open');
+}
+async function saveCredentialsMobile() {
+  if (!_currentProfile) return;
+  const errEl = document.getElementById('creds-err'); errEl.style.display = 'none';
+  const apiKey = document.getElementById('cr-apikey').value.trim();
+  const secret = document.getElementById('cr-secret').value.trim();
+  if (!apiKey || !secret) { errEl.textContent = 'Both fields required'; errEl.style.display = 'block'; return; }
+  try {
+    await api('/profiles/' + _currentProfile.name + '/credentials', {
+      method: 'PUT',
+      body: JSON.stringify({ raw_api_key: apiKey, raw_secret: secret }),
+    });
+    closeCredsSheet(); showToast('Credentials updated');
+    _currentProfile = await safeFetch('/profiles/' + _currentProfile.name);
+    if (_currentProfile) document.getElementById('key-hint').textContent = _currentProfile.key_hint ?? '—';
+  } catch(e) { errEl.textContent = e.message || 'Save failed'; errEl.style.display = 'block'; }
 }
 
 // ── Indicators ────────────────────────────────────────────────────
@@ -1204,6 +1745,21 @@ async function deleteIndicator() {
   } catch(e) { showToast(e.message||'Delete failed', true); }
 }
 
+async function saveMinRequiredMobile() {
+  if (!_currentProfile) return;
+  try {
+    await api('/profiles/' + _currentProfile.name, {
+      method: 'PUT',
+      body: JSON.stringify({
+        min_indicators_required:       numOrNull('f-min_indicators_required'),
+        min_entry_indicators_required: numOrNull('f-min_entry_indicators_required'),
+        min_exit_indicators_required:  numOrNull('f-min_exit_indicators_required'),
+      })
+    });
+    showToast('Min required saved');
+  } catch(e) { showToast(e.message || 'Save failed', true); }
+}
+
 function openSheet() {
   document.getElementById('ind-overlay').classList.add('open');
   document.getElementById('ind-sheet').classList.add('open');
@@ -1230,6 +1786,7 @@ function setFld(id, val) { const el=document.getElementById(id); if(el) el.value
 function setChk(id, val) { const el=document.getElementById(id); if(el) el.checked=!!val; }
 function chkVal(id) { const el=document.getElementById(id); return el?el.checked:false; }
 function numOrNull(id) { const el=document.getElementById(id); if(!el||el.value.trim()==='') return null; return parseFloat(el.value); }
+function strOrNull(id) { const el=document.getElementById(id); if(!el) return null; const v=el.value.trim(); return v===''?null:v; }
 
 function fmt$(n) {
   if (n==null||isNaN(n)) return '$—';

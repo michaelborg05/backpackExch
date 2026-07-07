@@ -58,6 +58,10 @@ _MEAN_REV_SHORT_BASE = {
     "use_entry_filter": True,
     "max_position_hours": 4,
     "use_market_regime_filter": False,
+    # Fill realism + safeguard defaults for this book
+    "stop_loss_slippage_pct": 0.1,
+    "max_consecutive_stop_losses": 2,
+    "consecutive_sl_lock_hours": 24,
     # "trading_hours": [
     #     {"day_of_week": 0, "start_time": "05:00", "end_time": "12:00", "enabled": True},
     #     {"day_of_week": 0, "start_time": "15:00", "end_time": "21:00", "enabled": True},
@@ -122,6 +126,10 @@ _FADE_V2C_BASE = {
     "use_entry_filter": True,
     "max_position_hours": 5,
     "use_market_regime_filter": False,
+    # Fill realism + safeguard defaults for this book
+    "stop_loss_slippage_pct": 0.1,
+    "max_consecutive_stop_losses": 2,
+    "consecutive_sl_lock_hours": 24,
     "use_trend_invalidation_exit": True,
     "trend_invalidation_indicators": "trend",
     "min_position_age_for_trend_check": 45,
@@ -169,6 +177,10 @@ FADE_SHORT_VARIANTS = {
         "use_entry_filter": True,
         "max_position_hours": 5,
         "use_market_regime_filter": False,
+        # Fill realism + safeguard defaults for this book
+        "stop_loss_slippage_pct": 0.1,
+        "max_consecutive_stop_losses": 2,
+        "consecutive_sl_lock_hours": 24,
         "use_trend_invalidation_exit": True,
         "trend_invalidation_indicators": "trend",
         "min_position_age_for_trend_check": 45,

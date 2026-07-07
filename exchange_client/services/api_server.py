@@ -3430,7 +3430,9 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
         changes = {}
 
         for field in ["max_daily_profit_pct", "max_daily_loss_pct",
-                      "profit_lock_hours", "loss_lock_hours", "is_active"]:
+                      "profit_lock_hours", "loss_lock_hours",
+                      "max_consecutive_stop_losses", "consecutive_sl_lock_hours",
+                      "is_active"]:
             val = getattr(body, field, None)
             if val is not None:
                 setattr(cb, field, val)
@@ -3787,6 +3789,8 @@ def _serialize_cb(cb) -> dict:
         "max_daily_loss_pct":   float(cb.max_daily_loss_pct)   if cb.max_daily_loss_pct   else 3.0,
         "profit_lock_hours":    cb.profit_lock_hours,
         "loss_lock_hours":      cb.loss_lock_hours,
+        "max_consecutive_stop_losses": cb.max_consecutive_stop_losses,
+        "consecutive_sl_lock_hours":   cb.consecutive_sl_lock_hours,
         "is_active":            bool(cb.is_active),
     }
 

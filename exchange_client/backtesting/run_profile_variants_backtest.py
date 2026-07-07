@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS,run_all_variants
-from backtesting.backtest_engine import ProfileOpenPositionCap
+from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBreaker
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
@@ -107,6 +107,17 @@ with get_db_session() as db:
             if max_open_per_profile:
                 profile_caps[name] = ProfileOpenPositionCap(max_open_per_profile)
 
+        # Per-variant consecutive-SL breakers, shared across symbol runs so the
+        # pause after N straight stop losses spans all symbols (like the live CB).
+        sl_breakers = {}
+        for name, config in variants.items():
+            max_consec_sl = config.get("max_consecutive_stop_losses")
+            if max_consec_sl:
+                sl_breakers[name] = ConsecutiveSLBreaker(
+                    int(max_consec_sl),
+                    float(config.get("consecutive_sl_lock_hours", 24) or 24),
+                )
+
         # Warn about profile-level symbols that won't be visited (not in default set)
         default_symbols_set = set(symbols)
         for name, config in variants.items():
@@ -141,6 +152,7 @@ with get_db_session() as db:
                 export_csv=csv_path,
                 price_source="ticks",
                 profile_caps=profile_caps,
+                sl_breakers=sl_breakers,
             )
 
             for r in symbol_results:
