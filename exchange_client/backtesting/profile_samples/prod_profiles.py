@@ -40,7 +40,7 @@ PROD_PROFILES = [
     "use_entry_filter": True,
     "use_atr_filter": False,
     "max_position_hours": 6,
-    "use_market_regime_filter": False,
+    "use_market_regime_filter": False,  # sweep 49d: regime filter hurts MR longs (-5.8% @4h) — keep off
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 30.0,
     "max_open_positions": 1,
@@ -91,6 +91,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 12,
     "use_market_regime_filter": True,
+    "regime_timeframe": "240",   # sweep 49d: @4h best for this profile (PF 1.15 -> 1.29)
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -188,7 +189,7 @@ PROD_PROFILES = [
 # Exported from profile: 4hr_ema50drop
 {
     "display_name": "4hr_p3_v7_rsi_pullbackAI",
-    "symbols": ['BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC'],
+    "symbols": ['BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC','BNB_USDC','ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "trend_following",
     "market_type": "SPOT",
@@ -307,7 +308,8 @@ PROD_PROFILES = [
     "use_entry_filter": True,
     "use_atr_filter": False,
     "max_position_hours": 4,
-    "use_market_regime_filter": False,
+    "use_market_regime_filter": True,
+    "regime_timeframe": "240",   # 4h sustained-trend guard; set "60" to compare 1h
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -365,6 +367,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 18,
     "use_market_regime_filter": True,
+    "regime_timeframe": "60",    # sweep 49d: @1h best for this profile (PF 1.26 -> 1.82); @4h hurts
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -429,7 +432,8 @@ PROD_PROFILES = [
     "use_entry_filter": True,
     "use_atr_filter": False,
     "max_position_hours": 5,
-    "use_market_regime_filter": False,
+    "use_market_regime_filter": True,
+    "regime_timeframe": "240",   # 4h sustained-trend guard; set "60" to compare 1h
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -479,7 +483,7 @@ PROD_PROFILES = [
     "use_entry_filter": True,
     "use_atr_filter": False,
     "max_position_hours": 6,
-    "use_market_regime_filter": False,
+    "use_market_regime_filter": False,  # sweep 49d: regime filter hurts MR longs (-4.7% @4h) — keep off
     "default_order_size_usdc": 200.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,

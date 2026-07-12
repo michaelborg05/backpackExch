@@ -29,8 +29,9 @@ class TradingProfile(BaseModel):
     max_position_size: Optional[Decimal] = None
  
     # Market Regime Filter
-    use_market_regime_filter: bool = False  
-    
+    use_market_regime_filter: bool = False
+    regime_timeframe: Optional[str] = Field(None, description="Regime check timeframe override (e.g. '240' for 4h). None = strategy-based default (entry TF for mean reversion, trend TF otherwise)")
+
     # NEW: Trend Filter Configuration (Higher Timeframe)
     use_trend_filter: bool = False
     trend_timeframe: str = "1h"  # Which timeframe to check trend on
@@ -170,6 +171,7 @@ class ProfileCreateRequest(BaseModel):
 
     # Filter toggles
     use_market_regime_filter: Optional[bool] = False
+    regime_timeframe: Optional[str] = None
     use_trend_filter: Optional[bool] = False
     use_entry_filter: Optional[bool] = False
     use_atr_filter: Optional[bool] = False
@@ -229,6 +231,7 @@ class ProfileUpdateRequest(BaseModel):
     entry_timeframe: Optional[str] = None
 
     use_market_regime_filter: Optional[bool] = None
+    regime_timeframe: Optional[str] = None  # "" clears the override (back to strategy default)
     use_trend_filter: Optional[bool] = None
     use_entry_filter: Optional[bool] = None
     use_atr_filter: Optional[bool] = None

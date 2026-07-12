@@ -122,16 +122,20 @@ SWING_VARIANTS = {
         **_SWING_BASE,
         "take_profit_pct": 3.0,
         "stop_loss_pct": 2.0,
-        "trailing_stop_pct": 1.2,
+        "trailing_stop_pct": 1.0,
         "arm_trailing_stop_pct": 1.5,
         "use_trailing_stop": True,
         "min_signal_confidence": 74.0,
         "signal_cooldown_minutes": 241,
+        "sl_cooldown_minutes": 485,
+        "tp_cooldown_minutes": 241,        
         "min_volume_ratio": 1.0,
         # "trend" mode re-checks 4hr trend indicators (EMA cross + RSI zone) on open positions.
         # Do NOT use "entry" mode here — 1hr RSI climbing above 50 as the trade wins would
         # incorrectly trigger an exit since the entry RSI range (28-50) would then "fail".
-        "trend_invalidation_indicators":    "trend",
+    #    "trend_invalidation_indicators":    "trend",
+        "trend_invalidation_indicators":    "trend",  # default: 4hr trend indicators
+        "exit_timeframe": "240",
         "min_position_age_for_trend_check": 0,
 
         # 4hr: EMA bullish cross (hard) + RSI in bullish zone 52-63 (hard)

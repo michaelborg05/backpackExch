@@ -3128,6 +3128,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             trend_timeframe=body.trend_timeframe,
             entry_timeframe=body.entry_timeframe,
             use_market_regime_filter=body.use_market_regime_filter,
+            regime_timeframe=body.regime_timeframe or None,
             use_trend_filter=body.use_trend_filter,
             use_entry_filter=body.use_entry_filter,
             use_atr_filter=body.use_atr_filter,
@@ -3215,7 +3216,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "signal_cooldown_minutes", "sl_cooldown_minutes", "tp_cooldown_minutes",
         "min_signal_confidence", "min_volume_ratio",
         "trend_timeframe", "entry_timeframe",
-        "use_market_regime_filter", "use_trend_filter",
+        "use_market_regime_filter", "regime_timeframe", "use_trend_filter",
         "use_entry_filter", "use_atr_filter", "enable_signal_generation",
         "min_indicators_required", "min_entry_indicators_required", "min_exit_indicators_required",
         "trend_indicator_groups", "entry_indicator_groups", "exit_indicator_groups",
@@ -3529,6 +3530,7 @@ def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
         _field("use_atr_filter", bool(p.use_atr_filter)),
         _field("max_position_hours", p.max_position_hours or 12),
         _field("use_market_regime_filter", bool(p.use_market_regime_filter)),
+        _field("regime_timeframe", p.regime_timeframe or None),
         _field("default_order_size_usdc", float(p.default_order_size_usdc) if p.default_order_size_usdc else 100.0),
         _field("max_position_size_pct", float(p.max_position_size_pct) if p.max_position_size_pct else 10.0),
         _field("max_open_positions", p.max_open_positions or 5),
@@ -3741,6 +3743,7 @@ def _serialize_profile(p, cb=None) -> dict:
 
         # Filters
         "use_market_regime_filter":    bool(p.use_market_regime_filter),
+        "regime_timeframe":            p.regime_timeframe or None,
         "use_trend_filter":            bool(p.use_trend_filter),
         "use_entry_filter":            bool(p.use_entry_filter),
         "use_atr_filter":              bool(p.use_atr_filter),

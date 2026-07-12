@@ -187,6 +187,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         max_position_hours=cfg.get("max_position_hours", None),
         # Market regime
         use_market_regime_filter=cfg.get("use_market_regime_filter", False),
+        regime_timeframe=cfg.get("regime_timeframe") or None,
         # Market type
         market_type=cfg.get("market_type", "SPOT"),
         # Leverage (perps only; always 1.0 for SPOT)
@@ -384,6 +385,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "min_volume_ratio": row.min_volume_ratio or 1.5,
             # Market regime
             "use_market_regime_filter": bool(row.use_market_regime_filter),
+            "regime_timeframe": row.regime_timeframe or None,
             "max_position_hours": row.max_position_hours or None,
             "use_trend_invalidation_exit": bool(row.use_trend_invalidation_exit),
             "trend_invalidation_indicators": row.trend_invalidation_indicators or "entry",

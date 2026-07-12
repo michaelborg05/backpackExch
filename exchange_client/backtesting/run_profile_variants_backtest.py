@@ -11,13 +11,13 @@ from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBre
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 7,
+parser.add_argument("--days",    type=int, default= 60,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
 parser.add_argument("--set",     default="4hr_swing", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
                     help="Which variant set to run (default: all)")
-parser.add_argument("--trades",  action="store_true", default=False,
+parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
 parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresults.csv",
 #parser.add_argument("--csv",     default="c:\\temp\\backtestresults.csv",
@@ -25,7 +25,7 @@ parser.add_argument("--csv",     default="/home/michael/Downloads/backtestresult
                     help="Export all trades to CSV. Filename is auto-suffixed per set/symbol.")
 parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
-parser.add_argument("--profile", default=None,
+parser.add_argument("--profile", default="p3_v7_rsi_pullback",
                     help="Run only this variant, e.g. p3_v4_ema50drop")
 args = parser.parse_args()
 

@@ -44,6 +44,7 @@ class TradingProfileDB(Base):
     
     # Filter Toggles
     use_market_regime_filter = Column(Boolean, default=True)
+    regime_timeframe = Column(String, nullable=True)  # regime check TF override (e.g. "240"); None = strategy-based default
     use_trend_filter = Column(Boolean, default=True)
     use_entry_filter = Column(Boolean, default=True)
     use_atr_filter = Column(Boolean, default=False)

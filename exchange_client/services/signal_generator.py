@@ -67,6 +67,12 @@ class SignalGenerator:
             self.regime_primary_tf = self.trend_timeframe    # 60m
             self.regime_confirm_tf = self.entry_timeframe    # 15m
 
+        # Per-profile override: run the regime check on a higher timeframe
+        # (e.g. "240") to block trading against a sustained multi-day trend
+        regime_tf_override = getattr(profile, 'regime_timeframe', None)
+        if regime_tf_override:
+            self.regime_primary_tf = str(regime_tf_override)
+
         # AI_AGENT: lazy-load handler (only instantiated if strategy_type matches)
         self._ai_handler: Optional[AISignalHandler] = None
 

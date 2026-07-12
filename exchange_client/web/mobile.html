@@ -552,6 +552,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           <div class="tgl-list">
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Signal Generation</div><div class="tgl-sub">Enable automated scanning</div></div><label class="tgl-sw"><input type="checkbox" id="f-sig-gen"><span class="tgl-track"></span></label></div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Market Regime Filter</div><div class="tgl-sub">Block trades in choppy conditions</div></div><label class="tgl-sw"><input type="checkbox" id="f-regime"><span class="tgl-track"></span></label></div>
+            <div class="frow single" style="padding:6px 0 2px">
+              <div class="field"><label>Regime Timeframe</label><select id="f-regime-tf"><option value="">Strategy default</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select></div>
+            </div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Trend Filter (HTF)</div><div class="tgl-sub">Require bullish trend before entry</div></div><label class="tgl-sw"><input type="checkbox" id="f-trend"><span class="tgl-track"></span></label></div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Entry Filter (LTF)</div><div class="tgl-sub">Require entry indicators on signal TF</div></div><label class="tgl-sw"><input type="checkbox" id="f-entry"><span class="tgl-track"></span></label></div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">ATR Filter</div><div class="tgl-sub">Only trade with sufficient volatility</div></div><label class="tgl-sw"><input type="checkbox" id="f-atr"><span class="tgl-track"></span></label></div>
@@ -1206,6 +1209,7 @@ function updateProfileUI(p) {
 
   // Filters
   setChk('f-sig-gen', p.enable_signal_generation); setChk('f-regime', p.use_market_regime_filter);
+  setFld('f-regime-tf', p.regime_timeframe || '');
   setChk('f-trend', p.use_trend_filter); setChk('f-entry', p.use_entry_filter);
   setChk('f-atr', p.use_atr_filter);
 
@@ -1264,6 +1268,7 @@ async function saveProfileSettings() {
         tp_cooldown_minutes:     numOrNull('f-tpcd'),
         enable_signal_generation: chkVal('f-sig-gen'),
         use_market_regime_filter: chkVal('f-regime'),
+        regime_timeframe:        strOrNull('f-regime-tf') ?? '',  // '' clears the override
         use_trend_filter:         chkVal('f-trend'),
         use_entry_filter:         chkVal('f-entry'),
         use_atr_filter:           chkVal('f-atr'),

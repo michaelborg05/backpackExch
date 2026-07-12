@@ -1399,6 +1399,10 @@ class ReplayRegimeFilter:
     DISTRIBUTION_VOLUME     = 1.5
     WHIPSAW_THRESHOLD       = 1.0    # HTF EMA diff % to consider "strong uptrend"
     REVERSAL_THRESHOLD      = -0.8   # LTF EMA diff % to consider "strong bearish reversal"
+    SUSTAINED_TREND_SPREAD_PCT = 2.0 # regime-TF EMA20/50 spread that blocks counter-trend entries
+
+    SHORT_STRATEGIES = ("short_trend_following", "short_mean_reversion")
+    COUNTER_TREND_STRATEGIES = ("mean_reversion", "short_mean_reversion", "short_trend_following")
 
     def __init__(self, replay_cache: "ReplayTrendCache"):
         self._cache = replay_cache
@@ -1420,8 +1424,13 @@ class ReplayRegimeFilter:
             if regime == "HIGH_RISK":
                 return False, reason
             return True, reason  # SAFE and CHOPPY both allowed for range
+        elif strategy_type in self.COUNTER_TREND_STRATEGIES:
+            # Counter-trend strategies: chop is their habitat — only HIGH_RISK blocks
+            if regime == "HIGH_RISK":
+                return False, reason
+            return True, reason
         else:
-            # trend_following / mean_reversion
+            # trend_following
             if regime == "SAFE":
                 return True, reason
             return False, reason  # CHOPPY or HIGH_RISK both blocked
@@ -1468,9 +1477,16 @@ class ReplayRegimeFilter:
     ) -> Tuple[bool, Optional[str]]:
         rsi = primary.rsi
         price = primary.price
+        is_short = strategy_type in self.SHORT_STRATEGIES
 
-        # 1. RSI panic / euphoria
-        if strategy_type in ("trend_following", "range_trading"):
+        # 1. RSI panic / euphoria (direction-aware, mirrors live RegimeFilter)
+        if is_short:
+            if rsi < 20:
+                return True, f"Extreme oversold - RSI {rsi:.0f} too low for shorting (bounce risk)"
+            rsi_mom, _ = self._cache._get_rsi_momentum(symbol, primary_tf)
+            if rsi_mom is not None and rsi_mom < -12:
+                return True, f"RSI already in free-fall ({rsi_mom:.1f}) - short entry too late"
+        elif strategy_type in ("trend_following", "range_trading"):
             if rsi < self.RSI_PANIC:
                 return True, f"Panic zone - RSI {rsi:.0f}"
         elif strategy_type == "mean_reversion":
@@ -1480,22 +1496,49 @@ class ReplayRegimeFilter:
             if rsi_mom is not None and rsi_mom < -10:
                 return True, f"Free fall - RSI dropping {rsi_mom:.1f}"
 
-        if rsi > self.RSI_EUPHORIA:
+        if strategy_type == "short_mean_reversion":
+            # Overbought is the setup — only block extreme RSI still surging
+            if rsi > 85:
+                rsi_mom, _ = self._cache._get_rsi_momentum(symbol, primary_tf)
+                if rsi_mom is not None and rsi_mom > 8:
+                    return True, f"Extreme overbought with surge - RSI {rsi:.0f} climbing ({rsi_mom:+.1f})"
+        elif strategy_type == "short_trend_following":
+            if rsi > 80:
+                rsi_mom, _ = self._cache._get_rsi_momentum(symbol, primary_tf)
+                if rsi_mom is not None and rsi_mom > 10:
+                    return True, f"Euphoria surge - RSI {rsi:.0f} climbing fast ({rsi_mom:+.1f})"
+        elif rsi > self.RSI_EUPHORIA:
             return True, f"Euphoria zone - RSI {rsi:.0f}"
 
-        # 2. Whipsaw: strong bullish HTF + strong bearish LTF reversal
-        if strategy_type == "mean_reversion":
-            if confirm is not None:
-                primary_diff = ((primary.ema20 - primary.ema50) / primary.ema50) * 100
+        # 2. Sustained-trend / whipsaw detection (mirrors live RegimeFilter)
+        primary_diff = ((primary.ema20 - primary.ema50) / primary.ema50) * 100
+
+        if is_short:
+            # Sustained rally on the regime TF — don't short into strength
+            if primary_diff > self.SUSTAINED_TREND_SPREAD_PCT:
+                return True, (
+                    f"Sustained {primary_tf}m rally - EMA20/50 spread "
+                    f"{primary_diff:+.2f}% > {self.SUSTAINED_TREND_SPREAD_PCT}%"
+                )
+            if strategy_type == "short_trend_following" and confirm is not None:
+                # Short squeeze forming: strong bearish HTF + bullish LTF recovery
                 confirm_diff = ((confirm.ema20 - confirm.ema50) / confirm.ema50) * 100
-                if primary_diff < -2.0 and confirm_diff < -2.0:
-                    return True, (
-                        f"Coordinated crash "
-                        f"(HTF {primary_diff:+.2f}%, LTF {confirm_diff:+.2f}%)"
-                    )
+                if primary_diff < -self.WHIPSAW_THRESHOLD:
+                    if confirm_diff > abs(self.REVERSAL_THRESHOLD):
+                        if price > confirm.ema20:
+                            return True, (
+                                f"Short squeeze risk "
+                                f"(HTF {primary_diff:+.2f}%, LTF {confirm_diff:+.2f}%)"
+                            )
+        elif strategy_type == "mean_reversion":
+            # Sustained downtrend on the regime TF — don't dip-buy a falling market
+            if primary_diff < -self.SUSTAINED_TREND_SPREAD_PCT:
+                return True, (
+                    f"Sustained {primary_tf}m downtrend - EMA20/50 spread "
+                    f"{primary_diff:+.2f}% < -{self.SUSTAINED_TREND_SPREAD_PCT}%"
+                )
         elif strategy_type not in ("range_trading",):
             if confirm is not None:
-                primary_diff = ((primary.ema20 - primary.ema50) / primary.ema50) * 100
                 confirm_diff = ((confirm.ema20 - confirm.ema50) / confirm.ema50) * 100
                 if primary_diff > self.WHIPSAW_THRESHOLD:
                     if confirm_diff < self.REVERSAL_THRESHOLD:
@@ -1505,8 +1548,9 @@ class ReplayRegimeFilter:
                                 f"(HTF {primary_diff:+.2f}%, LTF {confirm_diff:+.2f}%)"
                             )
 
-        # 3. Distribution: high volume + below VWAP + RSI decreasing
-        if primary.volume_ratio is not None:
+        # 3. Distribution: high volume + below VWAP + RSI decreasing (long strategies only —
+        #    for shorts, high-volume selling is confirmation, not risk)
+        if not is_short and primary.volume_ratio is not None:
             if primary.volume_ratio > self.DISTRIBUTION_VOLUME:
                 if primary.vwap and price < primary.vwap:
                     rsi_mom, rsi_dir = self._cache._get_rsi_momentum(symbol, primary_tf)
@@ -1708,6 +1752,9 @@ class BacktestProfile:
         "use_entry_filter":           True,
         "use_atr_filter":             False,
         "use_market_regime_filter":   False,
+        # Regime check TF override (e.g. "240"). None = strategy-based default:
+        # entry TF for mean reversion strategies, trend TF otherwise (mirrors SignalGenerator).
+        "regime_timeframe":           None,
         "min_signal_confidence":      70.0,
         "min_volume_ratio":           1.1,
         "min_indicators_required":    2,
@@ -2260,6 +2307,10 @@ class BacktestEngine:
         needed_timeframes = {self.profile.entry_timeframe}
         if self.profile.use_trend_filter:
             needed_timeframes.add(self.profile.trend_timeframe)
+        regime_primary_tf, regime_confirm_tf = self._regime_timeframes()
+        if getattr(self.profile, "use_market_regime_filter", False):
+            needed_timeframes.add(regime_primary_tf)
+            needed_timeframes.add(regime_confirm_tf)
 
         all_rows = (
             self.db.query(TrendAnalysisLog)
@@ -2483,8 +2534,8 @@ class BacktestEngine:
                 strategy_type = getattr(self.profile, "strategy_type", "trend_following")
                 regime_ok, regime_reason = regime_filter.can_trade(
                     symbol,
-                    self.profile.trend_timeframe,
-                    self.profile.entry_timeframe,
+                    regime_primary_tf,
+                    regime_confirm_tf,
                     strategy_type=strategy_type,
                 )
                 if not regime_ok:
@@ -2947,8 +2998,27 @@ class BacktestEngine:
             "min_entry_indicators_required",
             "stop_loss_slippage_pct", "taker_fee_pct",
             "max_consecutive_stop_losses",
+            "use_market_regime_filter", "regime_timeframe",
         ]
         return {k: getattr(self.profile, k, None) for k in keys}
+
+    def _regime_timeframes(self) -> Tuple[str, str]:
+        """
+        (primary, confirm) timeframes for the regime filter — mirrors
+        SignalGenerator: entry TF for mean reversion strategies, trend TF
+        otherwise; profile.regime_timeframe overrides the primary.
+        """
+        strategy = getattr(self.profile, "strategy_type", "trend_following")
+        if strategy in ("mean_reversion", "short_mean_reversion"):
+            primary = self.profile.entry_timeframe
+            confirm = self.profile.entry_timeframe
+        else:
+            primary = self.profile.trend_timeframe
+            confirm = self.profile.entry_timeframe
+        override = getattr(self.profile, "regime_timeframe", None)
+        if override:
+            primary = str(override)
+        return primary, confirm
 
 
 # ===========================================================================

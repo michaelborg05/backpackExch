@@ -60,6 +60,11 @@ class RegimeFilter:
         # 4. WHIPSAW DETECTION
         self.whipsaw_threshold = 1.0  # Require very strong established UPTREND
         self.reversal_threshold = -0.8  # Strong bearish reversal on LTF
+
+        # 5. SUSTAINED TREND (counter-trend strategies)
+        # EMA20/50 spread on the regime timeframe beyond this blocks shorting
+        # into a rally (short strategies) / dip-buying a downtrend (mean reversion)
+        self.sustained_trend_spread_pct = 2.0
             
         # Cache results
         self._regime_cache: Dict[str, Tuple[MarketRegime, str, float]] = {}
@@ -190,11 +195,19 @@ class RegimeFilter:
             if atr_ratio > self.atr_spike:
                 return True, f"Volatility spike - ATR {atr_ratio:.2f}x normal (stops unreliable)"
 
-        # 4. WHIPSAW / REVERSAL DETECTION
+        # 4. WHIPSAW / REVERSAL / SUSTAINED-TREND DETECTION
+        primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
+
         if strategy_type == StrategyType.SHORT_TREND_FOLLOWING:
+            # Sustained rally on the regime timeframe — don't fade a market that
+            # has been grinding up for days (e.g. 4h EMA20 > EMA50 by 2%+)
+            if primary_diff_pct > self.sustained_trend_spread_pct:
+                return True, (
+                    f"Sustained {primary_timeframe}m uptrend - EMA20/50 spread "
+                    f"{primary_diff_pct:+.2f}% > {self.sustained_trend_spread_pct}% — no shorting into strength"
+                )
             # Block: strong bearish HTF + bullish LTF reversal = short squeeze forming
             if confirm_trend is not None:
-                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
                 confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
                 if primary_diff_pct < -self.whipsaw_threshold:  # Strong bearish 60m
                     if confirm_diff_pct > abs(self.reversal_threshold):  # LTF turning bullish
@@ -204,26 +217,22 @@ class RegimeFilter:
                                 f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
                             )
         elif strategy_type == StrategyType.SHORT_MEAN_REVERSION:
-            # Block if BOTH timeframes are in a strong coordinated rally (too late to short)
-            if confirm_trend is not None:
-                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
-                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                if primary_diff_pct > 2.0 and confirm_diff_pct > 2.0:
-                    return True, (
-                        f"Coordinated rally - both timeframes very bullish "
-                        f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%) — wait for exhaustion"
-                    )
+            # Sustained rally on the regime timeframe (too late/dangerous to short).
+            # Uses the regime TF alone: the LTF being merely overbought is the
+            # setup, not a safety signal — what matters is the higher-TF trend.
+            if primary_diff_pct > self.sustained_trend_spread_pct:
+                return True, (
+                    f"Sustained {primary_timeframe}m rally - EMA20/50 spread "
+                    f"{primary_diff_pct:+.2f}% > {self.sustained_trend_spread_pct}% — wait for exhaustion"
+                )
         elif strategy_type == StrategyType.MEAN_REVERSION:
-            # Mean reversion LIKES volatility and reversals
-            # Only block if BOTH timeframes are in free fall
-            if confirm_trend is not None:
-                primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
-                confirm_diff_pct = ((confirm_trend.ema20 - confirm_trend.ema50) / confirm_trend.ema50) * 100
-                if primary_diff_pct < -2.0 and confirm_diff_pct < -2.0:
-                    return True, (
-                        f"Coordinated crash - both timeframes very bearish "
-                        f"(HTF {primary_diff_pct:+.2f}%, LTF {confirm_diff_pct:+.2f}%)"
-                    )
+            # Mean reversion LIKES volatility and reversals — but not dip-buying
+            # a sustained downtrend on the regime timeframe
+            if primary_diff_pct < -self.sustained_trend_spread_pct:
+                return True, (
+                    f"Sustained {primary_timeframe}m downtrend - EMA20/50 spread "
+                    f"{primary_diff_pct:+.2f}% < -{self.sustained_trend_spread_pct}% — no dip-buying a falling market"
+                )
         elif strategy_type == StrategyType.RANGE_TRADING:
             # Range trading relies on its own entry indicators — skip whipsaw check
             pass
@@ -429,7 +438,15 @@ class RegimeFilter:
                     )
                     return True, reason
 
-            case _:  # TREND_FOLLOWING and MEAN_REVERSION — original logic unchanged
+            case StrategyType.MEAN_REVERSION | StrategyType.SHORT_MEAN_REVERSION | StrategyType.SHORT_TREND_FOLLOWING:
+                # Counter-trend strategies: chop/ranging is their habitat — only
+                # HIGH_RISK (incl. sustained trend against the trade direction) blocks.
+                if regime == MarketRegime.HIGH_RISK:
+                    self.logger.warning(f"[{profile_name}] {symbol}: BLOCKED - {reason}")
+                    return False, reason
+                return True, reason  # SAFE and CHOPPY both tradeable
+
+            case _:  # TREND_FOLLOWING — original logic unchanged
                 if regime == MarketRegime.SAFE:
                     # Market is safe - now use your trend logic to find entries
                     return True, reason

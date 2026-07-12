@@ -461,6 +461,7 @@
               <div class="form-grid">
                 <div class="field"><label>Trend Timeframe (min)</label><input id="f-trend_timeframe" type="text" placeholder="60"></div>
                 <div class="field"><label>Entry Timeframe (min)</label><input id="f-entry_timeframe" type="text" placeholder="15"></div>
+                <div class="field"><label>Regime Timeframe</label><select id="f-regime_timeframe"><option value="">Strategy default</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select><div class="field-hint">TF for the Market Regime Filter. 4h blocks counter-trend entries against sustained multi-day trends</div></div>
                 <div class="field">
                   <label>Scan Cooldown (minutes)</label>
                   <input id="f-signal_cooldown_minutes" type="number" step="1" placeholder="15">
@@ -2196,6 +2197,7 @@ function fillSettings(p) {
   set('f-min_volume_ratio', p.min_volume_ratio);
   set('f-enable_signal_generation', p.enable_signal_generation);
   set('f-use_market_regime_filter', p.use_market_regime_filter);
+  set('f-regime_timeframe', p.regime_timeframe ?? '');
   set('f-use_trend_filter', p.use_trend_filter);
   set('f-use_entry_filter', p.use_entry_filter);
   set('f-use_atr_filter', p.use_atr_filter);
@@ -2388,6 +2390,7 @@ async function saveSettings() {
     min_volume_ratio:               getNum('f-min_volume_ratio'),
     enable_signal_generation:       getBool('f-enable_signal_generation'),
     use_market_regime_filter:       getBool('f-use_market_regime_filter'),
+    regime_timeframe:               getStr('f-regime_timeframe') ?? '',  // '' clears the override
     use_trend_filter:               getBool('f-use_trend_filter'),
     use_entry_filter:               getBool('f-use_entry_filter'),
     use_atr_filter:                 getBool('f-use_atr_filter'),
