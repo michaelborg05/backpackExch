@@ -116,7 +116,7 @@ SWING_VARIANTS = {
     # ── Profile 1: EMA Cross RSI Pullback ──────────────────────────────────────
     # Ticks optimizer iter 3 champion: score=182.36, 23T, 65% WR, 3.29x PF, +18.4% (60d, 5 symbols)
     # Market: 4hr EMA cross bullish + RSI in bullish zone (52-63). Enter on 1hr pullback
-    # where RSI dips to 28-50 (both ranges must agree). ADX 22-40 confirms entry momentum.
+    # where RSI dips to 30-50. ADX 22-40 confirms entry momentum.
     # No ADX required in trend — RSI zone acts as the selectivity filter.
     "p3_v7_rsi_pullback": {
         **_SWING_BASE,
@@ -134,21 +134,21 @@ SWING_VARIANTS = {
         "trend_invalidation_indicators":    "trend",
         "min_position_age_for_trend_check": 0,
 
-        # 4hr: EMA bullish cross (hard) + RSI in bullish zone 52-63 (both ranges hard-stop)
+        # 4hr: EMA bullish cross (hard) + RSI in bullish zone 52-63 (hard)
+        # (collapsed from two overlapping ranges 48-63 ∧ 52-65 — behaviour identical)
         "trend_indicators": [
             {"type": "ema_cross",  "params": {"hard_stop": True}},
-            {"type": "rsi_range",  "params": {"min": 48, "max": 63, "invert": True, "hard_stop": True}},
-            {"type": "rsi_range",  "params": {"min": 52, "max": 65, "invert": True, "hard_stop": True}},
+            {"type": "rsi_range",  "params": {"min": 52, "max": 63, "invert": True, "hard_stop": True}},
         ],
-        "min_indicators_required": 3,
+        "min_indicators_required": 2,
 
-        # 1hr: ADX in momentum zone (22-40) + RSI pulled back to 28-50 (both ranges hard-stop)
+        # 1hr: ADX in momentum zone (22-40) + RSI pulled back to 30-50 (hard)
+        # (collapsed from two overlapping ranges 30-52 ∧ 28-50 — behaviour identical)
         "entry_indicators": [
             {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 40}},
-            {"type": "rsi_range",  "params": {"min": 30, "max": 52, "invert": True, "hard_stop": True}},
-            {"type": "rsi_range",  "params": {"min": 28, "max": 50, "invert": True, "hard_stop": True}},
+            {"type": "rsi_range",  "params": {"min": 30, "max": 50, "invert": True, "hard_stop": True}},
         ],
-        "min_entry_indicators_required": 3,
+        "min_entry_indicators_required": 2,
     },
 
     # ── Profile 2: EMA Cross ADX + Volume Entry ────────────────────────────────
@@ -222,6 +222,54 @@ SWING_VARIANTS = {
             {"type": "rsi_range",      "params": {"min": 28, "max": 50, "invert": True}},
             {"type": "bollinger_bands","params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.0, "max_pct_b": 0.5}},
             {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -5.0, "max_gap_pct": 2.0}},
+        ],
+        "min_entry_indicators_required": 3,
+    },
+
+    # ── v6b: fast dip-buyer for perps (bullet) — 60m trend / 15m entry ────────
+    # 3-round optimization champion (Jul 8 2026, data Apr 29 → Jul 8, ticks mode,
+    # 0.05% SL slippage, fees excluded):
+    #   30d: 106T 51% WR +11.8% PF 1.34 | 60d: 142T 53% +20.2% PF 1.46 | full: 164T 53% +22.0% PF 1.42
+    #   Overlap with backpack set (v7+v11+v15): 5% — structurally different TF.
+    #   Avg hold 3.1h (funding-friendly). Per-symbol: all positive except XRP (-0.7%, n=15).
+    # FEE SENSITIVITY (avg trade is thin ~0.13%): at 0.02%/side taker → 60d +14.3% PF 1.30;
+    # at 0.05%/side → 60d +5.6% PF 1.11 (marginal — do not run at high taker fees).
+    # Rejected in optimization: breakout entries (PF 0.78), ema_gap trend gate (0.79),
+    # 2x-vol bursts (0.56), TP>=1.8 geometry (fee headroom did NOT improve), all-4 entry.
+    # For prod: enable consecutive-SL breaker in circuit_breaker_config (suggest k=3 / 12h
+    # for this TF) and calibrate stop_loss_slippage_pct from bullet percent_missed data.
+    "p3_v6b_fast_dip_regime": {
+        **_SWING_BASE,
+        "symbols": ['SOL_USDC', 'BTC_USDC', 'ETH_USDC', 'XRP_USDC', 'ZEC_USDC'],
+        "trend_timeframe": "60",
+        "entry_timeframe": "15",
+        "use_market_regime_filter": True,
+        "take_profit_pct": 1.5,
+        "stop_loss_pct": 1.0,
+        "trailing_stop_pct": 0.6,
+        "arm_trailing_stop_pct": 0.8,
+        "use_trailing_stop": True,
+        "min_signal_confidence": 74.0,
+        "signal_cooldown_minutes": 61,
+        "max_position_hours": 24,
+        "min_volume_ratio": 1.0,
+        "trend_invalidation_indicators":    "trend",
+        "min_position_age_for_trend_check": 0,
+
+        # 60m trend: EMA cross (hard) + ADX 20-45 (hard) + RSI 50-68
+        "trend_indicators": [
+            {"type": "ema_cross",  "params": {"hard_stop": True}},
+            {"type": "adx_regime", "params": {"min_adx": 20, "max_adx": 45, "hard_stop": True}},
+            {"type": "rsi_range",  "params": {"min": 50, "max": 68, "invert": True}},
+        ],
+        "min_indicators_required": 3,
+
+        # 15m entry: volume spike (hard) + deep RSI dip 25-45 + BB lower half + price near EMA20
+        "entry_indicators": [
+            {"type": "volume_spike",    "params": {"min_ratio": 1.2, "max_ratio": 8.0, "hard_stop": True}},
+            {"type": "rsi_range",       "params": {"min": 25, "max": 45, "invert": True}},
+            {"type": "bollinger_bands", "params": {"band": "upper", "mode": "pct_b", "min_pct_b": 0.0, "max_pct_b": 0.5}},
+            {"type": "price_vs_ema",    "params": {"ema": 20, "min_gap_pct": -3.0, "max_gap_pct": 1.0}},
         ],
         "min_entry_indicators_required": 3,
     },

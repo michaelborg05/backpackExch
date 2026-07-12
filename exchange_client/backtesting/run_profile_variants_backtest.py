@@ -11,7 +11,7 @@ from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBre
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 90,
+parser.add_argument("--days",    type=int, default= 7,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")

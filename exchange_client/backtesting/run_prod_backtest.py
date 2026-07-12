@@ -37,7 +37,7 @@ parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")
 parser.add_argument("--profile", default=None,
                     help="Run only one prod profile by name, e.g. prod_mean_rev")
-parser.add_argument("--trades",  action="store_true", default=True,
+parser.add_argument("--trades",  action="store_true", default=False,
                     help="Print per-trade breakdown under each profile")
 parser.add_argument("--csv",     default="/home/michael/Downloads/prod_backtest.csv",
                     help="Export all trades to CSV (requires --trades)")

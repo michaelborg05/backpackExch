@@ -606,6 +606,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
             <div class="field"><label>Profit Lock Hours</label><input id="f-cb-profit-hrs" type="number" step="1" placeholder="6"></div>
             <div class="field"><label>Loss Lock Hours</label><input id="f-cb-loss-hrs" type="number" step="1" placeholder="12"></div>
           </div>
+          <div class="frow">
+            <div class="field"><label>Consecutive SLs</label><input id="f-cb-consec-sl" type="number" step="1" min="0" placeholder="0 = off"></div>
+            <div class="field"><label>Consec SL Lock Hrs</label><input id="f-cb-consec-sl-hrs" type="number" step="1" placeholder="24"></div>
+          </div>
           <div class="tgl-list">
             <div class="tgl-row">
               <div class="tgl-info"><div class="tgl-name">Circuit Breaker Enabled</div><div class="tgl-sub">Uncheck to disable all daily limits</div></div>
@@ -1304,6 +1308,7 @@ async function loadCircuitBreaker(profName) {
     if (cb) {
       setFld('f-cb-profit', cb.max_daily_profit_pct); setFld('f-cb-loss', cb.max_daily_loss_pct);
       setFld('f-cb-profit-hrs', cb.profit_lock_hours); setFld('f-cb-loss-hrs', cb.loss_lock_hours);
+      setFld('f-cb-consec-sl', cb.max_consecutive_stop_losses); setFld('f-cb-consec-sl-hrs', cb.consecutive_sl_lock_hours);
       setChk('f-cb-active', cb.is_active);
     }
   } catch {}
@@ -1333,6 +1338,8 @@ async function saveCBSettings() {
         max_daily_loss_pct:   numOrNull('f-cb-loss'),
         profit_lock_hours:    numOrNull('f-cb-profit-hrs'),
         loss_lock_hours:      numOrNull('f-cb-loss-hrs'),
+        max_consecutive_stop_losses: numOrNull('f-cb-consec-sl'),
+        consecutive_sl_lock_hours:   numOrNull('f-cb-consec-sl-hrs'),
         is_active:            chkVal('f-cb-active'),
       })
     });
