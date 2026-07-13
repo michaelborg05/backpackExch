@@ -1403,6 +1403,10 @@ class ReplayRegimeFilter:
 
     SHORT_STRATEGIES = ("short_trend_following", "short_mean_reversion")
     COUNTER_TREND_STRATEGIES = ("mean_reversion", "short_mean_reversion", "short_trend_following")
+    # Legacy variant-file strategy names → live StrategyType values. Without this,
+    # e.g. "mean_reversion_short" falls into the trend_following branch and the
+    # euphoria/choppy blocks strangle a short profile whose setup IS overbought.
+    STRATEGY_ALIASES = {"mean_reversion_short": "short_mean_reversion"}
 
     def __init__(self, replay_cache: "ReplayTrendCache"):
         self._cache = replay_cache
@@ -1418,6 +1422,7 @@ class ReplayRegimeFilter:
         Returns (allowed, reason).
         Logic mirrors RegimeFilter.can_trade() per strategy type.
         """
+        strategy_type = self.STRATEGY_ALIASES.get(strategy_type, strategy_type)
         regime, reason = self._get_regime(symbol, primary_tf, confirm_tf, strategy_type)
 
         if strategy_type == "range_trading":
@@ -3009,6 +3014,7 @@ class BacktestEngine:
         otherwise; profile.regime_timeframe overrides the primary.
         """
         strategy = getattr(self.profile, "strategy_type", "trend_following")
+        strategy = ReplayRegimeFilter.STRATEGY_ALIASES.get(strategy, strategy)
         if strategy in ("mean_reversion", "short_mean_reversion"):
             primary = self.profile.entry_timeframe
             confirm = self.profile.entry_timeframe

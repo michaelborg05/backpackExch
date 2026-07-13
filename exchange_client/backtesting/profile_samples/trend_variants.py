@@ -183,6 +183,7 @@ TREND_VARIANTS = {
     # saving ~0.24% per losing BNB trade vs the default 60m trend-check exit.
     "tf_iter3_exit_rsi68": {
         **_TF_BASE,
+        "regime_timeframe": "240",  # sweep 49d: 4h best for this profile (aligned with prod)
         "take_profit_pct":       0.8,
         "stop_loss_pct":         0.6,
         "trailing_stop_pct":     0.3,
@@ -370,6 +371,7 @@ TREND_VARIANTS = {
     # 17T, 82% WR, 0.43% avg, 5.02x PF. Score=112.
     "tf_v3_rsizone_17t": {
         **_TF_BASE,
+        "regime_timeframe": "60",   # sweep 49d: 1h best; 4h hurt this profile (aligned with prod)
         "take_profit_pct":       0.8,
         "stop_loss_pct":         0.6,
         "trailing_stop_pct":     0.3,

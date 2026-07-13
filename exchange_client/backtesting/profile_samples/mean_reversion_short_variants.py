@@ -14,7 +14,7 @@
 
 _MEAN_REV_SHORT_BASE = {
     "display_name": "mean_reversion_short_profile",
-    "strategy_type": "mean_reversion_short",
+    "strategy_type": "short_mean_reversion",
     "entry_timeframe": "15",
     "take_profit_pct": 1.2,
     "stop_loss_pct": 0.7,
@@ -436,6 +436,8 @@ MEAN_REV_SHORT_VARIANTS = {
     # -------------------------------------------------------------------------
     "mrs_v15_optimised": {
         **_MEAN_REV_SHORT_BASE,
+        "use_market_regime_filter": True,
+        "regime_timeframe": "240",  # 4h sustained-rally guard (aligned with prod bullet_shorts_v15AI)
         "use_trend_filter": True,
         "trend_timeframe": "60",
         "trend_indicators": [

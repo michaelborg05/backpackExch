@@ -176,7 +176,8 @@ FADE_SHORT_VARIANTS = {
         "use_trend_filter": True,
         "use_entry_filter": True,
         "max_position_hours": 5,
-        "use_market_regime_filter": False,
+        "use_market_regime_filter": True,
+        "regime_timeframe": "240",  # 4h sustained-rally guard (aligned with prod, sweep 49d)
         # Fill realism + safeguard defaults for this book
         "stop_loss_slippage_pct": 0.1,
         "max_consecutive_stop_losses": 2,
@@ -201,6 +202,8 @@ FADE_SHORT_VARIANTS = {
 
     "mrs_v15_optimised": {
         **_MEAN_REV_SHORT_BASE,
+        "use_market_regime_filter": True,
+        "regime_timeframe": "240",  # 4h sustained-rally guard (aligned with prod bullet_shorts_v15AI)
         "use_trend_filter": True,
         "trend_timeframe": "60",
         "trend_indicators": [
