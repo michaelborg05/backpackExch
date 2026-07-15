@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BorgBot">
+<meta name="theme-color" content="#080b10">
 <title>BorgBot Mobile</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="/web/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/web/icons/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 /* ── Variables ──────────────────────────────────────────────────── */
@@ -776,6 +781,7 @@ let _currentProfile = null;
 let _indicators = [];
 let _editIndId = null;
 let _arTimer = null;
+let _refreshTimer = null;
 let _toastTimer = null;
 
 // ── Clock ─────────────────────────────────────────────────────────
@@ -801,7 +807,7 @@ function showToast(msg, isErr=false) {
 // ── API helper ────────────────────────────────────────────────────
 function akey() { return S.internalKey ?? null; }
 
-async function api(path, opts={}) {
+async function api(path, opts={}, _retried=false) {
   const k = akey(); if (!k) return null;
   try {
     const r = await fetch(BASE + path, {
@@ -809,7 +815,14 @@ async function api(path, opts={}) {
       headers: { 'X-API-Key': k, 'Content-Type': 'application/json', ...(opts.headers||{}) },
       ...opts
     });
-    if (r.status === 401) { fLogout('Session expired.'); return null; }
+    if (r.status === 401) {
+      // Access token (15min) expired, likely because the PWA was backgrounded
+      // and its JS timers were frozen. The refresh_token cookie lives much
+      // longer, so try it silently before dropping the user to the login screen.
+      if (!_retried && await tryRefresh()) return api(path, opts, true);
+      fLogout('Session expired.');
+      return null;
+    }
     if (r.status === 204) return { ok: true };
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -820,6 +833,15 @@ async function api(path, opts={}) {
     console.warn('[api]', path, e.message);
     throw e;
   }
+}
+
+async function tryRefresh() {
+  try {
+    const r = await fetch(BASE + '/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (!r.ok) return false;
+    scheduleRefresh(15);
+    return true;
+  } catch { return false; }
 }
 
 async function safeFetch(path) {
@@ -871,9 +893,9 @@ async function checkExistingSession() {
 }
 
 function scheduleRefresh(expMin) {
-  setTimeout(async () => {
-    const r = await fetch(BASE + '/auth/refresh', { method: 'POST', credentials: 'include' });
-    if (r.ok) scheduleRefresh(15); else fLogout('Session expired. Please log in.');
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(async () => {
+    if (!(await tryRefresh())) fLogout('Session expired. Please log in.');
   }, Math.max((expMin * 60 - 120) * 1000, 10000));
 }
 
@@ -884,7 +906,7 @@ async function doLogout() {
   showLogin();
 }
 
-function fLogout(msg='') { clearInterval(_arTimer); S = {}; showLogin(msg); }
+function fLogout(msg='') { clearInterval(_arTimer); clearTimeout(_refreshTimer); S = {}; showLogin(msg); }
 
 function showLogin(msg='') {
   document.getElementById('app').classList.remove('on');
@@ -893,13 +915,15 @@ function showLogin(msg='') {
   if (msg) setLoginErr(msg);
 }
 
-function showApp() {
+async function showApp() {
   document.getElementById('ls').style.display = 'none';
   document.getElementById('app').classList.add('on');
   document.getElementById('drawer-user').textContent = (S.u || '') + (S.role ? ' · ' + S.role : '');
   checkHealth();
   loadDashboard();
-  loadAllProfiles();
+  await loadAllProfiles();
+  const lastTab = localStorage.getItem('borgbot_last_tab');
+  if (lastTab && lastTab !== 'dash' && document.getElementById('p-' + lastTab)) navTo(lastTab);
   _arTimer = setInterval(() => {
     checkHealth();
     if (_tab === 'dash') loadDashboard();
@@ -928,6 +952,7 @@ function closeDrawer() {
 function navTo(name) {
   closeDrawer();
   _tab = name;
+  localStorage.setItem('borgbot_last_tab', name);
   document.querySelectorAll('.drawer-item').forEach(el => el.classList.remove('on'));
   const navEl = document.getElementById('nav-' + name);
   if (navEl) navEl.classList.add('on');
@@ -1828,6 +1853,23 @@ function escAttr(s) { if(s==null)return''; return String(s).replace(/"/g,'&quot;
 
 // ── Init ──────────────────────────────────────────────────────────
 checkExistingSession();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+}
+
+// Installed PWAs get their JS timers frozen while backgrounded (screen locked,
+// app switched away), so the setTimeout-based refresh in scheduleRefresh()
+// never fires. Refresh the access token as soon as the app is foregrounded
+// again instead of waiting for it to 401 on the next request.
+async function onForeground() {
+  if (!S.u) return;
+  if (!(await tryRefresh())) fLogout('Session expired. Please log in.');
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') onForeground();
+});
+window.addEventListener('pageshow', (e) => { if (e.persisted) onForeground(); });
 </script>
 </body>
 </html>
