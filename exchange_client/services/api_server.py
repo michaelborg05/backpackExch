@@ -15,7 +15,7 @@ from models.webhook import TrendUpdateAlert, TrendData
 from models.symbol import SymbolConfigRequest
 from models.ai_prompt import AIPromptCreate, AIPromptUpdate
 from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorOut
-from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest, TradingHoursEntry
+from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest, TradingHoursEntry, RiskGroup
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.factory import get_adapter
@@ -3124,6 +3124,7 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             max_position_size_pct=body.max_position_size_pct,
             max_open_positions=body.max_open_positions,
             max_open_positions_per_profile=body.max_open_positions_per_profile,
+            risk_group=body.risk_group,
             max_portfolio_exposure_pct=body.max_portfolio_exposure_pct,
             signal_cooldown_minutes=body.signal_cooldown_minutes,
             sl_cooldown_minutes=body.sl_cooldown_minutes,
@@ -3217,7 +3218,8 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "take_profit_pct", "stop_loss_pct", "trailing_stop_pct",
         "arm_trailing_stop_pct", "use_trailing_stop",
         "default_order_size_usdc", "max_position_size_pct",
-        "max_open_positions", "max_open_positions_per_profile", "max_portfolio_exposure_pct",
+        "max_open_positions", "max_open_positions_per_profile", "risk_group",
+        "max_portfolio_exposure_pct",
         "signal_cooldown_minutes", "sl_cooldown_minutes", "tp_cooldown_minutes",
         "min_signal_confidence", "min_volume_ratio",
         "trend_timeframe", "entry_timeframe",
@@ -3455,6 +3457,81 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
         return _serialize_cb(cb)
 
 # ---------------------------------------------------------------------------
+# Risk groups — shared position limits across profiles sharing a risk_group tag
+# ---------------------------------------------------------------------------
+
+def _serialize_risk_group(rg, member_names=None) -> dict:
+    return {
+        "name": rg.name,
+        "max_open_positions": rg.max_open_positions,
+        "max_positions_per_symbol": rg.max_positions_per_symbol,
+        "description": rg.description,
+        "is_active": bool(rg.is_active),
+        "members": member_names if member_names is not None else [],
+    }
+
+
+@app.get("/risk-groups", dependencies=[Depends(require_read_permission)])
+async def list_risk_groups():
+    """All configured risk groups, each with the profiles currently tagged into it."""
+    from db.utils import get_db_session
+    from db.crud import get_all_risk_groups
+    from db.models import TradingProfileDB
+
+    with get_db_session() as db:
+        groups = get_all_risk_groups(db)
+        # Map group name -> tagged profile names (from the source of truth: the DB)
+        rows = db.query(TradingProfileDB.name, TradingProfileDB.risk_group).filter(
+            TradingProfileDB.risk_group.isnot(None)
+        ).all()
+        members: dict = {}
+        for pname, grp in rows:
+            members.setdefault(grp, []).append(pname)
+        return [_serialize_risk_group(g, sorted(members.get(g.name, []))) for g in groups]
+
+
+@app.put("/risk-groups/{name}", dependencies=[Depends(require_admin_permission)])
+async def upsert_risk_group_endpoint(name: str, body: RiskGroup):
+    """Create or update a risk group's shared limits (keyed by name)."""
+    from db.utils import get_db_session
+    from db.crud import upsert_risk_group, get_risk_group
+    from services.audit import write_audit
+
+    with get_db_session() as db:
+        existing = get_risk_group(db, name)
+        before = _serialize_risk_group(existing) if existing else None
+        rg = upsert_risk_group(
+            db,
+            name=name,
+            max_open_positions=body.max_open_positions,
+            max_positions_per_symbol=body.max_positions_per_symbol,
+            description=body.description,
+            is_active=body.is_active,
+        )
+        write_audit(
+            db=db, type="risk_group", subtype="limits",
+            action="update" if before else "create",
+            entity_id=rg.id, entity_name=f"RiskGroup:{name}",
+            before=before, after=_serialize_risk_group(rg),
+        )
+        db.commit()
+        return _serialize_risk_group(rg)
+
+
+@app.delete("/risk-groups/{name}", dependencies=[Depends(require_admin_permission)])
+async def delete_risk_group_endpoint(name: str):
+    """Delete a risk group config. Profiles keep their tag but resolve to no limits."""
+    from db.utils import get_db_session
+    from db.crud import delete_risk_group
+
+    with get_db_session() as db:
+        ok = delete_risk_group(db, name)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Risk group '{name}' not found")
+        return {"deleted": name}
+
+
+# ---------------------------------------------------------------------------
 # Profile Python export — shared rendering helper
 # ---------------------------------------------------------------------------
 
@@ -3466,6 +3543,8 @@ def _render_profile_python_dict(p, indicators, hours, symbols, cb=None) -> str:
         if v is False: return "False"
         if v is None:  return "None"
         if isinstance(v, str): return json.dumps(v)
+        if isinstance(v, Decimal):
+            return repr(int(v) if v == v.to_integral_value() else float(v))
         return repr(v)
 
     def _format_params(params: dict) -> str:
@@ -3540,6 +3619,7 @@ def _render_profile_python_dict(p, indicators, hours, symbols, cb=None) -> str:
         _field("max_position_size_pct", float(p.max_position_size_pct) if p.max_position_size_pct else 10.0),
         _field("max_open_positions", p.max_open_positions or 5),
         _field("max_open_positions_per_profile", p.max_open_positions_per_profile),
+        _field("risk_group", p.risk_group or None),
         _field("max_portfolio_exposure_pct", float(p.max_portfolio_exposure_pct) if p.max_portfolio_exposure_pct else 80.0),
         _field("leverage_multiplier", float(p.leverage_multiplier) if p.leverage_multiplier else 1.0),
     ]
@@ -3742,6 +3822,7 @@ def _serialize_profile(p, cb=None) -> dict:
         "max_position_size_pct":       float(p.max_position_size_pct)       if p.max_position_size_pct       else None,
         "max_open_positions":          int(p.max_open_positions)            if p.max_open_positions            else 5,
         "max_open_positions_per_profile": int(p.max_open_positions_per_profile) if p.max_open_positions_per_profile else None,
+        "risk_group":                  p.risk_group or None,
         "max_portfolio_exposure_pct":  float(p.max_portfolio_exposure_pct)  if p.max_portfolio_exposure_pct  else 80.0,
 
         # Signal
