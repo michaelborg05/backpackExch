@@ -33,6 +33,8 @@ from utils.settings_helper import get_settings_helper
 from db.utils import get_db_session
 from db.crud import (
     get_open_positions,
+    count_open_positions_for_profiles,
+    get_risk_group,
     update_position_trailing_stop,
     close_invalid_position,
     update_high_low,
@@ -1122,6 +1124,43 @@ class MonitoringService:
 
         return False
 
+    def _get_risk_group_config(self, profile: TradingProfile):
+        """Resolve the shared risk-group limits for a profile's group.
+
+        Profiles sharing a ``risk_group`` tag share the position limits stored once
+        on the matching ``risk_groups`` row (e.g. all the 4hr-trend/1hr-entry longs),
+        so several near-identical profiles can't all pile into the same coin / the
+        same macro move.
+
+        Returns ``(group_name, member_names, max_open, max_per_symbol)`` or ``None``
+        if the profile is ungrouped, has no matching group config, or that config
+        sets no limits.
+        """
+        group = getattr(profile, 'risk_group', None)
+        if not group:
+            return None
+
+        with get_db_session() as db:
+            cfg = get_risk_group(db, group)
+            if cfg is None or not cfg.is_active:
+                return None
+            max_open = cfg.max_open_positions
+            max_per_symbol = cfg.max_positions_per_symbol
+
+        if max_open is None and max_per_symbol is None:
+            return None
+
+        profile_manager = get_profile_manager()
+        if profile_manager is None:
+            return None
+
+        member_names = [
+            p.name for p in profile_manager.get_all_profiles()
+            if getattr(p, 'risk_group', None) == group
+        ]
+
+        return group, member_names, max_open, max_per_symbol
+
     def _process_signals_for_profile(self, profile: TradingProfile):
         """Process trading signals for a specific profile"""
 
@@ -1191,9 +1230,39 @@ class MonitoringService:
             f"[{profile.name}] Generated {len(signals)} signal(s)"
         )
         
+        # Resolve shared risk-group limits once per run (None if this profile is ungrouped)
+        risk_group_cfg = self._get_risk_group_config(profile)
+
         # Process each signal (already sorted highest confidence first by scan_symbols)
         for signal in signals:
             try:
+                # Enforce shared risk-group limits (positions already held by *any*
+                # profile in the group count — including entries made earlier in this
+                # same run, since _execute_signal persists the OPEN position before
+                # returning). Query fresh each signal so those are reflected.
+                if risk_group_cfg is not None:
+                    group, member_names, g_max_open, g_max_per_symbol = risk_group_cfg
+                    with get_db_session() as db:
+                        if g_max_per_symbol is not None:
+                            sym_open = count_open_positions_for_profiles(
+                                db, member_names, signal.symbol
+                            )
+                            if sym_open >= g_max_per_symbol:
+                                self.logger.info(
+                                    f"[{profile.name}] Risk group '{group}' already holds "
+                                    f"{sym_open} position(s) on {signal.symbol} "
+                                    f"(cap {g_max_per_symbol}) — skipping"
+                                )
+                                continue
+                        if g_max_open is not None:
+                            group_open = count_open_positions_for_profiles(db, member_names)
+                            if group_open >= g_max_open:
+                                self.logger.info(
+                                    f"[{profile.name}] Risk group '{group}' at position cap "
+                                    f"({group_open}/{g_max_open}) — skipping remaining signals"
+                                )
+                                break
+
                 # Execute trade
                 self._execute_signal(signal, profile)
 

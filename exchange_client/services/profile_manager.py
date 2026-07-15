@@ -144,6 +144,7 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         # Risk management
         max_open_positions=int(cfg.get("max_open_positions", 5)),
         max_open_positions_per_profile=cfg.get("max_open_positions_per_profile"),
+        risk_group=cfg.get("risk_group"),
         max_portfolio_exposure_pct=float(cfg.get("max_portfolio_exposure_pct", 80)),
         take_profit_pct=float(cfg.get("take_profit_pct", 0)),
         stop_loss_pct=float(cfg.get("stop_loss_pct", 0)),
@@ -350,6 +351,7 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             # Risk management
             "max_open_positions": int(row.max_open_positions or 5),
             "max_open_positions_per_profile": row.max_open_positions_per_profile,
+            "risk_group": row.risk_group,
             "max_portfolio_exposure_pct": float(row.max_portfolio_exposure_pct or 80),
             "take_profit_pct": float(row.take_profit_pct or 0),
             "stop_loss_pct": float(row.stop_loss_pct or 0),

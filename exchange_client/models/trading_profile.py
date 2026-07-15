@@ -83,6 +83,9 @@ class TradingProfile(BaseModel):
     # Risk management
     max_open_positions: int = 5                  # Max concurrent positions per symbol
     max_open_positions_per_profile: Optional[int] = None  # Max total concurrent open positions across all symbols for this profile (None = no cap)
+    # Risk group tag — profiles sharing this tag share the limits on the matching
+    # risk_groups row (see RiskGroup). None = ungrouped.
+    risk_group: Optional[str] = None
     max_portfolio_exposure_pct: float = 80.0     # Max % of portfolio in positions
 
     class Config:
@@ -155,6 +158,7 @@ class ProfileCreateRequest(BaseModel):
     max_position_size_pct: Optional[float] = 40.0
     max_open_positions: Optional[int] = 5
     max_open_positions_per_profile: Optional[int] = None
+    risk_group: Optional[str] = None
     max_portfolio_exposure_pct: Optional[float] = 80.0
     leverage_multiplier: Optional[float] = 1.0
 
@@ -218,6 +222,7 @@ class ProfileUpdateRequest(BaseModel):
     max_position_size_pct: Optional[float] = None
     max_open_positions: Optional[int] = None
     max_open_positions_per_profile: Optional[int] = None
+    risk_group: Optional[str] = None
     max_portfolio_exposure_pct: Optional[float] = None
     leverage_multiplier: Optional[float] = None
 
@@ -275,4 +280,17 @@ class CircuitBreakerUpdateRequest(BaseModel):
     max_consecutive_stop_losses: Optional[int] = None  # 0 disables the consecutive-SL breaker
     consecutive_sl_lock_hours: Optional[int] = None
     is_active: Optional[bool] = None
+
+
+class RiskGroup(BaseModel):
+    """Shared position limits for a group of profiles.
+
+    Profiles join a group by setting their ``risk_group`` tag to this ``name``.
+    Limits apply across all member profiles combined; None = no cap.
+    """
+    name: str
+    max_open_positions: Optional[int] = None       # max concurrent open positions across the whole group
+    max_positions_per_symbol: Optional[int] = None  # max open positions on one symbol across the group (1 = dedupe)
+    description: Optional[str] = None
+    is_active: Optional[bool] = True
 

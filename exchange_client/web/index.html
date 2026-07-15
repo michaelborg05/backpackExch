@@ -448,6 +448,7 @@
                 <div class="field"><label>Max Position Size %</label><input id="f-max_position_size_pct" type="number" step="1" placeholder="40"><div class="field-hint">Max % of portfolio per position</div></div>
                 <div class="field"><label>Max Open Positions (per Symbol)</label><input id="f-max_open_positions" type="number" step="1" placeholder="5"><div class="field-hint">Max concurrent positions for each symbol independently</div></div>
                 <div class="field"><label>Max Open Positions (per Profile)</label><input id="f-max_open_positions_per_profile" type="number" step="1" min="1" placeholder="No cap"><div class="field-hint">Max total concurrent open positions across all symbols for this profile. Leave blank to disable.</div></div>
+                <div class="field"><label>Risk Group</label><input id="f-risk_group" type="text" placeholder="e.g. 4hr_longs"><div class="field-hint">Profiles sharing a group name share position limits (prevents timeframe-aligned profiles all taking the same coin). Configure the group's limits under Settings → Risk Groups. Leave blank to keep this profile independent.</div></div>
                 <div class="field"><label>Max Portfolio Exposure %</label><input id="f-max_portfolio_exposure_pct" type="number" step="1" placeholder="80"></div>
                 <div class="field" id="f-leverage-field">
                   <label>Leverage Multiplier</label>
@@ -949,6 +950,64 @@
           <span class="cb">Export all active profiles with Signal Generation enabled as a ready-to-paste <code>prod_profiles.py</code> array</span>
         </div>
         <button class="mbtn a" onclick="openExportAllModal()" style="flex-shrink:0">&#8659; Export All Profiles</button>
+      </div>
+    </div>
+
+    <!-- Risk Groups -->
+    <div class="card fi">
+      <div class="ch" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span class="ct">Risk Groups</span>
+          <span class="cb">Shared position limits across profiles. Profiles with a matching <code>Risk Group</code> tag share these caps — stops timeframe-aligned profiles all taking the same coin.</span>
+        </div>
+        <button class="mbtn a" onclick="rgLoad()" style="flex-shrink:0">&#8635; Reload</button>
+      </div>
+      <div style="padding:18px 20px">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <button class="mbtn a" onclick="rgOpenAdd()">+ Add Risk Group</button>
+        </div>
+
+        <!-- Add/Edit form (hidden by default) -->
+        <div id="rg-edit-form" style="display:none;background:var(--bg2,var(--bg));border:1px solid var(--brd);padding:14px 16px;border-radius:4px;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:700;color:var(--txd);letter-spacing:.1em;margin-bottom:10px" id="rg-form-title">ADD RISK GROUP</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:10px;color:var(--txd)">GROUP NAME</label>
+              <input id="rg-form-name" type="text" placeholder="e.g. 4hr_longs" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:160px">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:10px;color:var(--txd)">MAX POS / SYMBOL</label>
+              <input id="rg-form-per-symbol" type="number" min="1" step="1" placeholder="No cap" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:120px">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:10px;color:var(--txd)">MAX OPEN (GROUP)</label>
+              <input id="rg-form-max-open" type="number" min="1" step="1" placeholder="No cap" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:120px">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px">
+              <label style="font-size:10px;color:var(--txd)">DESCRIPTION</label>
+              <input id="rg-form-desc" type="text" placeholder="optional" style="background:var(--bg);border:1px solid var(--brd);color:var(--tx);padding:5px 8px;font-size:11px;font-family:'Space Mono',monospace;width:100%">
+            </div>
+            <button class="mbtn a" onclick="rgSave()">Save</button>
+            <button class="mbtn" onclick="document.getElementById('rg-edit-form').style.display='none'">Cancel</button>
+          </div>
+          <div style="font-size:10px;color:var(--txd);margin-top:8px">Set <b>Max Pos / Symbol = 1</b> to dedupe — only one profile in the group can hold a given coin at a time. Blank = no cap.</div>
+          <div id="rg-form-err" style="color:#e55;font-size:11px;margin-top:8px"></div>
+        </div>
+
+        <div id="rg-msg" style="font-size:11px;color:var(--txd);margin-bottom:8px"></div>
+        <div style="overflow-x:auto">
+          <table class="tbl" id="rg-tbl" style="width:100%">
+            <thead><tr>
+              <th>Group</th>
+              <th>Max Pos / Symbol</th>
+              <th>Max Open (Group)</th>
+              <th>Members</th>
+              <th>Description</th>
+              <th style="width:110px"></th>
+            </tr></thead>
+            <tbody id="rg-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -2185,6 +2244,7 @@ function fillSettings(p) {
   set('f-max_position_size_pct', p.max_position_size_pct);
   set('f-max_open_positions', p.max_open_positions);
   set('f-max_open_positions_per_profile', p.max_open_positions_per_profile);
+  set('f-risk_group', p.risk_group);
   set('f-max_portfolio_exposure_pct', p.max_portfolio_exposure_pct);
   set('f-leverage_multiplier', p.leverage_multiplier ?? 1.0);
   updateLeverageField(p.market_type);
@@ -2379,6 +2439,7 @@ async function saveSettings() {
     max_position_size_pct:          getNum('f-max_position_size_pct'),
     max_open_positions:             getInt('f-max_open_positions'),
     max_open_positions_per_profile: getInt('f-max_open_positions_per_profile'),
+    risk_group:                     getStr('f-risk_group'),
     max_portfolio_exposure_pct:     getNum('f-max_portfolio_exposure_pct'),
     leverage_multiplier:            getNum('f-leverage_multiplier'),
     trend_timeframe:                getStr('f-trend_timeframe'),
@@ -3683,7 +3744,111 @@ document.addEventListener('DOMContentLoaded', () => {
 let _sysAllSettings = {};  // {profile_name: [{setting_name, value, updated_at}]}
 
 async function sysInit() {
-  await Promise.all([sysLoadSettings(), sysLoadCacheStatus(), sysLoadLogLevel()]);
+  await Promise.all([sysLoadSettings(), sysLoadCacheStatus(), sysLoadLogLevel(), rgLoad()]);
+}
+
+// --- Risk Groups ---------------------------------------------------------
+let _rgGroups = [];
+
+async function rgLoad() {
+  const msg = document.getElementById('rg-msg');
+  if (msg) msg.textContent = 'Loading…';
+  try {
+    const data = await api('/risk-groups');
+    _rgGroups = Array.isArray(data) ? data : [];
+    rgRender();
+    if (msg) msg.textContent = _rgGroups.length ? '' : 'No risk groups yet — add one to link profiles.';
+  } catch(e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+  }
+}
+
+function rgEsc(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function rgRender() {
+  const body = document.getElementById('rg-body');
+  if (!body) return;
+  body.innerHTML = _rgGroups.map(g => {
+    const members = (g.members || []);
+    const memText = members.length ? members.map(rgEsc).join(', ') : '<span style="color:var(--txd)">none</span>';
+    const cap = v => v == null ? '<span style="color:var(--txd)">—</span>' : v;
+    return `<tr>
+      <td><b>${rgEsc(g.name)}</b></td>
+      <td>${cap(g.max_positions_per_symbol)}</td>
+      <td>${cap(g.max_open_positions)}</td>
+      <td style="font-size:10px">${memText}</td>
+      <td style="font-size:10px;color:var(--txd)">${rgEsc(g.description || '')}</td>
+      <td style="white-space:nowrap">
+        <button class="mbtn" onclick='rgOpenEdit(${JSON.stringify(g.name)})'>Edit</button>
+        <button class="mbtn" onclick='rgDelete(${JSON.stringify(g.name)})'>Del</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function rgOpenAdd() {
+  document.getElementById('rg-form-title').textContent = 'ADD RISK GROUP';
+  document.getElementById('rg-form-name').value = '';
+  document.getElementById('rg-form-name').removeAttribute('readonly');
+  document.getElementById('rg-form-per-symbol').value = '';
+  document.getElementById('rg-form-max-open').value = '';
+  document.getElementById('rg-form-desc').value = '';
+  document.getElementById('rg-form-err').textContent = '';
+  document.getElementById('rg-edit-form').style.display = 'block';
+}
+
+function rgOpenEdit(name) {
+  const g = _rgGroups.find(x => x.name === name);
+  if (!g) return;
+  document.getElementById('rg-form-title').textContent = 'EDIT RISK GROUP';
+  const nameEl = document.getElementById('rg-form-name');
+  nameEl.value = g.name;
+  nameEl.setAttribute('readonly', 'readonly');  // name is the key — edit limits, not the name
+  document.getElementById('rg-form-per-symbol').value = g.max_positions_per_symbol ?? '';
+  document.getElementById('rg-form-max-open').value = g.max_open_positions ?? '';
+  document.getElementById('rg-form-desc').value = g.description ?? '';
+  document.getElementById('rg-form-err').textContent = '';
+  document.getElementById('rg-edit-form').style.display = 'block';
+}
+
+async function rgSave() {
+  const name = document.getElementById('rg-form-name').value.trim();
+  const err = document.getElementById('rg-form-err');
+  err.textContent = '';
+  if (!name) { err.textContent = 'Group name is required.'; return; }
+  const perSym = getInt('rg-form-per-symbol');
+  const maxOpen = getInt('rg-form-max-open');
+  const desc = getStr('rg-form-desc');
+  try {
+    const res = await api('/risk-groups/' + encodeURIComponent(name), {
+      method: 'PUT',
+      body: JSON.stringify({
+        name,
+        max_positions_per_symbol: perSym,
+        max_open_positions: maxOpen,
+        description: desc,
+        is_active: true,
+      }),
+    });
+    if (res == null) { err.textContent = 'Save failed (check permissions).'; return; }
+    document.getElementById('rg-edit-form').style.display = 'none';
+    showToast('Risk group saved: ' + name);
+    await rgLoad();
+  } catch(e) {
+    err.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function rgDelete(name) {
+  if (!confirm(`Delete risk group "${name}"?\n\nProfiles keep their tag but will have no shared limits until you recreate it.`)) return;
+  try {
+    const res = await api('/risk-groups/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (res == null) { showToast('Delete failed (check permissions).', true); return; }
+    showToast('Risk group deleted: ' + name);
+    await rgLoad();
+  } catch(e) {
+    showToast('Error: ' + e.message, true);
+  }
 }
 
 async function sysLoadSettings() {

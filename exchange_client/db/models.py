@@ -39,6 +39,12 @@ class TradingProfileDB(Base):
     sl_cooldown_minutes = Column(Integer, nullable=True)   # per-profile override; None = use global setting
     tp_cooldown_minutes = Column(Integer, nullable=True)   # per-profile override; None = use global setting
     max_open_positions_per_profile = Column(Integer, nullable=True)   # total concurrent open positions across all symbols for this profile; None = no cap
+    # Risk group tag — references risk_groups.name. Profiles sharing a tag share the
+    # position limits defined on that risk_groups row (e.g. all 4hr-trend/1hr-entry
+    # longs), so timeframe-aligned profiles can't all pile into the same coin.
+    # None = ungrouped (behaves exactly as before). Loose reference (no FK) so a
+    # profile can carry a tag before the group config row exists.
+    risk_group = Column(String, nullable=True)
     min_signal_confidence = Column(Float, default=72.0)
     min_volume_ratio = Column(Float, default=1.0)
     
@@ -177,6 +183,27 @@ class Position(Base):
         Index('ix_positions_profile_symbol_status', 'profile_name', 'symbol', 'status'),
         Index('ix_positions_opened_at', 'created_at'),
     )
+
+
+class RiskGroupDB(Base):
+    """Shared position limits for a group of profiles.
+
+    Profiles reference a group by its ``name`` via ``trading_profiles.risk_group``.
+    The limits here apply across ALL profiles in the group combined, so several
+    timeframe-aligned profiles can't all take the same coin / over-concentrate on
+    one macro move. NULL limit = no cap for that dimension.
+    """
+    __tablename__ = "risk_groups"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)              # matched against trading_profiles.risk_group
+    max_open_positions = Column(Integer, nullable=True)            # max concurrent open positions across the whole group
+    max_positions_per_symbol = Column(Integer, nullable=True)      # max open positions on any single symbol across the group (1 = dedupe)
+    description = Column(String, nullable=True)
+
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class CircuitBreakerConfig(Base):

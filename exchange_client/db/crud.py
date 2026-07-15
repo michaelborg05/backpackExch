@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from db.models import Trade, Position, Order
 from models.trade import OrderResponse, OrderHistoryResponse
 from models.trading_profile import TradingProfile
-from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig
+from db.models import TradingProfileDB, CircuitBreakerConfig, CircuitBreakerEvent, DailyBalanceSnapshot, SymbolConfig, RiskGroupDB
 
 def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str = "MANUAL", signal_snapshot=None, direction: str = None) -> Trade:
     """Save a trade to the database"""
@@ -204,6 +204,75 @@ def get_open_positions(db: Session, profile_name: str, symbol: Optional[str] = N
     if symbol:
         query = query.filter(Position.symbol == symbol)
     return query.all()
+
+def count_open_positions_for_profiles(
+    db: Session,
+    profile_names: List[str],
+    symbol: Optional[str] = None,
+) -> int:
+    """Count OPEN positions across a set of profiles (optionally for a single symbol).
+
+    Used to enforce risk-group limits shared by timeframe-aligned profiles — e.g.
+    stopping three 4hr-long profiles from all holding BTC at once.
+    """
+    if not profile_names:
+        return 0
+    query = db.query(Position).filter(
+        Position.profile_name.in_(profile_names),
+        Position.status == "OPEN",
+    )
+    if symbol:
+        query = query.filter(Position.symbol == symbol)
+    return query.count()
+
+
+# --- Risk groups (shared position limits across profiles) ------------------
+
+def get_risk_group(db: Session, name: str) -> Optional[RiskGroupDB]:
+    """Fetch a risk group's shared limits by name (None if it doesn't exist)."""
+    if not name:
+        return None
+    return db.query(RiskGroupDB).filter(RiskGroupDB.name == name).first()
+
+
+def get_all_risk_groups(db: Session) -> List[RiskGroupDB]:
+    """All configured risk groups, ordered by name."""
+    return db.query(RiskGroupDB).order_by(RiskGroupDB.name).all()
+
+
+def upsert_risk_group(
+    db: Session,
+    name: str,
+    max_open_positions: Optional[int] = None,
+    max_positions_per_symbol: Optional[int] = None,
+    description: Optional[str] = None,
+    is_active: Optional[bool] = None,
+) -> RiskGroupDB:
+    """Create or update a risk group's shared limits (keyed by name)."""
+    row = db.query(RiskGroupDB).filter(RiskGroupDB.name == name).first()
+    if row is None:
+        row = RiskGroupDB(name=name)
+        db.add(row)
+    row.max_open_positions = max_open_positions
+    row.max_positions_per_symbol = max_positions_per_symbol
+    row.description = description
+    if is_active is not None:
+        row.is_active = is_active
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_risk_group(db: Session, name: str) -> bool:
+    """Delete a risk group config. Profiles tagged with it become effectively
+    ungrouped (the tag remains but resolves to no limits). Returns True if deleted."""
+    row = db.query(RiskGroupDB).filter(RiskGroupDB.name == name).first()
+    if row is None:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+
 
 def get_daily_realized_pnl_by_profile(
     db: Session,
