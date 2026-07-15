@@ -398,6 +398,118 @@ TREND_VARIANTS = {
         "min_position_age_for_trend_check": 15,
     },
 
+    # ==========================================================================
+    # V4 ITERATION — Jul 15 2026. Focused sweep on the two prod long profiles
+    # (tf_v3_rsizone_17t strong / tf_iter3_exit_rsi68 weak) over 3 tick windows
+    # (early-indep 27d, 30d, 57d — tick data only reaches 2026-05-19).
+    #
+    # Winner tf_v4_zone3855_tp9: two changes to tf_v3_rsizone_17t only —
+    #   RSI entry zone 40-58 -> 38-55 (deeper pullback), TP 0.8 -> 0.9.
+    #   PF 4.02x / 6.70x / 5.60x across the 3 windows (baseline 1.67/2.15/1.86),
+    #   avg PnL ~0.5% (baseline ~0.18%), WR 80-89%. ~half the trades, ~3x quality.
+    #
+    # Confirmed NEGATIVES this run (see memory tf_zone3855_tp9_champion):
+    #   - widening trading_hours = overfit (great 30d, collapses 57d) — keep curated
+    #   - pure momentum entries (rsi_momentum / bb_pct_b rising) fail
+    #   - regime filter ON @ 60m beats off and 240m
+    #   - dropping ZEC not needed once zone 38-55 is used
+    #
+    # tf_v4_tp9 and tf_v4_zone3855_tp8 are the lever-isolation siblings kept so
+    # the wider-window (candle-mode 90d) test brackets the winner rather than
+    # confirming one config in isolation (14T over 57d is a low sample).
+    # ==========================================================================
+
+    # ── V4 WINNER — deeper RSI zone (38-55) + TP 0.9 ──────────────────────────
+    "tf_v4_zone3855_tp9": {
+        **_TF_BASE,
+        "regime_timeframe": "60",
+        "take_profit_pct":       0.9,
+        "stop_loss_pct":         0.6,
+        "trailing_stop_pct":     0.35,
+        "arm_trailing_stop_pct": 0.45,
+        "trend_indicators": [
+            {"type": "ema_cross",      "params": {}},
+            {"type": "adx_regime",     "params": {"min_adx": 22, "max_adx": 65, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"min_value": 60, "lookback_candles": 5, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+        "entry_indicators": [
+            {"type": "rsi_range",             "params": {"min": 38, "max": 55, "invert": True}},
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 45, "current_min": 44, "min_jump": 5.0, "require_sustained": True, "hard_stop": True}},
+            {"type": "ema_slope",             "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 3,
+        "trend_invalidation_indicators": "exit",
+        "exit_indicators": [
+            {"type": "rsi_overbought", "params": {"min_value": 68, "hard_stop": True}},
+            {"type": "ema_slope",      "params": {"ema": 20, "direction": "rising", "min_slope_pct": -0.02, "hard_stop": True}},
+            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 44, "use_momentum": False}},
+        ],
+        "min_exit_indicators_required": 1,
+        "min_position_age_for_trend_check": 15,
+    },
+
+    # ── V4 sibling — TP 0.9 only (zone unchanged 40-58); more trades, robust 2nd
+    # Isolates the TP lever. 57d: 18T, 72% WR, 0.31% avg, 2.42x PF.
+    "tf_v4_tp9": {
+        **_TF_BASE,
+        "regime_timeframe": "60",
+        "take_profit_pct":       0.9,
+        "stop_loss_pct":         0.6,
+        "trailing_stop_pct":     0.35,
+        "arm_trailing_stop_pct": 0.45,
+        "trend_indicators": [
+            {"type": "ema_cross",      "params": {}},
+            {"type": "adx_regime",     "params": {"min_adx": 22, "max_adx": 65, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"min_value": 60, "lookback_candles": 5, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+        "entry_indicators": [
+            {"type": "rsi_range",             "params": {"min": 40, "max": 58, "invert": True}},
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 45, "current_min": 44, "min_jump": 5.0, "require_sustained": True, "hard_stop": True}},
+            {"type": "ema_slope",             "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 3,
+        "trend_invalidation_indicators": "exit",
+        "exit_indicators": [
+            {"type": "rsi_overbought", "params": {"min_value": 68, "hard_stop": True}},
+            {"type": "ema_slope",      "params": {"ema": 20, "direction": "rising", "min_slope_pct": -0.02, "hard_stop": True}},
+            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 44, "use_momentum": False}},
+        ],
+        "min_exit_indicators_required": 1,
+        "min_position_age_for_trend_check": 15,
+    },
+
+    # ── V4 sibling — deeper zone (38-55) at base TP 0.8; isolates the zone lever
+    "tf_v4_zone3855_tp8": {
+        **_TF_BASE,
+        "regime_timeframe": "60",
+        "take_profit_pct":       0.8,
+        "stop_loss_pct":         0.6,
+        "trailing_stop_pct":     0.3,
+        "arm_trailing_stop_pct": 0.4,
+        "trend_indicators": [
+            {"type": "ema_cross",      "params": {}},
+            {"type": "adx_regime",     "params": {"min_adx": 22, "max_adx": 65, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"min_value": 60, "lookback_candles": 5, "hard_stop": True}},
+        ],
+        "min_indicators_required": 3,
+        "entry_indicators": [
+            {"type": "rsi_range",             "params": {"min": 38, "max": 55, "invert": True}},
+            {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 45, "current_min": 44, "min_jump": 5.0, "require_sustained": True, "hard_stop": True}},
+            {"type": "ema_slope",             "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 3,
+        "trend_invalidation_indicators": "exit",
+        "exit_indicators": [
+            {"type": "rsi_overbought", "params": {"min_value": 68, "hard_stop": True}},
+            {"type": "ema_slope",      "params": {"ema": 20, "direction": "rising", "min_slope_pct": -0.02, "hard_stop": True}},
+            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 44, "use_momentum": False}},
+        ],
+        "min_exit_indicators_required": 1,
+        "min_position_age_for_trend_check": 15,
+    },
+
     # ── noregime test variants (kept for reference) ─────────────────────────────
     "tf_iter4_exit_rsi67_noregime": {
         **_TF_BASE,

@@ -14,6 +14,7 @@ in all backtest output — no variable names or dict keys needed.
 
 # Exported 10 active profile(s) with signal generation — 2026-07-03 11:29 UTC
 
+# Exported 8 active profile(s) with signal generation — 2026-07-15 12:48 UTC
 PROD_PROFILES = [
 # Exported from profile: 15m_MB_ATR
 {
@@ -40,7 +41,8 @@ PROD_PROFILES = [
     "use_entry_filter": True,
     "use_atr_filter": False,
     "max_position_hours": 6,
-    "use_market_regime_filter": False,  # sweep 49d: regime filter hurts MR longs (-5.8% @4h) — keep off
+    "use_market_regime_filter": False,
+    "regime_timeframe": None,
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 30.0,
     "max_open_positions": 1,
@@ -67,18 +69,18 @@ PROD_PROFILES = [
 },
 # Exported from profile: 15m_no_trend
 {
-    "display_name": "15m_tf_iter3_exit_rsi68AI",
+    "display_name": "15m_tf_v4_zone3855_tp9AI",
     "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'HYPE_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "trend_following",
     "market_type": "SPOT",
     "entry_timeframe": "15",
     "trend_timeframe": "60",
-    "exit_timeframe": None,
-    "take_profit_pct": 0.8,
+    "exit_timeframe": "15",
+    "take_profit_pct": 0.9,
     "stop_loss_pct": 0.6,
-    "trailing_stop_pct": 0.3,
-    "arm_trailing_stop_pct": 0.4,
+    "trailing_stop_pct": 0.35,
+    "arm_trailing_stop_pct": 0.45,
     "use_trailing_stop": True,
     "enable_signal_generation": True,
     "signal_cooldown_minutes": 20,
@@ -91,7 +93,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 12,
     "use_market_regime_filter": True,
-    "regime_timeframe": "240",   # sweep 49d: @4h best for this profile (PF 1.15 -> 1.29)
+    "regime_timeframe": "240",
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -113,26 +115,21 @@ PROD_PROFILES = [
         {"day_of_week": 4, "start_time": "14:00", "end_time": "21:00", "enabled": True},
     ],
     "trend_indicators": [
-        {"type": "ema_cross", "params": {"use_slope": False, "min_slope_pct": 0.01}},
-        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": -0.05, "max_pct_b": 0.95}},
-        {"type": "adx_regime", "params": {"min_adx": 28, "max_adx": 65, "hard_stop": True}},
-        {"type": "rsi_overbought", "params": {"side": "long", "min_value": 60, "lookback_candles": 5, "hard_stop": True}},
+        {"type": "ema_cross", "params": {}},
+        {"type": "adx_regime", "params": {"min_adx": 22, "max_adx": 65, "hard_stop": True}},
+        {"type": "rsi_overbought", "params": {"min_value": 60, "lookback_candles": 5, "hard_stop": True}},
     ],
-    "min_indicators_required": 4,
+    "min_indicators_required": 3,
     "entry_indicators": [
-        {"type": "price_vs_ema", "params": {"ema": 20, "min_gap_pct": 0, "max_gap_pct": 2.5}},
-        {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 38, "current_min": 45, "min_jump": 5, "require_sustained": True, "sustained_rise_mode": "net"}},
-        {"type": "bollinger_bands", "params": {"band": "lower", "mode": "pct_b", "min_pct_b": 0.05, "max_pct_b": 0.6}},
-        {"type": "rsi_threshold", "params": {"period": 14, "min_value": 52, "use_momentum": False, "early_threshold": 37, "hard_stop": True}},
-        {"type": "rsi_overbought", "params": {"side": "long", "min_value": 65, "hard_stop": True}},
-        {"type": "price_vs_vwap", "params": {}},
-        {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.02, "max_slope_pct": 0.25, "hard_stop": True}},
+        {"type": "rsi_range", "params": {"min": 38, "max": 55, "invert": True}},
+        {"type": "rsi_reversal_momentum", "params": {"lookback_candles": 6, "oversold_threshold": 45, "current_min": 44, "min_jump": 5, "require_sustained": True, "hard_stop": True}},
+        {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.01, "hard_stop": True}},
     ],
-    "min_entry_indicators_required": 5,
+    "min_entry_indicators_required": 3,
     "exit_indicators": [
-        {"type": "rsi_overbought", "params": {"side": "long", "min_value": 68, "hard_stop": True}},
+        {"type": "rsi_overbought", "params": {"min_value": 68, "hard_stop": True}},
         {"type": "ema_slope", "params": {"ema": 20, "direction": "rising", "min_slope_pct": -0.02, "hard_stop": True}},
-        {"type": "rsi_threshold", "params": {"period": 14, "min_value": 44, "use_momentum": False, "hard_stop": True}},
+        {"type": "rsi_threshold", "params": {"period": 14, "min_value": 44, "use_momentum": False}},
     ],
     "min_exit_indicators_required": 1,
 },
@@ -162,6 +159,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 72,
     "use_market_regime_filter": False,
+    "regime_timeframe": None,
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -189,7 +187,7 @@ PROD_PROFILES = [
 # Exported from profile: 4hr_ema50drop
 {
     "display_name": "4hr_p3_v7_rsi_pullbackAI",
-    "symbols": ['BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC','BNB_USDC','ZEC_USDC'],
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "trend_following",
     "market_type": "SPOT",
@@ -212,6 +210,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 72,
     "use_market_regime_filter": False,
+    "regime_timeframe": None,
     "default_order_size_usdc": 200.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -250,8 +249,8 @@ PROD_PROFILES = [
     "use_trailing_stop": True,
     "enable_signal_generation": True,
     "signal_cooldown_minutes": 20,
-    "sl_cooldown_minutes": 90,
-    "tp_cooldown_minutes": 35,
+    "sl_cooldown_minutes": 120,
+    "tp_cooldown_minutes": 90,
     "min_signal_confidence": 72.0,
     "min_volume_ratio": 1.0,
     "use_trend_filter": True,
@@ -259,7 +258,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 4,
     "use_market_regime_filter": True,
-    "regime_timeframe": "240",   # 4h sustained-trend guard; set "60" to compare 1h
+    "regime_timeframe": "240",
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -317,7 +316,7 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 18,
     "use_market_regime_filter": True,
-    "regime_timeframe": "60",    # sweep 49d: @1h best for this profile (PF 1.26 -> 1.82); @4h hurts
+    "regime_timeframe": "60",
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
@@ -383,13 +382,15 @@ PROD_PROFILES = [
     "use_atr_filter": False,
     "max_position_hours": 5,
     "use_market_regime_filter": True,
-    "regime_timeframe": "240",   # 4h sustained-trend guard; set "60" to compare 1h
+    "regime_timeframe": "240",
     "default_order_size_usdc": 100.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,
     "max_open_positions_per_profile": 2,
     "max_portfolio_exposure_pct": 80.0,
     "leverage_multiplier": 5.0,
+    "max_consecutive_stop_losses": 2,
+    "consecutive_sl_lock_hours": 12,
     "use_trend_invalidation_exit": True,
     "trend_invalidation_indicators": "trend",
     "min_position_age_for_trend_check": 45,
@@ -407,7 +408,6 @@ PROD_PROFILES = [
     ],
     "min_entry_indicators_required": 4,
 },
-
 # Exported from profile: spike_entry
 {
     "display_name": "mr_opt_v7_adx_rsi_turn_wideAI",
@@ -433,7 +433,8 @@ PROD_PROFILES = [
     "use_entry_filter": True,
     "use_atr_filter": False,
     "max_position_hours": 6,
-    "use_market_regime_filter": False,  # sweep 49d: regime filter hurts MR longs (-4.7% @4h) — keep off
+    "use_market_regime_filter": False,
+    "regime_timeframe": None,
     "default_order_size_usdc": 200.0,
     "max_position_size_pct": 40.0,
     "max_open_positions": 1,

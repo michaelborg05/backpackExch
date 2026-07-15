@@ -11,11 +11,11 @@ from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBre
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 90,
+parser.add_argument("--days",    type=int, default= 60,
                     help="Lookback window in days")
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="mr", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
+parser.add_argument("--set",     default="trend", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
@@ -34,7 +34,7 @@ start = end - timedelta(days=args.days)
 print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
 
 VARIANT_SETS = {
-    "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC"]),
+    "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","BNB_USDC","XRP_USDC","ZEC_USDC"]),
     "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","BNB_USDC","ZEC_USDC"]),
@@ -63,7 +63,7 @@ symbols_override = [args.symbol] if args.symbol else None
 csv_path = None
 if args.csv and args.trades:
     base     = args.csv.replace(".csv", "")
-    csv_path = f"{base}_{args.set}.csv"
+    csv_path = f"{base}_{args.set}_{args.days}.csv"
     import os
     if os.path.exists(csv_path):
     #     choice = input(f"File '{csv_path}' already exists. Delete and restart? (y/n): ").lower()
