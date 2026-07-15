@@ -11,3 +11,5 @@ services:
         sync: false
       - key: WEBHOOK_SECRET
         sync: false
+      - key: JWT_REFRESH_EXPIRE_HR
+        value: "336"
