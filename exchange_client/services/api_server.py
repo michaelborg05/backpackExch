@@ -1,5 +1,8 @@
 # api_server.py
 import asyncio
+import base64
+import hmac
+import json
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -3011,6 +3014,7 @@ async def list_profiles():
 async def export_all_profiles_python():
     from db.utils import get_db_session
     from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours, SymbolConfig
+    from db.crud import get_circuit_breaker_config
     from fastapi.responses import PlainTextResponse
     from datetime import datetime, timezone
 
@@ -3046,7 +3050,8 @@ async def export_all_profiles_python():
                 .all()
             )
             symbols = [s.symbol for s in symbol_rows]
-            blocks.append(_render_profile_python_dict(p, indicators, hours, symbols))
+            cb = get_circuit_breaker_config(db, p.name)
+            blocks.append(_render_profile_python_dict(p, indicators, hours, symbols, cb))
 
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     header = f"# Exported {len(blocks)} active profile(s) with signal generation — {now}\n"
@@ -3453,7 +3458,7 @@ async def update_profile_cb_config(profile_name: str, body: CircuitBreakerUpdate
 # Profile Python export — shared rendering helper
 # ---------------------------------------------------------------------------
 
-def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
+def _render_profile_python_dict(p, indicators, hours, symbols, cb=None) -> str:
     import json
 
     def _py_val(v):
@@ -3539,6 +3544,13 @@ def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
         _field("leverage_multiplier", float(p.leverage_multiplier) if p.leverage_multiplier else 1.0),
     ]
 
+    # Consecutive-SL circuit breaker (circuit_breaker_config table). Only the
+    # consecutive-SL fields are exported: daily PnL limits are not modeled in
+    # the backtester, so exporting them would be misleading.
+    if cb and (cb.max_consecutive_stop_losses or 0) > 0:
+        fields.append(_field("max_consecutive_stop_losses", int(cb.max_consecutive_stop_losses)))
+        fields.append(_field("consecutive_sl_lock_hours", int(cb.consecutive_sl_lock_hours or 24)))
+
     if p.use_trend_invalidation_exit:
         fields.append(_field("use_trend_invalidation_exit", bool(p.use_trend_invalidation_exit)))
     if p.trend_invalidation_indicators:
@@ -3574,6 +3586,7 @@ def _render_profile_python_dict(p, indicators, hours, symbols) -> str:
 async def export_profile_python(profile_name: str):
     from db.utils import get_db_session
     from db.models import TradingProfileDB, IndicatorDB, ProfileTradingHours, SymbolConfig
+    from db.crud import get_circuit_breaker_config
     from fastapi.responses import PlainTextResponse
 
     with get_db_session() as db:
@@ -3600,8 +3613,9 @@ async def export_profile_python(profile_name: str):
             .all()
         )
         symbols = [s.symbol for s in symbol_rows]
+        cb = get_circuit_breaker_config(db, profile_name)
 
-    return PlainTextResponse(content=_render_profile_python_dict(p, indicators, hours, symbols))
+    return PlainTextResponse(content=_render_profile_python_dict(p, indicators, hours, symbols, cb))
 
 
 # ---------------------------------------------------------------------------
@@ -4090,28 +4104,98 @@ app.include_router(auth_router)
 # Mount static files directory
 app.mount("/web", StaticFiles(directory="web"), name="web")
 
-@app.post("/webhook/test-log")
-async def webhook_test_log(request: Request):
-    """No-auth endpoint for logging raw webhook payloads during testing."""
+def _verify_tdm_basic_auth(request: Request) -> None:
+    """Validate the HTTP Basic credentials NCR TDM sends with each webhook.
+
+    Fails closed: if TDM_WEBHOOK_USER/PASSWORD are not configured the endpoint
+    rejects everything, so the receiver is never left unauthenticated.
+    """
+    expected_user = config.tdm_webhook_user if hasattr(config, "tdm_webhook_user") else ""
+    expected_pass = config.tdm_webhook_password if hasattr(config, "tdm_webhook_password") else ""
+
+    unauthorized = HTTPException(
+        status_code=401,
+        detail="Invalid or missing credentials",
+        headers={"WWW-Authenticate": 'Basic realm="tdm-webhook"'},
+    )
+
+    if not expected_user or not expected_pass:
+        apiserver_logger.error(
+            "TDM webhook rejected: TDM_WEBHOOK_USER/TDM_WEBHOOK_PASSWORD not configured"
+        )
+        raise unauthorized
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("basic "):
+        raise unauthorized
+
+    try:
+        decoded = base64.b64decode(auth_header[6:].strip()).decode("utf-8")
+        username, _, password = decoded.partition(":")
+    except Exception:
+        raise unauthorized
+
+    # Constant-time comparison to avoid leaking credentials via timing.
+    user_ok = hmac.compare_digest(username, expected_user)
+    pass_ok = hmac.compare_digest(password, expected_pass)
+    if not (user_ok and pass_ok):
+        apiserver_logger.warning("TDM webhook rejected: bad Basic credentials")
+        raise unauthorized
+
+
+@app.post("/webhook/tdm")
+async def webhook_tdm(request: Request):
+    """Authenticated receiver for NCR Voyix TDM webhook subscriptions.
+
+    Configure the TDM subscription with authenticationType=BASIC and a
+    user:password credential matching TDM_WEBHOOK_USER / TDM_WEBHOOK_PASSWORD.
+    Each delivery is persisted to the tdm_webhook_events table for tracking.
+    """
+    _verify_tdm_basic_auth(request)
+
     body_bytes = await request.body()
     headers = dict(request.headers)
     query_params = dict(request.query_params)
 
+    # Never persist the credential we just validated.
+    headers.pop("authorization", None)
+
+    body_json = None
+    body_text = None
     try:
-        body_json = await request.json()
+        body_json = json.loads(body_bytes)
     except Exception:
-        body_json = body_bytes.decode("utf-8", errors="replace")
+        body_text = body_bytes.decode("utf-8", errors="replace")
+
+    topic_id = None
+    if isinstance(body_json, dict):
+        topic_id = body_json.get("topicId") or body_json.get("topic_id")
 
     apiserver_logger.info(
-        "WEBHOOK_TEST | method=%s path=%s query=%s headers=%s body=%s",
-        request.method,
-        request.url.path,
-        query_params,
-        headers,
-        body_json,
+        "WEBHOOK_TDM | topic=%s query=%s body=%s",
+        topic_id, query_params, body_json if body_json is not None else body_text,
     )
 
-    return {"status": "logged"}
+    try:
+        from db.utils import get_db_session
+        from db.models import TdmWebhookEvent
+        with get_db_session() as db:
+            db.add(TdmWebhookEvent(
+                remote_addr=request.client.host if request.client else None,
+                method=request.method,
+                path=request.url.path,
+                topic_id=str(topic_id) if topic_id is not None else None,
+                headers=headers,
+                query_params=query_params or None,
+                body=body_json if isinstance(body_json, (dict, list)) else None,
+                body_text=body_text,
+            ))
+            db.commit()
+    except Exception as e:
+        # Don't 500 back to NCR on a storage hiccup — we've already logged it.
+        apiserver_logger.error(f"Failed to persist TDM webhook event: {e}", exc_info=True)
+
+    return {"status": "received"}
 
 
 @app.get("/")

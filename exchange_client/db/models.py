@@ -845,3 +845,23 @@ class WebhookPriceTick(Base):
     symbol = Column(String, nullable=False, index=True)
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     price = Column(Numeric, nullable=False)
+
+
+class TdmWebhookEvent(Base):
+    """Raw NCR Voyix TDM webhook deliveries, captured for tracking/inspection.
+
+    Not tied to trading logic — a generic sink for incoming subscription events.
+    """
+    __tablename__ = "tdm_webhook_events"
+
+    id = Column(Integer, primary_key=True)
+    received_at = Column(DateTime(timezone=True), nullable=False,
+                         server_default=func.now(), index=True)
+    remote_addr = Column(String, nullable=True)
+    method = Column(String, nullable=True)
+    path = Column(String, nullable=True)
+    topic_id = Column(String, nullable=True, index=True)   # from body.topicId if present
+    headers = Column(JSONB, nullable=True)
+    query_params = Column(JSONB, nullable=True)
+    body = Column(JSONB, nullable=True)                    # parsed JSON payload
+    body_text = Column(Text, nullable=True)                # raw fallback when not JSON
