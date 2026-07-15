@@ -781,6 +781,7 @@ let _currentProfile = null;
 let _indicators = [];
 let _editIndId = null;
 let _arTimer = null;
+let _refreshTimer = null;
 let _toastTimer = null;
 
 // ── Clock ─────────────────────────────────────────────────────────
@@ -806,7 +807,7 @@ function showToast(msg, isErr=false) {
 // ── API helper ────────────────────────────────────────────────────
 function akey() { return S.internalKey ?? null; }
 
-async function api(path, opts={}) {
+async function api(path, opts={}, _retried=false) {
   const k = akey(); if (!k) return null;
   try {
     const r = await fetch(BASE + path, {
@@ -814,7 +815,14 @@ async function api(path, opts={}) {
       headers: { 'X-API-Key': k, 'Content-Type': 'application/json', ...(opts.headers||{}) },
       ...opts
     });
-    if (r.status === 401) { fLogout('Session expired.'); return null; }
+    if (r.status === 401) {
+      // Access token (15min) expired, likely because the PWA was backgrounded
+      // and its JS timers were frozen. The refresh_token cookie lives much
+      // longer, so try it silently before dropping the user to the login screen.
+      if (!_retried && await tryRefresh()) return api(path, opts, true);
+      fLogout('Session expired.');
+      return null;
+    }
     if (r.status === 204) return { ok: true };
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -825,6 +833,15 @@ async function api(path, opts={}) {
     console.warn('[api]', path, e.message);
     throw e;
   }
+}
+
+async function tryRefresh() {
+  try {
+    const r = await fetch(BASE + '/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (!r.ok) return false;
+    scheduleRefresh(15);
+    return true;
+  } catch { return false; }
 }
 
 async function safeFetch(path) {
@@ -876,9 +893,9 @@ async function checkExistingSession() {
 }
 
 function scheduleRefresh(expMin) {
-  setTimeout(async () => {
-    const r = await fetch(BASE + '/auth/refresh', { method: 'POST', credentials: 'include' });
-    if (r.ok) scheduleRefresh(15); else fLogout('Session expired. Please log in.');
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(async () => {
+    if (!(await tryRefresh())) fLogout('Session expired. Please log in.');
   }, Math.max((expMin * 60 - 120) * 1000, 10000));
 }
 
@@ -889,7 +906,7 @@ async function doLogout() {
   showLogin();
 }
 
-function fLogout(msg='') { clearInterval(_arTimer); S = {}; showLogin(msg); }
+function fLogout(msg='') { clearInterval(_arTimer); clearTimeout(_refreshTimer); S = {}; showLogin(msg); }
 
 function showLogin(msg='') {
   document.getElementById('app').classList.remove('on');
@@ -1840,6 +1857,19 @@ checkExistingSession();
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
 }
+
+// Installed PWAs get their JS timers frozen while backgrounded (screen locked,
+// app switched away), so the setTimeout-based refresh in scheduleRefresh()
+// never fires. Refresh the access token as soon as the app is foregrounded
+// again instead of waiting for it to 401 on the next request.
+async function onForeground() {
+  if (!S.u) return;
+  if (!(await tryRefresh())) fLogout('Session expired. Please log in.');
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') onForeground();
+});
+window.addEventListener('pageshow', (e) => { if (e.persisted) onForeground(); });
 </script>
 </body>
 </html>
