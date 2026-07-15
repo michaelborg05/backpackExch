@@ -4205,3 +4205,12 @@ async def serve_dashboard():
 @app.get("/mobile")
 async def serve_mobile():
     return FileResponse("web/mobile.html")
+
+@app.get("/sw.js")
+async def serve_service_worker():
+    # Served from root (not /web/) so its default scope covers /mobile.
+    return FileResponse("web/sw.js", media_type="application/javascript")
+
+@app.get("/manifest.json")
+async def serve_manifest():
+    return FileResponse("web/manifest.json", media_type="application/manifest+json")
