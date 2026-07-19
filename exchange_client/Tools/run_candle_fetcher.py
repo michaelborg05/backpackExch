@@ -30,7 +30,7 @@ from services.candle_fetcher import SYMBOL_MAP, fetch_and_store
 
 DEFAULT_SYMBOLS = ["SOL_USDC", "ETH_USDC", "BTC_USDC", 
                    "BNB_USDC", "XRP_USDC", "ZEC_USDC"]
-DEFAULT_TFS = ["15", "60"]
+DEFAULT_TFS = ["15", "60","240"]
 
 
 def main():

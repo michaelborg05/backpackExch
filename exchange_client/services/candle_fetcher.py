@@ -286,8 +286,18 @@ def compute_rows(symbol: str, timeframe: str, candles: Sequence[Candle],
     # not collide on uq_trend_shadow_bar.
     source = source or f"binance:{get_quote()}"
     tf_min = TF_MINUTES[timeframe]
+
+    # Drop the in-progress bar. Binance returns the current, unclosed candle as
+    # the last element: its OHLC and volume are partial, which corrupts
+    # volume_ratio (a hard gate) and every recursion seeded from it. Worse, the
+    # idempotent insert means a partial bar written once is NEVER corrected when
+    # the bar actually closes, so it must never be written in the first place.
+    now_utc = datetime.now(timezone.utc)
     rows: List[dict] = []
     for i in range(warmup, len(candles)):
+        bar_close = times[i] + timedelta(minutes=tf_min)
+        if bar_close > now_utc:
+            continue
         # Timestamp the row at the bar's CLOSE, which is when the webhook path
         # would have fired for that bar.
         rows.append({
