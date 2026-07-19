@@ -70,7 +70,7 @@ PROD_PROFILES = [
 # Exported from profile: 15m_no_trend
 {
     "display_name": "15m_tf_v4_zone3855_tp9AI",
-    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'HYPE_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "trend_following",
     "market_type": "SPOT",
@@ -293,7 +293,7 @@ PROD_PROFILES = [
 # Exported from profile: default
 {
     "display_name": "15m_tf_v3_rsizone_17tAI",
-    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'HYPE_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "trend_following",
     "market_type": "SPOT",

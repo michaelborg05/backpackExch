@@ -35,7 +35,7 @@ print_period(start, end, period_label)
 VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
-    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","HYPE_USDC","BNB_USDC","XRP_USDC","ZEC_USDC"]),
+    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","BNB_USDC","XRP_USDC","ZEC_USDC"]),
     "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","BNB_USDC","ZEC_USDC"]),
     "mr_short":    (MEAN_REV_SHORT_VARIANTS,    ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
     "mrs_exp":     (MEAN_REV_SHORT_EXPERIMENTS,["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),

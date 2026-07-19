@@ -788,10 +788,6 @@ def setup_symbol_configs():
                 "order_size_usdc": 150.0,
                 "max_position_size_pct": 40.0  # 20% of portfolio
             },
-            "HYPE_USDC": {
-                "order_size_usdc": 100.0,
-                "max_position_size_pct": 25.0  # 10% of portfolio
-            },
             "SUI_USDC": {
                 "order_size_usdc": 100.0,
                 "max_position_size_pct": 25.0  # 15% of portfolio
@@ -968,10 +964,6 @@ def add_new_profile():
             "ETH_USDC": {
                 "order_size_usdc": 150.0,
                 "max_position_size_pct": 50.0  # 20% of portfolio
-            },
-            "HYPE_USDC": {
-                "order_size_usdc": 100.0,
-                "max_position_size_pct": 40.0  # 10% of portfolio
             },
             "SUI_USDC": {
                 "order_size_usdc": 100.0,

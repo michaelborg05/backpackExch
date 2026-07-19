@@ -38,7 +38,7 @@ from db.utils import get_db_session
 # Config
 # ---------------------------------------------------------------------------
 
-SYMBOLS = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "HYPE_USDC", "BNB_USDC", "XRP_USDC", "ZEC_USDC"]
+SYMBOLS = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "BNB_USDC", "XRP_USDC", "ZEC_USDC"]
 P1_DAYS   = 14
 P2_DAYS   = 60     # overridden by --p2-days
 TOP_N     = 5      # overridden by --top-n

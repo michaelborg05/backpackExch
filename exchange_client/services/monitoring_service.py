@@ -53,7 +53,7 @@ class MonitoringService:
         self.config = Config()
         self.logger = log_manager.get_logger("MonitoringService")
         self.settings = get_settings_helper()
-        #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "SUI_USDC"]
+        #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "SUI_USDC"]
         self._symbol_cache = get_symbol_cache()
         self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
 

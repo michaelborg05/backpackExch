@@ -59,7 +59,6 @@ log = logging.getLogger(__name__)
 SYMBOLS = [
     "SOL_USDC",
     "BTC_USDC",
-    "HYPE_USDC",
     "BNB_USDC",
     "ETH_USDC",
     "XRP_USDC",

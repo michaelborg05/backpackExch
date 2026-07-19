@@ -39,7 +39,7 @@ from db.utils import get_db_session
 
 STATE_FILE   = str(Path(__file__).resolve().parent / "optimizer_state.json")
 RESULTS_FILE = str(Path(__file__).resolve().parent / "optimizer_results.json")
-SYMBOLS      = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "HYPE_USDC", "BNB_USDC", "XRP_USDC"]
+SYMBOLS      = ["SOL_USDC", "ETH_USDC", "BTC_USDC", "BNB_USDC", "XRP_USDC"]
 SCAN_DAYS    = 60
 MIN_TRADES   = 6   # minimum total trades across all symbols to qualify
 
