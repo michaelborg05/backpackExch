@@ -1021,11 +1021,31 @@ def populate_default_settings():
                 'retention_trans_history_days': '90',   # orders, positions, trades, ai_signal_log
                 'retention_trenddata_history_days': '90', # trend_analysis_log
                 'retention_audit_history_days': '28',          # circuit_breaker_events, config_audit_log, daily_balance_snapshots
+
+                # ── Candle fetcher (CandleFetcherService -> trend_analysis_shadow) ──
+                # Programmatic candle feed running in parallel with the TradingView
+                # webhooks. Writes ONLY to trend_analysis_shadow; the live signal
+                # path is untouched. The on/off switch is the ENABLE_CANDLE_FETCHER
+                # env var (read before a DB session exists) — everything else here.
+                'candle_fetcher_quote': 'USDT',          # quote asset on the source venue.
+                                                         # MUST match the TradingView feed's quote during the
+                                                         # parallel run: the USDT/USDC basis is only -0.057% on
+                                                         # price, but volume_ratio differs ~33% and flips the
+                                                         # >=1.5 gate on ~13% of bars.
+                'candle_fetcher_timeframes': '15,60',    # comma-separated timeframes to fetch
+                'candle_fetcher_interval': '900',        # seconds between fetch cycles
+                'candle_fetcher_lookback_hours': '6',    # overlap per cycle; inserts are idempotent on
+                                                         # (symbol, timeframe, timestamp, source) so a generous
+                                                         # window costs nothing and self-heals after downtime
+                'candle_fetcher_symbols': '',            # blank = use enabled monitored_symbols (recommended).
+                                                         # Set a comma-separated list only to override.
             }
             new_settings = {
-                'retention_trans_history_days': '90',
-                'retention_trenddata_history_days': '90',
-                'retention_audit_history_days': '28',
+                'candle_fetcher_quote': 'USDT',
+                'candle_fetcher_timeframes': '15,60,240',
+                'candle_fetcher_interval': '900',
+                'candle_fetcher_lookback_hours': '6',
+                'candle_fetcher_symbols': '',
             }
             created = initialize_default_settings(db, default_settings=new_settings)
             

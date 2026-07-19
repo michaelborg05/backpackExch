@@ -2,6 +2,7 @@ import uvicorn
 from services.api_server import app
 from services.monitoring_service import MonitoringService, set_monitoring_service
 from services.alerting import initialize_health_alerting_service
+from services.candle_fetcher_service import initialize_candle_fetcher_service
 from utils.logging import log_manager
 from utils.config import Config
 from pathlib import Path
@@ -41,6 +42,17 @@ if __name__ == "__main__":
     health_alerter.set_monitoring_service(monitoring)
     health_alerter.start()
 
+    # -------------------------------------------------------------------------
+    # Candle fetcher — migration parallel-run. Own thread, writes ONLY to
+    # trend_analysis_shadow; the live signal path is untouched. Disabled unless
+    # ENABLE_CANDLE_FETCHER=true, so deploying this file changes nothing by
+    # default. See Tools/compare_shadow.py for the cutover check.
+    # -------------------------------------------------------------------------
+    candle_fetcher = initialize_candle_fetcher_service()
+    if candle_fetcher:
+        main_logger.info("Starting candle fetcher service...")
+        candle_fetcher.start()
+
     try:
         main_logger.info(f"Starting API server on port {config.port}...")
         uvicorn.run(app, host="0.0.0.0", port=config.port)
@@ -49,5 +61,7 @@ if __name__ == "__main__":
     finally:
         main_logger.info("Shutting down services...")
         health_alerter.stop()
+        if candle_fetcher:
+            candle_fetcher.stop()
         monitoring.stop()
         main_logger.info("Application shutdown complete")

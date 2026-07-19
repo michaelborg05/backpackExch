@@ -892,3 +892,54 @@ class TdmWebhookEvent(Base):
     query_params = Column(JSONB, nullable=True)
     body = Column(JSONB, nullable=True)                    # parsed JSON payload
     body_text = Column(Text, nullable=True)                # raw fallback when not JSON
+
+class TrendAnalysisShadow(Base):
+    """Parallel-run staging table for the programmatic candle fetcher.
+
+    Mirrors TrendAnalysisLog exactly, plus provenance columns. Kept separate so
+    the fetcher can run alongside the TradingView webhook path without any risk
+    to the live signal source. Compare with Tools/compare_shadow.py; once the
+    diff is clean, the fetcher can be pointed at trend_analysis_log directly and
+    this table dropped.
+    """
+    __tablename__ = "trend_analysis_shadow"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, index=True)
+
+    # OHLC of the last CLOSED candle — matches TrendAnalysisLog's prev_candle
+    # convention, so rows from the two tables are directly comparable.
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+
+    price = Column(Float)
+
+    rsi = Column(Float)
+    ema20 = Column(Float)
+    ema50 = Column(Float)
+    vwap = Column(Float)
+    bb_upper = Column(Float)
+    bb_lower = Column(Float)
+    bb_basis = Column(Float)
+    volume = Column(Float)
+    volume_ratio = Column(Float)
+    volume_sma = Column(Float)
+    adx = Column(Float, nullable=True)
+    atr_pct = Column(Float, nullable=True)   # not in TV feed; computed locally
+
+    timestamp = Column(DateTime(timezone=True), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Provenance
+    source = Column(String, nullable=False, index=True)   # e.g. "binance"
+    source_symbol = Column(String)                        # e.g. "SOLUSDT"
+    is_backfill = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index('ix_trend_shadow_lookup', 'symbol', 'timeframe', 'timestamp'),
+        UniqueConstraint('symbol', 'timeframe', 'timestamp', 'source',
+                         name='uq_trend_shadow_bar'),
+    )

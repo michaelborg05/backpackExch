@@ -1113,6 +1113,26 @@ async def tradingview_trend_webhook(alert: TrendUpdateAlert, background_tasks: B
         apiserver_logger.error(f"Error processing trend update: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+# Rate-limit the unmonitored-symbol warning so a persistently mislabelled feed
+# logs once every few minutes rather than on every webhook.
+_unmonitored_warned: dict = {}
+_UNMONITORED_WARN_INTERVAL = 300  # seconds
+
+
+def _warn_unmonitored_symbol(symbol: str, allowed) -> None:
+    import time as _time
+    last = _unmonitored_warned.get(symbol, 0)
+    now_s = _time.time()
+    if now_s - last < _UNMONITORED_WARN_INTERVAL:
+        return
+    _unmonitored_warned[symbol] = now_s
+    apiserver_logger.warning(
+        f"Dropping trend data for unmonitored symbol '{symbol}' — it is not in "
+        f"monitored_symbols ({sorted(allowed)[:8]}...). If the data feed was "
+        f"recently re-pointed, this symbol is receiving NO trend updates."
+    )
+
+
 def sync_trend_updates(trends):
     from db.utils import get_db_session
     from db.crud_monitored_symbols import get_enabled_symbols_set
@@ -1125,13 +1145,28 @@ def sync_trend_updates(trends):
         apiserver_logger.warning(f"Could not load monitored symbols, allowing all: {e}")
         allowed = None
 
+    from utils.symbols import normalize_symbol
+
     trend_cache = get_trend_cache()
     now = datetime.now(timezone.utc)
     ticks = []
     seen_symbols = set()
     for trend_data in trends:
+        # Normalise the inbound label to the canonical Backpack name. The feed
+        # may legitimately be sourced from a USDT pair (or another venue) while
+        # everything downstream keys on <BASE>_USDC — without this, changing the
+        # chart's quote asset silently orphans the symbol.
+        canonical = normalize_symbol(trend_data.symbol)
+        if canonical and canonical != trend_data.symbol:
+            apiserver_logger.debug(
+                f"Normalised inbound symbol {trend_data.symbol} -> {canonical}"
+            )
+            trend_data.symbol = canonical
+
         if allowed is not None and trend_data.symbol not in allowed:
-            apiserver_logger.debug(f"Ignoring trend data for unmonitored symbol: {trend_data.symbol}")
+            # WARNING, not DEBUG: the usual cause is a feed relabelling that
+            # would otherwise drop data silently and indefinitely.
+            _warn_unmonitored_symbol(trend_data.symbol, allowed)
             continue
         trend_cache.update(trend_data)
         if trend_data.symbol not in seen_symbols:
@@ -1382,7 +1417,7 @@ async def scan_for_signals(profile_name: str):
     from db.utils import get_db_session
     with get_db_session() as db:
         db_tickers = get_active_symbols(db)
-    symbols = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "BTC_USDC"]
+    symbols = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC",  "BTC_USDC"]
 
     # Generate signals
     signals = signal_gen.scan_symbols(symbols)
@@ -3998,7 +4033,7 @@ async def admin_scan_all_profiles():
 
     with get_db_session() as db:
         db_tickers = get_active_symbols(db)
-    symbols = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "HYPE_USDC", "BTC_USDC"]
+    symbols = db_tickers if db_tickers else ["SOL_USDC", "ETH_USDC", "BTC_USDC"]
 
     results = []
     for profile in profiles:

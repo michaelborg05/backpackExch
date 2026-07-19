@@ -1,0 +1,267 @@
+"""Background service that keeps trend_analysis_shadow topped up.
+
+Runs the programmatic candle fetcher on an interval, in its own daemon thread,
+so the Binance-sourced feed accumulates alongside the live TradingView webhook
+feed during the parallel-run migration period.
+
+Deliberately isolated from trading:
+  * Own thread — a hang or crash here cannot stall the monitoring loop.
+  * Every exception is swallowed and logged; the thread never dies.
+  * Writes ONLY to trend_analysis_shadow. The live signal path reads
+    trend_analysis_log and is completely untouched.
+  * OFF by default. Set ENABLE_CANDLE_FETCHER=true to turn it on.
+
+Once Tools/compare_shadow.py shows an acceptable gate-flip rate, the fetcher can
+be pointed at trend_analysis_log and this service becomes the primary feed.
+"""
+from __future__ import annotations
+
+import os
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+
+from cache.settings_cache import get_settings_cache
+from db.crud_monitored_symbols import get_enabled_symbols_set
+from db.utils import get_db_session
+from services.candle_fetcher import SYMBOL_MAP, fetch_and_store, get_quote
+from utils.logging import log_manager
+from utils.symbols import normalize_symbol
+
+
+class CandleFetcherService:
+    """Periodically fetch candles and write them to the shadow table.
+
+    Configuration lives in the DB (`settings` table, via SettingsCache) and the
+    symbol list comes from `monitored_symbols` — the same list the webhook and
+    monitoring loop use. Only the on/off switch is an env var, because it has to
+    be readable before the DB session exists and it is a deploy-time decision.
+
+    Settings (all global, i.e. profile_name NULL):
+        candle_fetcher_quote            default "USDT"
+        candle_fetcher_timeframes       default "15,60"
+        candle_fetcher_interval         default 900   (seconds)
+        candle_fetcher_lookback_hours   default 6
+        candle_fetcher_symbols          default ""    (blank = use monitored_symbols)
+
+    Symbols resolve as: candle_fetcher_symbols if set, else the enabled rows of
+    monitored_symbols — minus anything with no mapping on the source venue
+    (e.g. HYPE, which Binance does not list). Re-resolved every cycle, so adding
+    a monitored symbol picks it up without a restart.
+    """
+
+    def __init__(
+        self,
+        symbols: Optional[List[str]] = None,
+        timeframes: Optional[List[str]] = None,
+        interval_seconds: Optional[int] = None,
+        lookback_hours: Optional[int] = None,
+    ):
+        self.logger = log_manager.get_logger("candle_fetcher")
+
+        # Explicit constructor args win (used by tests); otherwise resolved from
+        # settings on each cycle so changes take effect without a redeploy.
+        self._symbols_override = symbols
+        self._timeframes_override = timeframes
+        self._interval_override = interval_seconds
+        self._lookback_override = lookback_hours
+
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._last_run_ts: Optional[float] = None
+        self._last_rows: int = 0
+        self._last_symbols: List[str] = []
+        self._consecutive_failures: int = 0
+        self._warned_unmapped: set = set()
+
+    # -- configuration -----------------------------------------------------
+
+    def _setting(self, name: str, default):
+        cache = get_settings_cache()
+        if cache is None:
+            return default
+        if isinstance(default, int):
+            return cache.get_int(name, default=default)
+        return cache.get(name, default=default)
+
+    @property
+    def interval(self) -> int:
+        if self._interval_override is not None:
+            return self._interval_override
+        return max(60, self._setting("candle_fetcher_interval", 900))
+
+    @property
+    def lookback_hours(self) -> int:
+        if self._lookback_override is not None:
+            return self._lookback_override
+        return max(1, self._setting("candle_fetcher_lookback_hours", 6))
+
+    @property
+    def timeframes(self) -> List[str]:
+        if self._timeframes_override:
+            return self._timeframes_override
+        raw = self._setting("candle_fetcher_timeframes", "15,60") or "15,60"
+        return [t.strip() for t in str(raw).split(",") if t.strip()]
+
+    def resolve_symbols(self) -> List[str]:
+        """Symbols to fetch: explicit override > setting > monitored_symbols.
+
+        Anything the source venue does not list is dropped with a one-time
+        warning rather than failing the cycle.
+        """
+        if self._symbols_override:
+            candidates = list(self._symbols_override)
+        else:
+            raw = self._setting("candle_fetcher_symbols", "") or ""
+            if str(raw).strip():
+                candidates = [s.strip().upper() for s in str(raw).split(",") if s.strip()]
+            else:
+                try:
+                    with get_db_session() as db:
+                        candidates = sorted(get_enabled_symbols_set(db))
+                except Exception as e:  # noqa: BLE001
+                    self.logger.error(f"Could not read monitored_symbols: {e}")
+                    return []
+
+        usable, unmapped = [], []
+        for sym in candidates:
+            canonical = normalize_symbol(sym) or sym
+            (usable if canonical in SYMBOL_MAP else unmapped).append(canonical)
+
+        for sym in unmapped:
+            if sym not in self._warned_unmapped:
+                self._warned_unmapped.add(sym)
+                self.logger.warning(
+                    f"{sym} is monitored but not listed on the candle source "
+                    f"({get_quote()}) — skipping. Add it to "
+                    f"services/candle_fetcher.SYMBOL_BASES if that is wrong."
+                )
+        return usable
+
+    # -- lifecycle ---------------------------------------------------------
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            self.logger.warning("CandleFetcherService already running")
+            return
+        # Do not gate startup on the symbol list — it is resolved per cycle from
+        # monitored_symbols, so an empty list now may be populated later.
+        symbols = self.resolve_symbols()
+        if not symbols:
+            self.logger.warning(
+                "CandleFetcherService starting with no resolvable symbols — "
+                "will re-check monitored_symbols each cycle"
+            )
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run_loop, name="CandleFetcherService", daemon=True
+        )
+        self._thread.start()
+        self.logger.info(
+            f"✅ CandleFetcherService started (symbols={len(symbols)}: {symbols}, "
+            f"timeframes={self.timeframes}, interval={self.interval}s, "
+            f"lookback={self.lookback_hours}h, quote={get_quote()}) "
+            f"-> trend_analysis_shadow"
+        )
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=30)
+        self.logger.info("CandleFetcherService stopped")
+
+    @property
+    def is_healthy(self) -> bool:
+        """True if a run completed within the last 3 intervals."""
+        if self._last_run_ts is None:
+            return False
+        return (time.time() - self._last_run_ts) < (self.interval * 3)
+
+    def status(self) -> dict:
+        return {
+            "running": bool(self._thread and self._thread.is_alive()),
+            "healthy": self.is_healthy,
+            "symbols": self._last_symbols or self.resolve_symbols(),
+            "timeframes": self.timeframes,
+            "interval_seconds": self.interval,
+            "quote": get_quote(),
+            "last_run": (
+                datetime.fromtimestamp(self._last_run_ts, tz=timezone.utc).isoformat()
+                if self._last_run_ts else None
+            ),
+            "last_run_rows": self._last_rows,
+            "consecutive_failures": self._consecutive_failures,
+        }
+
+    # -- loop --------------------------------------------------------------
+
+    def _run_loop(self) -> None:
+        # Small stagger so startup does not contend with cache warmup.
+        self._stop_event.wait(timeout=30)
+        while not self._stop_event.is_set():
+            try:
+                self._fetch_once()
+                self._consecutive_failures = 0
+            except Exception as e:  # noqa: BLE001 — must never kill the thread
+                self._consecutive_failures += 1
+                self.logger.error(
+                    f"Candle fetch cycle failed ({self._consecutive_failures} in a row): {e}",
+                    exc_info=True,
+                )
+            self._stop_event.wait(timeout=self.interval)
+        self.logger.info("Candle fetch loop exited")
+
+    def _fetch_once(self) -> None:
+        symbols = self.resolve_symbols()
+        if not symbols:
+            self.logger.warning("No fetchable symbols this cycle — skipping")
+            return
+        self._last_symbols = symbols
+
+        end = datetime.now(tz=timezone.utc)
+        start = end - timedelta(hours=self.lookback_hours)
+        total, gapped, failed = 0, [], []
+
+        with get_db_session() as db:
+            for symbol in symbols:
+                for tf in self.timeframes:
+                    if self._stop_event.is_set():
+                        return
+                    try:
+                        report = fetch_and_store(db, symbol, tf, start, end)
+                        total += report.written
+                        if not report.contiguous:
+                            gapped.append(report.describe())
+                    except Exception as e:  # noqa: BLE001 — one symbol must not stop the rest
+                        failed.append(f"{symbol}/{tf}: {e}")
+
+        self._last_run_ts = time.time()
+        self._last_rows = total
+        self.logger.info(f"Candle fetch cycle complete — {total} shadow rows written")
+        if gapped:
+            # Wilder recursions (RSI/ADX) drift across gaps; surface loudly.
+            self.logger.warning(f"Gaps detected in {len(gapped)} series: {'; '.join(gapped[:5])}")
+        if failed:
+            self.logger.error(f"{len(failed)} series failed: {'; '.join(failed[:5])}")
+
+
+_service: Optional[CandleFetcherService] = None
+
+
+def get_candle_fetcher_service() -> Optional[CandleFetcherService]:
+    return _service
+
+
+def initialize_candle_fetcher_service(**kwargs) -> Optional[CandleFetcherService]:
+    """Create the service if ENABLE_CANDLE_FETCHER is truthy, else return None."""
+    global _service
+    enabled = os.getenv("ENABLE_CANDLE_FETCHER", "false").strip().lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        log_manager.get_logger("candle_fetcher").info(
+            "CandleFetcherService disabled (set ENABLE_CANDLE_FETCHER=true to enable)"
+        )
+        _service = None
+        return None
+    _service = CandleFetcherService(**kwargs)
+    return _service
