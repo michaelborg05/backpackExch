@@ -332,9 +332,21 @@ def write_shadow_rows(db, rows: Sequence[dict]) -> int:
         if not chunk:
             continue
         stmt = insert(TrendAnalysisShadow).values(chunk)
-        stmt = stmt.on_conflict_do_nothing(constraint="uq_trend_shadow_bar")
-        # RETURNING gives an exact count of rows that actually landed; cursor
-        # rowcount is unreliable for batched ON CONFLICT DO NOTHING.
+        # DO UPDATE, not DO NOTHING. A bar can legitimately be re-fetched with
+        # better data than the first write — most importantly if a partial
+        # (in-progress) bar ever gets persisted, DO NOTHING would freeze it
+        # permanently. With DO UPDATE, re-running a backfill over any window
+        # repairs that window, so the table is self-healing.
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_trend_shadow_bar",
+            set_={c: stmt.excluded[c] for c in (
+                "open", "high", "low", "close", "price",
+                "rsi", "ema20", "ema50", "vwap",
+                "bb_upper", "bb_lower", "bb_basis",
+                "volume", "volume_sma", "volume_ratio",
+                "adx", "atr_pct", "source_symbol", "is_backfill",
+            )},
+        )
         res = db.execute(stmt.returning(TrendAnalysisShadow.id))
         written += len(res.fetchall())
     db.commit()
