@@ -24,11 +24,12 @@ Examples:
 import argparse
 import importlib
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from backtesting.period import DAYS_HELP, parse_period, print_period
 
 # ---------------------------------------------------------------------------
 # Map --file shorthand -> (module path, dict name)
@@ -68,8 +69,7 @@ def run_single(args, profile_name: str, profile_config: dict):
     from backtesting.backtest_engine import BacktestEngine, BacktestProfile
 
     profile = BacktestProfile.from_dict(profile_name, profile_config)
-    end   = datetime.now(tz=timezone.utc)
-    start = end - timedelta(days=args.days)
+    start, end = args.start, args.end
 
     symbols = [args.symbol] if args.symbol else ["BTC_USDC"]
 
@@ -95,8 +95,7 @@ def run_sweep(args, profile_name: str, profile_config: dict):
     from backtesting.backtest_engine import BacktestProfile, ParameterSweep
 
     profile = BacktestProfile.from_dict(profile_name, profile_config)
-    end   = datetime.now(tz=timezone.utc)
-    start = end - timedelta(days=args.days)
+    start, end = args.start, args.end
 
     param_grids = {
         "tp_sl": {
@@ -149,8 +148,8 @@ def main():
                         help="List available profile names in --file and exit")
     parser.add_argument("--symbol",  default="ETH_USDC",
                         help="Symbol override, e.g. SOL_USDC (default: BTC_USDC)")
-    parser.add_argument("--days",    type=int, default=35,
-                        help="Lookback window in days (default: 35)")
+    parser.add_argument("--days",    default="35",
+                        help=f"{DAYS_HELP} (default: 35)")
     parser.add_argument("--sweep",   action="store_true", default=True,
                         help="Run parameter sweep instead of single backtest")
     parser.add_argument("--sweep-grid", default="tp_sl",
@@ -188,9 +187,8 @@ def main():
 
     profile_config = variants[args.profile]
 
-    end   = datetime.now(tz=timezone.utc)
-    start = end - timedelta(days=args.days)
-    print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
+    args.start, args.end, period_label = parse_period(args.days)
+    print_period(args.start, args.end, period_label)
 
     if args.sweep:
         run_sweep(args, args.profile, profile_config)

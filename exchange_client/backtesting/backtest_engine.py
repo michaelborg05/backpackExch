@@ -1794,6 +1794,18 @@ class BacktestProfile:
         "exit_indicators":                    None,
         "min_exit_indicators_required":       1,
         "exit_timeframe":                     None,
+        # ATR-scaled exits (opt-in). When set, the stop / target are sized in
+        # units of the entry-TF ATR14 instead of a fixed % of price, so a
+        # high-volatility symbol gets a proportionally wider stop. Trailing
+        # geometry scales with the resulting target. None = use the fixed pcts.
+        "atr_stop_mult":              None,
+        "atr_tp_mult":                None,
+        "atr_floor_pct":              0.15,   # clamp: ignore implausibly calm ATR
+        "atr_ceiling_pct":            2.0,    # clamp: cap freak-volatility stops
+        # Volatility band for ENTRY (skip the trade, vs atr_stop_mult which
+        # resizes the stop). None = no volatility gate.
+        "max_entry_atr_pct":          None,
+        "min_entry_atr_pct":          None,
     }
 
     def __init__(self, name: str, config: dict):
@@ -2393,6 +2405,12 @@ class BacktestEngine:
         if profile_tp_cooldown is not None:
             cooldown_tp_mins = profile_tp_cooldown
 
+        # Rolling ATR14 on the entry timeframe, maintained as we replay rows.
+        # Used only when the profile opts in via atr_stop_mult / atr_tp_mult.
+        atr_trs: List[float] = []
+        atr_prev_close: Optional[float] = None
+        atr_pct: Optional[float] = None
+
         # We replay ALL rows in timestamp order, feeding each timeframe into cache.
         for idx, row in enumerate(all_rows):
             prev_same_tf = self._find_prev_same_tf(all_rows, idx)
@@ -2407,6 +2425,18 @@ class BacktestEngine:
             # Only run signal logic on entry_timeframe candles
             if row.timeframe != self.profile.entry_timeframe:
                 continue
+
+            # Update rolling ATR14 (entry-TF) BEFORE any entry this candle, so the
+            # ATR used to size a stop never includes the candle we enter on.
+            if row.high is not None and row.low is not None and row.close is not None:
+                _h, _l, _c = float(row.high), float(row.low), float(row.close)
+                tr = (_h - _l) if atr_prev_close is None else max(
+                    _h - _l, abs(_h - atr_prev_close), abs(_l - atr_prev_close)
+                )
+                atr_trs.append(tr)
+                atr_prev_close = _c
+                if len(atr_trs) >= 14 and _c:
+                    atr_pct = (sum(atr_trs[-14:]) / 14) / _c * 100
 
             row_time = row.timestamp.replace(tzinfo=timezone.utc) if row.timestamp.tzinfo is None else row.timestamp
 
@@ -2446,7 +2476,7 @@ class BacktestEngine:
                     # Candle mode: update trailing stop water mark from candle high/low.
                     # Tick mode: water mark is updated inside _check_exit_from_prices above.
                     if price_source == "candle" and self.profile.use_trailing_stop:
-                        arm_pct = float(self.profile.arm_trailing_stop_pct) / 100
+                        arm_pct = float(open_pos.get("eff_arm_pct", self.profile.arm_trailing_stop_pct)) / 100
                         if is_short:
                             if float(row.low) < open_pos["lowest_price"]:
                                 open_pos["lowest_price"] = float(row.low)
@@ -2621,6 +2651,19 @@ class BacktestEngine:
                     print(f"[{row_time}] Confidence too low: {confidence_pct:.1f}%")
                 continue
 
+            # Volatility ceiling/floor: skip the entry entirely when entry-TF ATR14
+            # is outside the tradeable band. Distinct from atr_stop_mult — this
+            # removes the trade rather than trying to survive it with a wider stop.
+            max_entry_atr = getattr(self.profile, "max_entry_atr_pct", None)
+            min_entry_atr = getattr(self.profile, "min_entry_atr_pct", None)
+            if atr_pct is not None:
+                if max_entry_atr and atr_pct > float(max_entry_atr):
+                    if self.verbose:
+                        print(f"{self._tag}[{row_time}] ATR {atr_pct:.2f}% > ceiling {max_entry_atr}% — skipping")
+                    continue
+                if min_entry_atr and atr_pct < float(min_entry_atr):
+                    continue
+
             # SIGNAL — open position
             result.signals_fired += 1
 
@@ -2662,18 +2705,51 @@ class BacktestEngine:
             result.trades.append(trade)
             cap_idx = effective_cap.record_entry(row_time) if effective_cap else None
 
+            # --- ATR-scaled TP/SL (opt-in) -------------------------------------
+            # atr_stop_mult / atr_tp_mult express the stop and target in units of
+            # the entry-TF ATR14 instead of a fixed % of price, so a high-vol
+            # symbol gets a proportionally wider stop. Falls back to the fixed
+            # pcts when the profile does not opt in or ATR is not yet available.
+            eff_tp_pct = float(self.profile.take_profit_pct)
+            eff_sl_pct = float(self.profile.stop_loss_pct)
+            eff_trail_pct = float(self.profile.trailing_stop_pct)
+            eff_arm_pct   = float(self.profile.arm_trailing_stop_pct)
+
+            atr_sl_mult = getattr(self.profile, "atr_stop_mult", None)
+            atr_tp_mult = getattr(self.profile, "atr_tp_mult", None)
+            if atr_pct and (atr_sl_mult or atr_tp_mult):
+                # Clamp ATR% so a single freak candle cannot produce an absurd stop.
+                clamped_atr = min(max(atr_pct, float(getattr(self.profile, "atr_floor_pct", 0.15) or 0.15)),
+                                  float(getattr(self.profile, "atr_ceiling_pct", 2.0) or 2.0))
+                if atr_sl_mult:
+                    eff_sl_pct = clamped_atr * float(atr_sl_mult)
+                if atr_tp_mult:
+                    eff_tp_pct = clamped_atr * float(atr_tp_mult)
+                # Keep trailing geometry proportional to the (new) target.
+                base_tp = float(self.profile.take_profit_pct) or 1.0
+                eff_trail_pct = float(self.profile.trailing_stop_pct) * (eff_tp_pct / base_tp)
+                eff_arm_pct   = float(self.profile.arm_trailing_stop_pct) * (eff_tp_pct / base_tp)
+
             if is_short:
-                tp_price = entry_price * (1 - float(self.profile.take_profit_pct) / 100)
-                sl_price = entry_price * (1 + float(self.profile.stop_loss_pct)   / 100)
+                tp_price = entry_price * (1 - eff_tp_pct / 100)
+                sl_price = entry_price * (1 + eff_sl_pct / 100)
             else:
-                tp_price = entry_price * (1 + float(self.profile.take_profit_pct) / 100)
-                sl_price = entry_price * (1 - float(self.profile.stop_loss_pct)   / 100)
+                tp_price = entry_price * (1 + eff_tp_pct / 100)
+                sl_price = entry_price * (1 - eff_sl_pct / 100)
+
+            trade.entry_details["atr_pct"]    = round(atr_pct, 4) if atr_pct else None
+            trade.entry_details["eff_tp_pct"] = round(eff_tp_pct, 4)
+            trade.entry_details["eff_sl_pct"] = round(eff_sl_pct, 4)
 
             open_pos = {
                 "trade":           trade,
                 "entry_price":     entry_price,
                 "tp_price":        tp_price,
                 "sl_price":        sl_price,
+                "eff_tp_pct":      eff_tp_pct,
+                "eff_sl_pct":      eff_sl_pct,
+                "eff_trail_pct":   eff_trail_pct,
+                "eff_arm_pct":     eff_arm_pct,
                 "trailing_armed":  False,
                 "highest_price":   entry_price,  # long trailing high-water mark
                 "lowest_price":    entry_price,  # short trailing low-water mark
@@ -2809,7 +2885,7 @@ class BacktestEngine:
                 return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": low}
             # Trailing stop: trail above the lowest seen price
             if self.profile.use_trailing_stop and pos["trailing_armed"]:
-                trail_pct = float(self.profile.trailing_stop_pct) / 100
+                trail_pct = float(pos.get("eff_trail_pct", self.profile.trailing_stop_pct)) / 100
                 trail_sl  = pos["lowest_price"] * (1 + trail_pct)
                 if high >= trail_sl:
                     return {"price": trail_sl, "reason": "trailing_stop", "candle_price": high}
@@ -2822,7 +2898,7 @@ class BacktestEngine:
                 return {"price": pos["tp_price"], "reason": "take_profit", "candle_price": high}
             # Trailing stop: trail below the highest seen price
             if self.profile.use_trailing_stop and pos["trailing_armed"]:
-                trail_pct = float(self.profile.trailing_stop_pct) / 100
+                trail_pct = float(pos.get("eff_trail_pct", self.profile.trailing_stop_pct)) / 100
                 trail_sl  = pos["highest_price"] * (1 - trail_pct)
                 if low <= trail_sl:
                     return {"price": trail_sl, "reason": "trailing_stop", "candle_price": low}
@@ -2850,7 +2926,7 @@ class BacktestEngine:
             profit_pct = (pos["entry_price"] - close) / pos["entry_price"] * 100
         else:
             profit_pct = (close - pos["entry_price"]) / pos["entry_price"] * 100
-        progress_pct = profit_pct / float(self.profile.take_profit_pct) * 100
+        progress_pct = profit_pct / float(pos.get("eff_tp_pct", self.profile.take_profit_pct)) * 100
         if progress_pct > 50:
             return None
         return {"price": close, "reason": "stale_position", "candle_price": close}
@@ -2944,8 +3020,8 @@ class BacktestEngine:
         """
         is_short  = pos.get("is_short", False)
         use_ts    = self.profile.use_trailing_stop
-        arm_pct   = float(self.profile.arm_trailing_stop_pct) / 100
-        trail_pct = float(self.profile.trailing_stop_pct) / 100
+        arm_pct   = float(pos.get("eff_arm_pct", self.profile.arm_trailing_stop_pct)) / 100
+        trail_pct = float(pos.get("eff_trail_pct", self.profile.trailing_stop_pct)) / 100
 
         for price in prices:
             # --- update water mark ---

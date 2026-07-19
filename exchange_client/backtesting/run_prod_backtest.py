@@ -12,12 +12,12 @@ Usage:
     python backtesting/run_prod_backtest.py --days 14 --symbol SOL_USDC
     python backtesting/run_prod_backtest.py --days 30 --trades --csv /tmp/prod_backtest.csv
     python backtesting/run_prod_backtest.py --days 30 --profile prod_mean_rev
+    python backtesting/run_prod_backtest.py --days 30-60   # non-overlapping older window
 """
 
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -26,13 +26,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from backtesting.profile_samples.prod_profiles import PROD_PROFILES as _PROD_PROFILES_LIST
 from backtesting.profile_variants import run_all_variants
 from backtesting.backtest_engine import ConsecutiveSLBreaker, ProfileOpenPositionCap
+from backtesting.period import DAYS_HELP, parse_period, print_period
 
 PROD_PROFILES = {c["display_name"]: c for c in _PROD_PROFILES_LIST}
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run prod profile backtests")
-parser.add_argument("--days",    type=int, default=90,
-                    help="Lookback window in days (default: 14)")
+parser.add_argument("--days",    default="90",
+                    help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")
 parser.add_argument("--profile", default=None,
@@ -45,9 +46,8 @@ parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
 args = parser.parse_args()
 
-end   = datetime.now(tz=timezone.utc)
-start = end - timedelta(days=args.days)
-print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
+start, end, period_label = parse_period(args.days)
+print_period(start, end, period_label)
 
 # ---------------------------------------------------------------------------
 # Profile selection
@@ -67,7 +67,7 @@ symbols_override = [args.symbol] if args.symbol else None
 # ---------------------------------------------------------------------------
 csv_path = None
 if args.csv and args.trades:
-    csv_path = args.csv.replace(".csv", "_prod.csv")
+    csv_path = args.csv.replace(".csv", f"_prod_{period_label}.csv")
     if os.path.exists(csv_path):
         os.remove(csv_path)
         print(f"Deleted {csv_path}. Starting fresh.")
@@ -138,7 +138,7 @@ with get_db_session() as db:
         merged.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)
 
         print(f"\n\n{'='*80}")
-        print(f"  PROD PROFILES — TOTALS ACROSS ALL SYMBOLS")
+        print(f"  PROD PROFILES — TOTALS ACROSS ALL SYMBOLS - {period_label}")
         print(f"{'='*80}")
         print(f"{'Profile':<30} {'Trades':>7} {'Win%':>6} {'AvgPnL':>8} {'TotalPnL':>10} {'ProfFact':>9}")
         print("-" * 80)

@@ -1,6 +1,5 @@
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -8,11 +7,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS,run_all_variants
 from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBreaker
+from backtesting.period import DAYS_HELP, parse_period, print_period
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    type=int, default= 60,
-                    help="Lookback window in days")
+parser.add_argument("--days",    default="30-60",  #Can now give a range. 0-30, 60-90
+                    help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
 parser.add_argument("--set",     default="trend", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
@@ -29,9 +29,8 @@ parser.add_argument("--profile", default=None,
                     help="Run only this variant, e.g. p3_v4_ema50drop")
 args = parser.parse_args()
 
-end   = datetime.now(tz=timezone.utc)
-start = end - timedelta(days=args.days)
-print(f"Period: {start.strftime('%Y-%m-%d %H:%M')} -> {end.strftime('%Y-%m-%d %H:%M')} UTC ({args.days}d)")
+start, end, period_label = parse_period(args.days)
+print_period(start, end, period_label)
 
 VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
@@ -63,7 +62,7 @@ symbols_override = [args.symbol] if args.symbol else None
 csv_path = None
 if args.csv and args.trades:
     base     = args.csv.replace(".csv", "")
-    csv_path = f"{base}_{args.set}_{args.days}.csv"
+    csv_path = f"{base}_{args.set}_{period_label}.csv"
     import os
     if os.path.exists(csv_path):
     #     choice = input(f"File '{csv_path}' already exists. Delete and restart? (y/n): ").lower()
@@ -168,7 +167,7 @@ with get_db_session() as db:
         merged.sort(key=lambda r: r.profit_factor, reverse=True)
 
         print(f"\n\n{'='*80}")
-        print(f"  TOTALS ACROSS ALL SYMBOLS")
+        print(f"  TOTALS ACROSS ALL SYMBOLS  - {period_label}")
         print(f"{'='*80}")
         print(f"{'Variant':<35} {'Trades':>7} {'Win%':>6} {'AvgPnL':>8} {'TotalPnL':>10} {'ProfFact':>9}")
         print("-" * 80)
