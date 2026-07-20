@@ -54,6 +54,9 @@ def run_all_variants(
     price_source: str = "candle",
     profile_caps: dict = None,  # variant_name -> ProfileOpenPositionCap; shared across symbol runs
     sl_breakers: dict = None,   # variant_name -> ConsecutiveSLBreaker; shared across symbol runs
+    data_source: str = "log",   # "log" = trend_analysis_log | "shadow" = trend_analysis_shadow
+    shadow_source: str = None,  # e.g. "binance:USDT"; None = whichever source has most rows
+    tick_source: str = "webhook",  # "webhook" | "path1m" (1m OHLC expanded to a path)
 ) -> list:
     """
     Run all variants and return sorted results.
@@ -83,7 +86,9 @@ def run_all_variants(
         cap     = profile_caps.get(name) if profile_caps else None
         breaker = sl_breakers.get(name) if sl_breakers else None
         result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source,
-                             profile_cap=cap, sl_breaker=breaker)
+                             profile_cap=cap, sl_breaker=breaker,
+                             data_source=data_source, shadow_source=shadow_source,
+                             tick_source=tick_source)
         results.append(result)
 
     results.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)

@@ -47,7 +47,11 @@ def main():
     ap.add_argument("--symbols", nargs="+", default=None)
     ap.add_argument("--timeframes", nargs="+", default=["15", "60", "240"])
     ap.add_argument("--sample", type=int, default=250,
-                    help="most recent N bars to verify per series (0 = all)")
+                    help="bars to verify per window (0 = all in window)")
+    ap.add_argument("--windows", type=int, default=1,
+                    help="number of probe windows spread evenly across --days. "
+                         "1 (default) checks only the most recent bars; use e.g. 10 "
+                         "to actually verify the whole history rather than the tail.")
     ap.add_argument("--repair", action="store_true",
                     help="re-fetch affected windows (now safe: upsert is DO UPDATE)")
     args = ap.parse_args()
@@ -64,46 +68,54 @@ def main():
     with get_db_session() as db:
         for sym in symbols:
             for tf in args.timeframes:
-                rows = db.execute(text("""
-                    SELECT timestamp, close, volume FROM trend_analysis_shadow
-                    WHERE symbol=:s AND timeframe=:t AND source=:src
-                      AND timestamp BETWEEN :lo AND :hi
-                    ORDER BY timestamp DESC
-                """), {"s": sym, "t": tf, "src": source, "lo": start, "hi": end}).fetchall()
-                if not rows:
+                tf_min = TF_MINUTES[tf]
+                # Probe windows spread evenly across the range. Checking only the
+                # tail would leave the bulk of the history unverified.
+                span = (end - start) / max(args.windows, 1)
+                checked = bad_vol = bad_px = unmatched = 0
+                for w in range(max(args.windows, 1)):
+                    w_hi = end - span * w
+                    w_lo = w_hi - timedelta(minutes=tf_min * (args.sample or 500))
+                    if w_lo < start:
+                        w_lo = start
+                    rows = db.execute(text("""
+                        SELECT timestamp, close, volume FROM trend_analysis_shadow
+                        WHERE symbol=:s AND timeframe=:t AND source=:src
+                          AND timestamp BETWEEN :lo AND :hi
+                        ORDER BY timestamp
+                    """), {"s": sym, "t": tf, "src": source,
+                           "lo": w_lo, "hi": w_hi}).fetchall()
+                    if not rows:
+                        continue
+                    try:
+                        candles, _ = fetch_klines(
+                            sym, tf,
+                            rows[0][0] - timedelta(minutes=tf_min * 2),
+                            rows[-1][0] + timedelta(minutes=tf_min))
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  {sym:<11} tf={tf:<4} window {w} fetch failed: {e}")
+                        continue
+                    # Row timestamp is the bar CLOSE; kline key is the bar OPEN.
+                    fresh = {c.open_time + timedelta(minutes=tf_min): c for c in candles}
+                    for ts, close, vol in rows:
+                        c = fresh.get(ts)
+                        if c is None:
+                            unmatched += 1
+                            continue
+                        checked += 1
+                        if c.volume and abs(float(vol) - c.volume) / c.volume * 100 > VOL_TOLERANCE_PCT:
+                            bad_vol += 1
+                            problems[(sym, tf)].append(ts)
+                        elif c.close and abs(float(close) - c.close) / c.close * 100 > PRICE_TOLERANCE_PCT:
+                            bad_px += 1
+                            problems[(sym, tf)].append(ts)
+
+                if not checked:
                     print(f"  {sym:<11} tf={tf:<4} no rows")
                     continue
-                if args.sample:
-                    rows = rows[:args.sample]
-                rows = list(reversed(rows))
-
-                tf_min = TF_MINUTES[tf]
-                lo = rows[0][0] - timedelta(minutes=tf_min * 2)
-                hi = rows[-1][0] + timedelta(minutes=tf_min)
-                try:
-                    candles, _ = fetch_klines(sym, tf, lo, hi)
-                except Exception as e:  # noqa: BLE001
-                    print(f"  {sym:<11} tf={tf:<4} fetch failed: {e}")
-                    continue
-                # Row timestamp is the bar CLOSE; kline key is the bar OPEN.
-                fresh = {c.open_time + timedelta(minutes=tf_min): c for c in candles}
-
-                bad_vol = bad_px = unmatched = 0
-                for ts, close, vol in rows:
-                    c = fresh.get(ts)
-                    if c is None:
-                        unmatched += 1
-                        continue
-                    if c.volume and abs(float(vol) - c.volume) / c.volume * 100 > VOL_TOLERANCE_PCT:
-                        bad_vol += 1
-                        problems[(sym, tf)].append(ts)
-                    elif c.close and abs(float(close) - c.close) / c.close * 100 > PRICE_TOLERANCE_PCT:
-                        bad_px += 1
-                        problems[(sym, tf)].append(ts)
-
                 status = "ok" if not (bad_vol or bad_px) else "PARTIAL/STALE"
                 extra = f"  unmatched={unmatched}" if unmatched else ""
-                print(f"  {sym:<11} tf={tf:<4} checked={len(rows):>4}  "
+                print(f"  {sym:<11} tf={tf:<4} checked={checked:>5}  "
                       f"bad_volume={bad_vol:<4} bad_price={bad_px:<4} {status}{extra}")
 
     print()

@@ -370,3 +370,63 @@ def fetch_and_store(db, symbol: str, timeframe: str, start: datetime, end: datet
     report.returned = len(rows)
     report.written = write_shadow_rows(db, rows)
     return report
+
+
+# ===========================================================================
+# 1-minute price path — intra-candle fill model
+# ===========================================================================
+
+def expand_bar_to_path(open_time: datetime, o: float, h: float, l: float, c: float
+                       ) -> List[Tuple[float, float]]:
+    """Expand one 1m OHLC bar into four (epoch_seconds, price) points.
+
+    Order matters: it decides whether a stop or a target is deemed to hit first
+    when a bar spans both. The standard conservative approximation walks toward
+    the adverse extreme first:
+
+        up bar   (close >= open):  O -> L -> H -> C
+        down bar (close <  open):  O -> H -> L -> C
+
+    For a long position that means the low is visited before the high inside an
+    up bar, so a stop sitting between them triggers rather than the target. That
+    is the pessimistic reading, which is the one worth having in a backtest.
+    """
+    base = open_time.timestamp()
+    mid = (l, h) if c >= o else (h, l)
+    return [(base, o), (base + 15, mid[0]), (base + 30, mid[1]), (base + 45, c)]
+
+
+def fetch_and_store_paths(db, symbol: str, start: datetime, end: datetime,
+                          source: Optional[str] = None) -> FetchReport:
+    """Backfill 1m bars into price_path_shadow for [start, end]."""
+    from sqlalchemy.dialects.postgresql import insert
+
+    from db.models import PricePathShadow
+
+    src = source or f"binance:{get_quote()}"
+    candles, report = fetch_klines(symbol, "1", start, end)
+    now_utc = datetime.now(timezone.utc)
+
+    rows = [
+        {"symbol": symbol, "timestamp": c.open_time, "open": c.open,
+         "high": c.high, "low": c.low, "close": c.close, "source": src}
+        for c in candles
+        # never persist the in-progress bar (same hazard as compute_rows)
+        if c.open_time + timedelta(minutes=1) <= now_utc
+    ]
+    report.returned = len(rows)
+
+    written = 0
+    CHUNK = 5000
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i:i + CHUNK]
+        stmt = insert(PricePathShadow).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_price_path_bar",
+            set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close")},
+        )
+        res = db.execute(stmt.returning(PricePathShadow.id))
+        written += len(res.fetchall())
+    db.commit()
+    report.written = written
+    return report

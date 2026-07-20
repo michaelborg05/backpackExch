@@ -943,3 +943,42 @@ class TrendAnalysisShadow(Base):
         UniqueConstraint('symbol', 'timeframe', 'timestamp', 'source',
                          name='uq_trend_shadow_bar'),
     )
+
+
+class PricePathShadow(Base):
+    """1-minute OHLC used to reconstruct the intra-candle price path.
+
+    Purpose: the backtester's tick mode needs to know how price MOVED inside an
+    entry candle, so stops and targets fire at the right moment. That came from
+    webhook_price_ticks, which is a ~2-minute sample (7.5 points per 15m bar)
+    and only exists from when webhook collection started.
+
+    1m klines give 15 points per 15m bar from close alone, or 60 once each bar
+    is expanded to an O/H/L/C path — and they backfill for years. Denser and
+    historically complete, which is what makes long backtests possible with a
+    realistic fill model.
+
+    NOTE ON TIMESTAMP: this table stores the bar's OPEN time, unlike
+    trend_analysis_shadow which stores the CLOSE. Path expansion needs to place
+    the four points inside [open, open+1min), so the open is the natural key.
+
+    Volume is deliberately not stored — the fill model does not use it, and at
+    ~12M rows the column is not free.
+    """
+    __tablename__ = "price_path_shadow"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)  # bar OPEN
+
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+
+    source = Column(String, nullable=False, index=True)   # e.g. "binance:USDT"
+
+    __table_args__ = (
+        Index('ix_price_path_lookup', 'symbol', 'timestamp'),
+        UniqueConstraint('symbol', 'timestamp', 'source', name='uq_price_path_bar'),
+    )

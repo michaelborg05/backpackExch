@@ -27,10 +27,30 @@ parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
 parser.add_argument("--profile", default=None,
                     help="Run only this variant, e.g. p3_v4_ema50drop")
+parser.add_argument("--data-source", default="log", choices=["log", "shadow"],
+                    help="Candle source. 'log' = trend_analysis_log (TradingView webhooks, "
+                         "~60d of history). 'shadow' = trend_analysis_shadow (programmatically "
+                         "fetched candles, years of history). Default: log")
+parser.add_argument("--shadow-source", default=None,
+                    help="Which shadow feed to read, e.g. binance:USDT. Default: whichever "
+                         "source has the most rows for the symbol. Only used with "
+                         "--data-source shadow.")
+parser.add_argument("--tick-source", default="webhook", choices=["webhook", "path1m"],
+                    help="Where intra-candle price path comes from in tick mode. "
+                         "'webhook' = webhook_price_ticks (~2min sample, ~60d history). "
+                         "'path1m' = price_path_shadow 1m OHLC expanded to O/H/L/C "
+                         "(60 points per 15m bar, full history).")
+parser.add_argument("--price-source", default="ticks", choices=["ticks", "candle"],
+                    help="Fill model. 'ticks' needs webhook_price_ticks coverage and falls "
+                         "back to candle automatically when the window is not covered "
+                         "(which is normal for long shadow backtests).")
 args = parser.parse_args()
 
 start, end, period_label = parse_period(args.days)
 print_period(start, end, period_label)
+print(f"Candle source: {args.data_source}"
+      + (f" ({args.shadow_source})" if args.shadow_source else "")
+      + f"   |   fill model: {args.price_source}")
 
 VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
@@ -149,9 +169,12 @@ with get_db_session() as db:
                 verbose=args.verbose,
                 show_trades=args.trades,
                 export_csv=csv_path,
-                price_source="ticks",
+                price_source=args.price_source,
                 profile_caps=profile_caps,
                 sl_breakers=sl_breakers,
+                data_source=args.data_source,
+                shadow_source=args.shadow_source,
+                tick_source=args.tick_source,
             )
 
             for r in symbol_results:

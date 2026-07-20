@@ -48,6 +48,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from sqlalchemy import func
 
 # ---------------------------------------------------------------------------
 # Lazy imports — only resolve when engine runs (keeps this file importable
@@ -2259,10 +2260,25 @@ class BacktestEngine:
         end: datetime,
         price_mode: str = "auto",
         price_source: str = "candle",  # "candle" | "ticks"
+        data_source: str = "log",      # "log" = trend_analysis_log (TradingView)
+                                       # "shadow" = trend_analysis_shadow (fetched candles)
+        shadow_source: Optional[str] = None,  # e.g. "binance:USDT"; None = most rows
+        tick_source: str = "webhook",  # "webhook" = webhook_price_ticks (~2min sample, ~60d)
+                                       # "path1m"  = price_path_shadow expanded to O/H/L/C
+                                       #             (60 points per 15m bar, full history)
         profile_cap: Optional["ProfileOpenPositionCap"] = None,
         sl_breaker: Optional["ConsecutiveSLBreaker"] = None,
     ) -> BacktestResult:
-        from db.models import TrendAnalysisLog
+        from db.models import TrendAnalysisLog, TrendAnalysisShadow
+
+        # Candle source. "shadow" reads the programmatically fetched table, which
+        # carries years of history rather than the ~60 days the TradingView
+        # webhooks accumulated — the binding constraint on every backtest
+        # conclusion in this project. Column names are identical between the two
+        # tables, so everything downstream is unchanged.
+        if data_source not in ("log", "shadow"):
+            raise ValueError(f"data_source must be 'log' or 'shadow', got {data_source!r}")
+        CandleModel = TrendAnalysisShadow if data_source == "shadow" else TrendAnalysisLog
 
         is_short = "short" in getattr(self.profile, "strategy_type", "")
 
@@ -2305,7 +2321,23 @@ class BacktestEngine:
         tick_times: List[float] = []    # epoch seconds, sorted
         tick_prices: List[float] = []
         if price_source == "ticks":
-            tick_times, tick_prices, ticks_available = self._load_price_ticks(symbol, start, end)
+            if tick_source == "path1m":
+                tick_times, tick_prices, ticks_available = self._load_price_path(symbol, start, end,
+                                                                                 shadow_source)
+            else:
+                tick_times, tick_prices, ticks_available = self._load_price_ticks(symbol, start, end)
+            # Ticks only exist from when webhook collection started. A long
+            # backtest can therefore be "tick mode" while ticks cover only the
+            # tail of the window, silently mixing fill models across the run.
+            # Require the ticks to actually span the window before trusting them.
+            if ticks_available and tick_times:
+                covered = (tick_times[-1] - tick_times[0])
+                wanted = (end - start).total_seconds()
+                if wanted > 0 and covered / wanted < 0.9:
+                    print(f"[Backtest] {symbol}: price ticks cover only "
+                          f"{covered / wanted:.0%} of the window — falling back to "
+                          f"candle mode so the fill model is consistent throughout")
+                    ticks_available = False
             if not ticks_available:
                 print(f"[Backtest] No price ticks for {symbol} {start.date()}→{end.date()} — falling back to candle prices")
                 price_source = "candle"
@@ -2329,17 +2361,34 @@ class BacktestEngine:
             needed_timeframes.add(regime_primary_tf)
             needed_timeframes.add(regime_confirm_tf)
 
-        all_rows = (
-            self.db.query(TrendAnalysisLog)
+        _q = (
+            self.db.query(CandleModel)
             .filter(
-                TrendAnalysisLog.symbol    == symbol,
-                TrendAnalysisLog.timeframe.in_(needed_timeframes),
-                TrendAnalysisLog.timestamp >= start,
-                TrendAnalysisLog.timestamp <= end,
+                CandleModel.symbol    == symbol,
+                CandleModel.timeframe.in_(needed_timeframes),
+                CandleModel.timestamp >= start,
+                CandleModel.timestamp <= end,
             )
-            .order_by(TrendAnalysisLog.timestamp)
-            .all()
         )
+        if data_source == "shadow":
+            src = shadow_source
+            if src is None:
+                # Default to whichever source has the most rows for this symbol,
+                # so a mixed table (e.g. binance:USDT + binance:USDC) never
+                # silently interleaves two different quotes into one series.
+                src_row = (
+                    self.db.query(CandleModel.source, func.count(CandleModel.id))
+                    .filter(CandleModel.symbol == symbol,
+                            CandleModel.timestamp >= start,
+                            CandleModel.timestamp <= end)
+                    .group_by(CandleModel.source)
+                    .order_by(func.count(CandleModel.id).desc())
+                    .first()
+                )
+                src = src_row[0] if src_row else None
+            if src:
+                _q = _q.filter(CandleModel.source == src)
+        all_rows = _q.order_by(CandleModel.timestamp).all()
 
         if not all_rows:
             print(f"[Backtest] No data for {symbol} in range {start} → {end}")
@@ -2934,6 +2983,63 @@ class BacktestEngine:
     # ------------------------------------------------------------------
     # Tick-based helpers
     # ------------------------------------------------------------------
+
+    # Expanding 1m OHLC into a path is the same work for every variant run
+    # against the same symbol/window, and run() is called once per variant per
+    # symbol — 130+ times in a full sweep. Cache the expanded path so it is
+    # built once. Keyed on the query, so correctness is unaffected.
+    _PATH_CACHE: dict = {}
+    _PATH_CACHE_MAX = 8
+
+    def _load_price_path(
+        self, symbol: str, start: datetime, end: datetime,
+        shadow_source: Optional[str] = None,
+    ) -> Tuple[List[float], List[float], bool]:
+        """Build an intra-candle price path from stored 1m OHLC.
+
+        Each 1m bar becomes four points (O/H/L/C, adverse extreme first), giving
+        60 points per 15m candle versus ~7.5 from the webhook tick sample — and
+        unlike the webhook ticks this backfills for years, which is what makes a
+        realistic fill model possible on long backtests.
+        """
+        from db.models import PricePathShadow
+        from services.candle_fetcher import expand_bar_to_path
+
+        key = (symbol, start, end, shadow_source)
+        hit = BacktestEngine._PATH_CACHE.get(key)
+        if hit is not None:
+            return hit
+
+        q = (
+            self.db.query(PricePathShadow.timestamp, PricePathShadow.open,
+                          PricePathShadow.high, PricePathShadow.low,
+                          PricePathShadow.close)
+            .filter(
+                PricePathShadow.symbol == symbol,
+                PricePathShadow.timestamp >= start,
+                PricePathShadow.timestamp <= end,
+            )
+        )
+        if shadow_source:
+            q = q.filter(PricePathShadow.source == shadow_source)
+        rows = q.order_by(PricePathShadow.timestamp).all()
+        if not rows:
+            BacktestEngine._PATH_CACHE[key] = ([], [], False)
+            return [], [], False
+
+        times: List[float] = []
+        prices: List[float] = []
+        for ts, o, h, l, c in rows:
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            for t, p in expand_bar_to_path(ts, float(o), float(h), float(l), float(c)):
+                times.append(t)
+                prices.append(p)
+
+        if len(BacktestEngine._PATH_CACHE) >= BacktestEngine._PATH_CACHE_MAX:
+            BacktestEngine._PATH_CACHE.pop(next(iter(BacktestEngine._PATH_CACHE)))
+        BacktestEngine._PATH_CACHE[key] = (times, prices, True)
+        return times, prices, True
 
     def _load_price_ticks(
         self, symbol: str, start: datetime, end: datetime
