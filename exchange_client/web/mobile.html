@@ -158,8 +158,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 .pf-val{font-size:13px;color:var(--tx)}
 .pf-pnl{font-weight:700}
 .pf-pnl.g{color:var(--grn)}.pf-pnl.r{color:var(--red)}
-.pos-footer{border-top:1px solid var(--brd);padding:9px 13px;display:flex;gap:16px;font-size:11px}
+.pos-footer{border-top:1px solid var(--brd);padding:9px 13px;display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11px}
 .pos-tp{color:var(--grn)}.pos-sl{color:var(--red)}
+.pos-tsl{color:var(--txd)}.pos-tsl.armed{color:var(--grn)}
+.tsl-armed{font-size:9px;letter-spacing:.08em;padding:1px 5px;margin-left:4px;
+  background:rgba(0,255,157,.12);color:var(--grn);border:1px solid rgba(0,255,157,.3)}
 .empty{text-align:center;padding:48px 20px;color:var(--txd);font-size:12px}
 
 /* ── BALANCES ───────────────────────────────────────────────────── */
@@ -1102,6 +1105,9 @@ async function loadPositions() {
       const pnlPct = parseFloat(p.pnl_pct) || 0;
       const pc = pnl >= 0 ? 'g' : 'r';
       const sc = (p.side||'').toLowerCase() === 'long' ? 'long' : 'short';
+      const armed = p.trailing_stop_armed === true;
+      const tslVal = p.trailing_sl_price ? fmtPrice(p.trailing_sl_price) : '—';
+      const tslBadge = armed ? '<span class="tsl-armed">ARMED</span>' : (p.trailing_sl_price ? ' idle' : '');
       return `<div class="pos-card">
         <div class="pos-head">
           <div><div class="pos-sym">${escHtml(p.symbol)}</div><div class="pos-prof">${escHtml(p.profile_name)}</div></div>
@@ -1115,7 +1121,8 @@ async function loadPositions() {
         </div>
         <div class="pos-footer">
           <span class="pos-tp">TP: ${p.tp_price ? fmtPrice(p.tp_price) : '—'}</span>
-          <span class="pos-sl">SL: ${p.sl_price ? fmtPrice(p.sl_price) : '—'}${p.trailing_sl_price ? ' ·trail: '+fmtPrice(p.trailing_sl_price) : ''}</span>
+          <span class="pos-sl">SL: ${p.sl_price ? fmtPrice(p.sl_price) : '—'}</span>
+          <span class="pos-tsl${armed ? ' armed' : ''}">TSL: ${tslVal}${tslBadge}</span>
         </div>
       </div>`;
     }).join('');

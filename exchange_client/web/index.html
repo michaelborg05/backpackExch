@@ -83,8 +83,8 @@
 
     <div class="panel" id="p-positions">
       <div class="card fi"><div class="ch"><span class="ct">All Open Positions</span><span class="cb g" id="pcb2">0 LIVE</span></div>
-      <table class="dt"><thead><tr><th>Profile</th><th>Symbol</th><th>Side</th><th>Quantity</th><th>Entry</th><th>Mark</th><th>P&amp;L</th><th>P&amp;L %</th><th>TP</th><th>SL</th></tr></thead>
-      <tbody id="pfull"><tr><td colspan="10" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody></table></div>
+      <table class="dt"><thead><tr><th>Profile</th><th>Symbol</th><th>Side</th><th>Quantity</th><th>Entry</th><th>Mark</th><th>P&amp;L</th><th>P&amp;L %</th><th>TP</th><th>SL</th><th>TSL</th></tr></thead>
+      <tbody id="pfull"><tr><td colspan="11" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody></table></div>
     </div>
 
     <div class="panel" id="p-balances">
@@ -1334,17 +1334,22 @@ async function loadOv(){
 
 async function loadPT(tid){
   const tb=document.getElementById(tid);if(!tb)return;
-  tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--txd);padding:16px">Loading positions...</td></tr>';
+  tb.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--txd);padding:16px">Loading positions...</td></tr>';
   const allPs=await api('/positions')??[];
   const b2=document.getElementById('pcb2');
   if(b2){b2.textContent=allPs.length+' LIVE';b2.className='cb '+(allPs.length>0?'g':'');}
-  if(!allPs.length){tb.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--txd);padding:24px">No open positions</td></tr>';return;}
+  if(!allPs.length){tb.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--txd);padding:24px">No open positions</td></tr>';return;}
   tb.innerHTML=allPs.map(p=>{
     const pnl=parseFloat(p.unrealised_pnl??0),pct=parseFloat(p.pnl_pct??0);
     const sd=(p.side??'long').toLowerCase(),bw=Math.min(Math.abs(pct)*2,100);
     const profLabel=S.profiles[p.profile_name]?.display_name??p.profile_name;
     const rowClr=pnl>=0?'rgba(0,212,100,0.05)':'rgba(255,80,80,0.05)';
     const accentClr=pnl>=0?'var(--grn)':'var(--red)';
+    const tslArmed=p.trailing_stop_armed===true;
+    const tslPr=p.trailing_sl_price?fpr(p.trailing_sl_price):'—';
+    const tslCell=tslArmed
+      ?'<span style="font-size:9px;letter-spacing:.06em;padding:1px 5px;background:rgba(0,212,100,0.15);color:var(--grn);border:1px solid rgba(0,212,100,0.3)">ARMED</span> '+tslPr
+      :(p.trailing_sl_price?'<span style="color:var(--txd)">idle</span> '+tslPr:'—');
     return '<tr style="background:'+rowClr+'">'
       +'<td class="tm td2" style="font-size:10px;letter-spacing:.06em;border-left:3px solid '+accentClr+'">'+profLabel+'</td>'
       +'<td class="ts tm">'+p.symbol+'</td>'
@@ -1356,6 +1361,7 @@ async function loadPT(tid){
       +'<td class="tm '+(pct>=0?'tg':'tr2')+'">'+(pct>=0?'+':'')+pct.toFixed(2)+'%</td>'
       +'<td class="tm td2">'+(p.tp_price?fpr(p.tp_price):'—')+'</td>'
       +'<td class="tm td2">'+(p.sl_price?fpr(p.sl_price):'—')+'</td>'
+      +'<td class="tm td2">'+tslCell+'</td>'
       +'</tr>';
   }).join('');
 }
