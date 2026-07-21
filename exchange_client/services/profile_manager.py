@@ -193,6 +193,9 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         market_type=cfg.get("market_type", "SPOT"),
         # Leverage (perps only; always 1.0 for SPOT)
         leverage_multiplier=float(cfg.get("leverage_multiplier", 1.0)),
+        # Maker execution
+        entry_order_mode=cfg.get("entry_order_mode") or "taker",
+        maker_timeout_sec=cfg.get("maker_timeout_sec"),
     )
     return profile
 
@@ -396,6 +399,9 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "market_type": row.market_type or "SPOT",
             # Leverage (perps only)
             "leverage_multiplier": float(row.leverage_multiplier or 1.0),
+            # Maker execution
+            "entry_order_mode": getattr(row, "entry_order_mode", None) or "taker",
+            "maker_timeout_sec": getattr(row, "maker_timeout_sec", None),
         }
         from utils.db_secrets import resolve_secret
         # Resolve API credentials from linked ExchangeAccount

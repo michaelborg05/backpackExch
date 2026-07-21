@@ -471,7 +471,103 @@ async def place_order(
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
+
+@app.post("/test/entry-signal/{profile_name}/{symbol}",
+          dependencies=[Depends(require_trade_permission), Depends(check_rate_limit)])
+async def test_entry_signal(profile_name: str, symbol: str, side: str = "buy"):
+    """Fire a synthetic entry signal through the REAL execution path.
+
+    Unlike POST /order (which calls order_buy directly and always takes), this
+    routes through MonitoringService._execute_signal -> _place_entry_order, so it
+    exercises whatever the profile is configured for — including the maker-first
+    flow (PostOnly limit at best bid -> orders table -> reconciled to a position
+    by _monitor_orders on the next cycle). Use it to test maker execution live on
+    a small size.
+
+    Size comes from the profile (default_order_size_usdc) — point this at a
+    profile configured with a small order size and entry_order_mode set as you
+    want to test. This BYPASSES caps/cooldowns/circuit-breaker (it calls the
+    executor directly), so it fires regardless — do not leave it exposed in prod.
+
+    The monitoring service MUST be running for a maker order to fill (the
+    reconcile happens in its loop). Watch the orders/positions tables + Telegram.
+    """
+    import time as _time
+
+    from models.trading_signal import SignalStrength, TradingSignal
+    from utils.constants import TradeReason, TradeSide
+
+    monitoring = get_monitoring_service()
+    if monitoring is None:
+        raise HTTPException(status_code=503, detail="Monitoring service not running")
+
+    profile = get_profile_manager().get(profile_name)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+
+    # action must be a TradeSide enum (str-based): real signals use it and
+    # _execute_signal calls signal.action.value. A plain "BUY" string crashes there.
+    action = TradeSide.LONG if side.lower() in ("buy", "long") else TradeSide.SHORT
+    mode = getattr(profile, "entry_order_mode", "taker") or "taker"
+
+    signal = TradingSignal(
+        symbol=symbol,
+        action=action,
+        strength=SignalStrength.WEAK,
+        source=TradeReason.API,
+        confidence=99.0,
+        reasons=["manual test/entry-signal"],
+        indicators={},
+        timestamp=_time.time(),
+        timeframe=getattr(profile, "entry_timeframe", "15"),
+        trend_timeframe=getattr(profile, "trend_timeframe", "60"),
+        regime_confidence="test",
+        signal_snapshot=None,
+    )
+
+    try:
+        monitoring._execute_signal(signal, profile)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"execute failed: {e}")
+
+    # What ACTUALLY happened (not just the configured mode). _place_entry_order
+    # records this on the service each call.
+    diag = getattr(monitoring, "_last_maker_diag", None)
+    actual_path = (diag or {}).get("path")
+
+    result = {
+        "fired": True,
+        "profile": profile_name,
+        "symbol": symbol,
+        "action": action.value,
+        "entry_order_mode": mode,
+        "actual_outcome": diag or "no diagnostic recorded",
+        "note": "Size came from default_order_size_usdc.",
+    }
+    if actual_path == "maker_resting":
+        result["result"] = ("✅ Maker limit is RESTING — check the orders table "
+                            "(purpose=ENTRY, status=New). It will fill or fall back on the next cycle.")
+    elif actual_path == "taker_fallback":
+        result["result"] = ("⚠️ Fell back to TAKER (market order). The maker limit did not rest — "
+                            "see actual_outcome.reason and the [maker-entry] line in the app log for "
+                            "the exchange's rejection message.")
+    elif actual_path == "taker":
+        result["result"] = "Profile is in taker mode — placed a market order."
+    elif actual_path == "sizing_failed":
+        result["result"] = ("❌ NO order attempted — position sizing failed (no order placed at all). "
+                            "Reason: " + str((diag or {}).get("reason")) + ". Common causes: no price in "
+                            "cache yet, insufficient USDC balance, or missing market info. This is why "
+                            "the orders table is empty.")
+    elif actual_path == "too_small_after_scalar":
+        result["result"] = ("❌ NO order — size below the $5 minimum after the BB scalar. "
+                            "Reason: " + str((diag or {}).get("reason")))
+    elif actual_path == "reached_execute_signal":
+        result["result"] = ("Reached the executor but did not place an order and did not hit a known "
+                            "bail point — check the app log for this signal.")
+    return result
+
+
 #@app.post("/webhook/tradingview", dependencies=[Depends(require_webhook_permission)], response_model=WebhookResponse)
 @app.post("/webhook/tradingview", response_model=WebhookResponse)
 async def tradingview_webhook(
@@ -3265,6 +3361,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
         "min_position_age_for_trend_check", "max_position_hours", "exit_timeframe",
         "market_type", "leverage_multiplier",
+        "entry_order_mode", "maker_timeout_sec",
         "is_active",
     ]
 
@@ -3902,6 +3999,8 @@ def _serialize_profile(p, cb=None) -> dict:
         # Market
         "market_type":                 p.market_type or "SPOT",
         "leverage_multiplier":         float(p.leverage_multiplier) if p.leverage_multiplier else 1.0,
+        "entry_order_mode":            getattr(p, "entry_order_mode", None) or "taker",
+        "maker_timeout_sec":           getattr(p, "maker_timeout_sec", None),
 
         # Account linkage
         "account_id":                  p.account_id,

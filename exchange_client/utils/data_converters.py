@@ -142,11 +142,22 @@ def build_query_string(params: dict) -> str:
     # Sort keys alphabetically and build query string
     query_parts = []
     for key in sorted(params.keys()):
-        if params[key] is not None:  # Skip None values
+        val = params[key]
+        if val is not None:  # Skip None values
+            # Booleans MUST serialise as JSON-style lowercase 'true'/'false' to
+            # match the request body the exchange signs against. Python's
+            # str(True) -> 'True' would make the signed string differ from the
+            # JSON body (postOnly=true), causing an "Invalid signature" rejection.
+            # This first bites on postOnly (maker orders); market/limit orders
+            # have no boolean fields.
+            if isinstance(val, bool):
+                str_val = "true" if val else "false"
+            else:
+                str_val = str(val)
             encoded_key = urllib.parse.quote_plus(str(key))
-            encoded_value = urllib.parse.quote_plus(str(params[key]))
+            encoded_value = urllib.parse.quote_plus(str_val)
             query_parts.append(f"{encoded_key}={encoded_value}")
-    
+
     return "&".join(query_parts)
 
 def build_authorisation_header(api_key: str, secret: str,  query_params: Dict[str, Any], body: Optional[Dict[str, Any]], instruction: str, window: int = 5000) -> str:

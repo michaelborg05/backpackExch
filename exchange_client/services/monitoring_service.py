@@ -1341,7 +1341,13 @@ class MonitoringService:
             f"[{profile.name}] 🎯 EXECUTING SIGNAL: {signal.symbol} "
             f"({signal.strength.name}, {signal.confidence:.1f}%) {signal.action.value}"
         )
-        
+
+        # Diagnostic reflects where execution got to; overwritten by
+        # _place_entry_order if we reach order placement. Surfaced by
+        # /test/entry-signal so an early bail is never invisible.
+        self._last_maker_diag = {"symbol": signal.symbol, "path": "reached_execute_signal",
+                                 "reason": None}
+
         try:
 
             quantity, size_reason = self.position_calculator.calculate_buy_quantity(
@@ -1349,11 +1355,12 @@ class MonitoringService:
                 profile=profile,
                 quote_asset="USDC"
             )
-            
+
             if quantity is None:
                 self.logger.warning(
                     f"[{profile.name}] Cannot calculate position size: {size_reason}"
                 )
+                self._last_maker_diag.update(path="sizing_failed", reason=str(size_reason))
                 return
 
             self.logger.info(
@@ -1380,6 +1387,8 @@ class MonitoringService:
                         f"[{profile.name}] Order too small after BB scalar "
                         f"(${float(quantity * price):.2f}), skipping"
                     )
+                    self._last_maker_diag.update(path="too_small_after_scalar",
+                                                 reason=f"${float(quantity * price):.2f} < $5 min")
                     return
 
             # Execute the entry order (direction-aware). Maker-first vs taker is
@@ -1524,8 +1533,17 @@ class MonitoringService:
             # SHORT: open via order_sell with no position_id (entry, not close)
             return adapter.order_sell(symbol=signal.symbol, quantity=str(quantity), **common_kwargs)
 
+        # Diagnostic of what actually happened on the entry — surfaced by the
+        # /test/entry-signal endpoint and logged, so a taker fallback is never
+        # silent. Reset each call.
+        diag = {"symbol": signal.symbol, "path": None, "reason": None,
+                "limit_price": None, "price_source": None, "best_bid": None,
+                "best_ask": None}
+        self._last_maker_diag = diag
+
         mode = (getattr(profile, "entry_order_mode", None) or "taker").lower()
         if mode != "maker_then_taker":
+            diag.update(path="taker", reason="profile in taker mode")
             return _taker(), "taker"
 
         # Maker-first path. Rest at the live best bid/ask (fresh from the book)
@@ -1538,19 +1556,32 @@ class MonitoringService:
         try:
             depth = adapter.get_depth(signal.symbol)
             limit_price = best_maker_price(depth, is_long_signal)
+            # Record the touch prices so a "why did it reject" is obvious.
+            if isinstance(depth, dict):
+                try:
+                    bids = [float(x[0]) for x in (depth.get("bids") or [])]
+                    asks = [float(x[0]) for x in (depth.get("asks") or [])]
+                    diag["best_bid"] = max(bids) if bids else None
+                    diag["best_ask"] = min(asks) if asks else None
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as e:  # noqa: BLE001
-            self.logger.debug(f"[{profile.name}] depth fetch failed for {signal.symbol}: {e}")
+            self.logger.warning(f"[{profile.name}] depth fetch failed for {signal.symbol}: {e}")
+            diag["reason"] = f"depth fetch failed: {e}"
         price_source = "book"
         if not limit_price or limit_price <= 0:
             limit_price = self.price_cache.get_price(signal.symbol)
-            price_source = "ticker(fallback)"
+            price_source = "ticker(fallback,~30s stale)"
+        diag.update(limit_price=float(limit_price) if limit_price else None, price_source=price_source)
         if not limit_price or limit_price <= 0:
             self.logger.warning(
                 f"[{profile.name}] maker mode but no price for {signal.symbol}; using taker"
             )
+            diag.update(path="taker_fallback", reason="no price available")
             return _taker(), "taker"
-        self.logger.debug(
-            f"[{profile.name}] maker limit price {limit_price} from {price_source} for {signal.symbol}"
+        self.logger.info(
+            f"[{profile.name}] maker limit {limit_price} from {price_source} "
+            f"(bid={diag['best_bid']} ask={diag['best_ask']}) for {signal.symbol}"
         )
 
         resting = adapter.place_maker_entry_order(
@@ -1561,8 +1592,18 @@ class MonitoringService:
             source=f"SIGNAL_{signal.strength.name}",
         )
         if resting is None:
-            # Adapter can't rest a maker entry (unsupported / rejected) -> take.
-            self.logger.info(f"[{profile.name}] maker entry not resting; using taker for {signal.symbol}")
+            # place_maker_entry_order returned None: PostOnly rejected (would
+            # cross), placement failed, or adapter unsupported. See the
+            # [maker-entry] log line for the exchange message. -> take.
+            self.logger.warning(
+                f"[{profile.name}] maker entry did NOT rest for {signal.symbol} "
+                f"(limit {limit_price} from {price_source}); falling back to TAKER. "
+                f"Likely PostOnly-reject if limit crossed the book "
+                f"(bid={diag['best_bid']} ask={diag['best_ask']})."
+            )
+            diag.update(path="taker_fallback",
+                        reason="place_maker_entry_order returned None (PostOnly reject / "
+                               "placement failed / unsupported) — see [maker-entry] log line")
             return _taker(), "taker"
 
         # Resting order recorded; the position opens on fill in _monitor_orders.
@@ -1570,6 +1611,7 @@ class MonitoringService:
             f"[{profile.name}] 🅼 maker entry resting for {signal.symbol} @ {limit_price} "
             f"(will fill or fall back to taker on timeout)"
         )
+        diag.update(path="maker_resting", reason="ok")
         return None, "pending_maker"
 
     def _reconcile_maker_entry(self, adapter, profile, order) -> None:

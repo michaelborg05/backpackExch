@@ -426,6 +426,8 @@
                 <div class="field"><label>Trading Type</label><select id="f-trading_type"><option value="rules_live">Rules Live</option><option value="shadow">Shadow (AI paper)</option><option value="ai_live">AI Live</option></select></div>
                 <div class="field"><label>Strategy Type</label><select id="f-strategy_type"><option value="trend_following">Trend Following</option><option value="mean_reversion">Mean Reversion</option><option value="range_trading">Range Trading</option><option value="short_trend_following">Short Trend Following</option><option value="short_mean_reversion">Short Mean Reversion</option></select></div>
                 <div class="field"><label>Market Type</label><select id="f-market_type"><option value="SPOT">Spot</option><option value="PERP">Perpetual (PERP)</option></select></div>
+                <div class="field"><label>Entry Order Mode</label><select id="f-entry_order_mode"><option value="taker">Taker (market)</option><option value="maker_then_taker">Maker then Taker</option></select><div class="field-hint">Maker rests a PostOnly limit at best bid, falls back to taker on timeout</div></div>
+                <div class="field"><label>Maker Timeout (sec)</label><input id="f-maker_timeout_sec" type="number" step="15" min="15" placeholder="45"><div class="field-hint">How long the maker limit rests before taker fallback</div></div>
               </div>
             </div>
             <div class="form-section">
@@ -2241,6 +2243,8 @@ function fillSettings(p) {
   set('f-trading_type', p.trading_type);
   set('f-strategy_type', p.strategy_type);
   set('f-market_type', p.market_type);
+  set('f-entry_order_mode', p.entry_order_mode || 'taker');
+  set('f-maker_timeout_sec', p.maker_timeout_sec);
   set('f-take_profit_pct', p.take_profit_pct);
   set('f-stop_loss_pct', p.stop_loss_pct);
   set('f-trailing_stop_pct', p.trailing_stop_pct);
@@ -2436,6 +2440,8 @@ async function saveSettings() {
     trading_type:                   getStr('f-trading_type'),
     strategy_type:                  getStr('f-strategy_type'),
     market_type:                    getStr('f-market_type'),
+    entry_order_mode:               getStr('f-entry_order_mode'),
+    maker_timeout_sec:              getInt('f-maker_timeout_sec'),
     take_profit_pct:                getNum('f-take_profit_pct'),
     stop_loss_pct:                  getNum('f-stop_loss_pct'),
     trailing_stop_pct:              getNum('f-trailing_stop_pct'),
