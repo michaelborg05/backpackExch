@@ -1528,14 +1528,30 @@ class MonitoringService:
         if mode != "maker_then_taker":
             return _taker(), "taker"
 
-        # Maker-first path. Rest AT the signal price (never price-improve — the
-        # adverse-selection test showed improving forfeits the winners).
-        limit_price = self.price_cache.get_price(signal.symbol)
+        # Maker-first path. Rest at the live best bid/ask (fresh from the book)
+        # rather than the ~30s-stale ticker price — this avoids spurious PostOnly
+        # rejections and guarantees the order rests as a maker. Fall back to the
+        # cached price if depth is unavailable. Never price-improve beyond the
+        # touch (the adverse-selection test showed improving forfeits winners).
+        from services.maker_execution import best_maker_price
+        limit_price = None
+        try:
+            depth = adapter.get_depth(signal.symbol)
+            limit_price = best_maker_price(depth, is_long_signal)
+        except Exception as e:  # noqa: BLE001
+            self.logger.debug(f"[{profile.name}] depth fetch failed for {signal.symbol}: {e}")
+        price_source = "book"
+        if not limit_price or limit_price <= 0:
+            limit_price = self.price_cache.get_price(signal.symbol)
+            price_source = "ticker(fallback)"
         if not limit_price or limit_price <= 0:
             self.logger.warning(
                 f"[{profile.name}] maker mode but no price for {signal.symbol}; using taker"
             )
             return _taker(), "taker"
+        self.logger.debug(
+            f"[{profile.name}] maker limit price {limit_price} from {price_source} for {signal.symbol}"
+        )
 
         resting = adapter.place_maker_entry_order(
             symbol=signal.symbol,

@@ -20,17 +20,63 @@ Design constants baked into the helpers:
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 MAKER_DEFAULT_TIMEOUT_SEC = 45   # rest this long before cancelling + taking
 
 
 def maker_entry_limit_price(signal_price) -> Decimal:
-    """The price to rest a maker entry at: the signal price, unmodified.
+    """Fallback price to rest a maker entry at: the signal price, unmodified.
 
     Do NOT add an offset. Price-improvement forfeits the winners (measured).
+    Prefer best_maker_price() off live depth; this is the fallback when depth
+    is unavailable.
     """
     return Decimal(str(signal_price))
+
+
+def best_maker_price(depth: Any, is_long: bool) -> Optional[Decimal]:
+    """Best price to REST a maker order at, from a live order book.
+
+    A resting order is a maker only if it does not cross the book:
+      * long  (buy)  -> rest AT the best BID (highest bid). Joins the bid queue.
+      * short (sell) -> rest AT the best ASK (lowest ask).  Joins the ask queue.
+
+    Using the live book instead of a ~30s-stale last price both avoids spurious
+    PostOnly rejections and guarantees the order rests as a maker. Returns None
+    when the book is missing/empty/crossed so the caller can fall back to the
+    signal price.
+
+    `depth` is the raw exchange depth: {"bids": [[price, qty], ...],
+    "asks": [[price, qty], ...]} with prices as str or float, any sort order.
+    """
+    if not isinstance(depth, dict):
+        return None
+    bids = depth.get("bids") or []
+    asks = depth.get("asks") or []
+
+    def _prices(levels):
+        out = []
+        for lvl in levels:
+            try:
+                out.append(Decimal(str(lvl[0])))
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    bid_prices = _prices(bids)
+    ask_prices = _prices(asks)
+    best_bid = max(bid_prices) if bid_prices else None
+    best_ask = min(ask_prices) if ask_prices else None
+
+    # Sanity: a valid book has best_bid < best_ask. If crossed or one side is
+    # empty, don't trust it — let the caller fall back.
+    if best_bid is not None and best_ask is not None and best_bid >= best_ask:
+        return None
+
+    if is_long:
+        return best_bid
+    return best_ask
 
 
 def entry_order_expired(age_seconds: float, timeout_sec: int) -> bool:
