@@ -10,7 +10,8 @@ DATABASE_URL = config.database_url  # e.g., "postgresql://user:pass@host/dbname"
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,  # Verify connections before using
+    pool_pre_ping=True,   # Verify connections at checkout (catches dead idle conns)
+    pool_recycle=300,     # Retire connections after 5 min so Neon doesn't drop them mid-query
     pool_size=5,
     max_overflow=10
 )

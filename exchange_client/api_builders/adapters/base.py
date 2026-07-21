@@ -115,6 +115,21 @@ class ExchangeAdapter(ABC):
         Returns None when the order is still open.
         """
 
+    # Maker-first entry (optional; default = unsupported -> caller uses taker).
+    # Concrete, non-abstract so existing adapters (Bullet, Binance) need no change.
+    def place_maker_entry_order(self, symbol: str, quantity: str, limit_price: str,
+                                is_long: bool, source: str = "MAKER_ENTRY") -> Optional[Any]:
+        """Place a PostOnly limit entry recorded in the orders table.
+
+        Return None if this adapter does not support maker entries — the caller
+        (MonitoringService) then falls back to a taker order.
+        """
+        return None
+
+    def reconcile_entry_order(self, order: Any) -> dict:
+        """Reconcile a resting ENTRY order. Default: nothing to do."""
+        return {"status": "resting", "position_id": None}
+
     @abstractmethod
     def validate_balance_for_trade(self, sale_action: str, symbol: str) -> tuple:
         """Pre-flight balance check before placing an order.

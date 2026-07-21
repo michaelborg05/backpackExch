@@ -1027,6 +1027,155 @@ class TradingService:
 
         return order_response
 
+    # ==========================================================================
+    # MAKER-FIRST ENTRY (async, orders-table driven — mirrors the TP/SL pattern)
+    # See docs/maker_execution_plan.md. Unlike a market entry (ProcessMarketOrder,
+    # which fills and opens the position synchronously), a maker entry rests a
+    # PostOnly limit and is reconciled by MonitoringService._monitor_orders() on
+    # later cycles — non-blocking and crash-safe, exactly like the TP/SL orders.
+    # ==========================================================================
+
+    def place_maker_entry_order(self, symbol: str, quantity: str, limit_price: str,
+                                is_long: bool, source: str = "MAKER_ENTRY") -> Optional[OrderResponse]:
+        """Place a PostOnly limit entry and record it in the orders table.
+
+        The order rests with purpose="ENTRY" and position_id=None. The position
+        is NOT opened here — it opens when the order fills, in reconcile_entry_order.
+        Returns the resting OrderResponse, or None if placement failed/rejected
+        (caller falls back to taker).
+
+        LIVE: confirm the venue REJECTS a crossing PostOnly (returns error / not
+        a taker fill) so we never accidentally pay taker on this path.
+        """
+        # PostOnly LIMIT: price set -> create_buy/sell makes it a LIMIT; post_only
+        # forces maker-or-reject at the venue.
+        if is_long:
+            order = create_buy(symbol, quantity, limit_price, post_only=True)
+        else:
+            order = create_sell(symbol, quantity, limit_price, post_only=True)
+        order = self._validate_and_adjust_order(order)
+        order = self._validate_market_rules(order)
+
+        db = None
+        try:
+            try:
+                order_response = self.ExecuteOrder(order)
+            except ExchangeAPIError as e:
+                self.logger.info(f"[maker-entry] PostOnly rejected by exchange ({e.message}); caller will take")
+                return None
+            if order_response is None:
+                return None
+            db = SessionLocal()
+            saved = save_order(db, order_response, self.profile.name,
+                               position_id=None, purpose="ENTRY")
+            self.logger.info(
+                f"[maker-entry] resting {symbol} qty={quantity} @ {limit_price} "
+                f"(order id {saved.id}, exch {order_response.id})"
+            )
+            return order_response
+        except Exception as e:  # noqa: BLE001
+            self.logger.error(f"[maker-entry] failed to place/save entry order: {e}", exc_info=True)
+            return None
+        finally:
+            if db:
+                db.close()
+
+    def _open_position_from_entry_fill(self, db, saved_trade, side_upper: str):
+        """Open a position + rest its TP order from a filled ENTRY trade.
+
+        Deliberately mirrors the LONG/SHORT open block of ProcessMarketOrder
+        (the market-entry source of truth). Duplicated rather than refactored so
+        the proven live market path stays byte-for-byte unchanged. If that block
+        changes, mirror the change here.
+        """
+        direction = "LONG" if side_upper == "BID" else "SHORT"
+        tp_price, sl_price, trailing_sl_price = PositionCalculator.calculate_position_prices(
+            entry_price=saved_trade.price, side=saved_trade.side, profile=self.profile,
+        )
+        position = open_position(
+            db=db, trade=saved_trade, tp_price=tp_price, sl_price=sl_price,
+            trailing_sl_price=trailing_sl_price,
+            highest_price=saved_trade.price, lowest_price=saved_trade.price,
+            direction=direction,
+        )
+        self.logger.info(
+            f"[maker-entry] {direction} position opened id={position.id} "
+            f"TP={tp_price} SL={sl_price} trail={trailing_sl_price}"
+        )
+        if direction == "LONG":
+            import time
+            time.sleep(0.5)
+            self._refresh_balance_cache_after_trade(None)
+            tp_order = self.create_limit_order(
+                position_id=position.id, symbol=position.symbol, side="ASK",
+                quantity=str(position.quantity), price=str(position.tp_price),
+                purpose="TAKE_PROFIT",
+            )
+            if tp_order:
+                self.logger.info(f"[maker-entry] TP order created for position {position.id}")
+        return position
+
+    def reconcile_entry_order(self, order) -> dict:
+        """Reconcile a resting ENTRY order against the exchange.
+
+        Returns {"status": "resting"|"filled"|"gone", "position_id": int|None,
+                 "executed_qty": Decimal}. On a fill, opens the position (+TP).
+        Called each cycle from MonitoringService._monitor_orders for ENTRY orders.
+        """
+        from decimal import Decimal as _D
+        result = {"status": "resting", "position_id": None, "executed_qty": _D("0")}
+        db = None
+        try:
+            exch = self.get_single_order(order.symbol, order.exchange_order_id)
+            hist = None
+            if exch is None:
+                hist = self.get_order_history(symbol=order.symbol, order_id=order.exchange_order_id)
+            snap = exch or hist
+            from_history = exch is None and hist is not None
+            if snap is None:
+                # Order not found anywhere — treat as gone so the monitor stops tracking.
+                result["status"] = "gone"
+                return result
+
+            status = str(getattr(getattr(snap, "status", None), "value", getattr(snap, "status", "")))
+            # OrderResponse uses executed_quantity (snake); OrderHistoryResponse
+            # uses executedQuantity (camel). Handle both.
+            executed = _D(str(getattr(snap, "executedQuantity", None)
+                              or getattr(snap, "executed_quantity", None) or "0"))
+            result["executed_qty"] = executed
+
+            if status == OrderStatus.FILLED or (executed > 0 and status in ("Cancelled", "Expired")):
+                db = SessionLocal()
+                side_upper = order.side.upper()
+                # Book the fill as an opening trade using the save function that
+                # matches the snapshot type (mirrors process_limit_order's split).
+                if from_history:
+                    saved_trade = save_limit_trade(db, snap, self.profile.name, reason="MAKER_ENTRY")
+                else:
+                    saved_trade = save_trade(
+                        db, snap, self.profile.name, source="MAKER_ENTRY",
+                        signal_snapshot=None,
+                        direction="LONG" if side_upper == "BID" else "SHORT",
+                    )
+                position = self._open_position_from_entry_fill(db, saved_trade, side_upper)
+                update_order(db, self.profile.name, order.exchange_order_id, status=OrderStatus.FILLED)
+                result.update(status="filled", position_id=position.id)
+                return result
+
+            if status in ("Cancelled", "Expired", "Rejected"):
+                db = SessionLocal()
+                update_order(db, self.profile.name, order.exchange_order_id, status=status)
+                result["status"] = "gone"
+                return result
+
+            return result  # still resting
+        except Exception as e:  # noqa: BLE001
+            self.logger.error(f"[maker-entry] reconcile failed for {order.exchange_order_id}: {e}", exc_info=True)
+            return result
+        finally:
+            if db:
+                db.close()
+
     def validate_balance_for_trade(self,
         sale_action: str,
         symbol: str

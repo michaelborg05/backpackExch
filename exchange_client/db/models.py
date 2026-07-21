@@ -47,6 +47,13 @@ class TradingProfileDB(Base):
     risk_group = Column(String, nullable=True)
     min_signal_confidence = Column(Float, default=72.0)
     min_volume_ratio = Column(Float, default=1.0)
+
+    # ── Maker execution (see docs/maker_execution_plan.md) ────────────────────
+    # entry_order_mode: "taker" (default, unchanged behaviour) | "maker_then_taker"
+    #   maker_then_taker posts a PostOnly limit at the signal price, waits up to
+    #   maker_timeout_sec, then falls back to a taker order for any unfilled size.
+    entry_order_mode = Column(String, nullable=False, server_default=text("'taker'"), default="taker")
+    maker_timeout_sec = Column(Integer, nullable=True)  # None = use MAKER_DEFAULT_TIMEOUT_SEC
     
     # Filter Toggles
     use_market_regime_filter = Column(Boolean, default=True)
@@ -155,6 +162,10 @@ class Position(Base):
     lowest_price = Column(Numeric(20, 8), nullable=True)
 
     trailing_stop_armed = Column(Boolean, default=False, server_default=text("false"))
+
+    # Maker/taker attribution for the ENTRY fill (see docs/maker_execution_plan.md).
+    # "maker" | "taker" | "mixed" | NULL(legacy/unknown). Powers the fee-saving report.
+    fill_type = Column(String, nullable=True)
 
     # ── NEW: links this position back to the AI signal that triggered it ──────
     # Null for non-AI-AGENT profiles. Set in monitoring_service._execute_signal()

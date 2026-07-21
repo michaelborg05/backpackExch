@@ -127,6 +127,28 @@ class BackpackAdapter(ExchangeAdapter):
             self.logger.error(f"[Backpack] process_limit_order() failed: {e}")
             return None
 
+    def place_maker_entry_order(self, symbol: str, quantity: str, limit_price: str,
+                                is_long: bool, source: str = "MAKER_ENTRY") -> Optional[Any]:
+        from api_builders.trading_builder import TradingService
+        try:
+            trading = TradingService(self.profile)
+            return trading.place_maker_entry_order(
+                symbol=symbol, quantity=quantity, limit_price=limit_price,
+                is_long=is_long, source=source,
+            )
+        except Exception as e:
+            self.logger.error(f"[Backpack] place_maker_entry_order({symbol}) failed: {e}")
+            return None
+
+    def reconcile_entry_order(self, order: Any) -> dict:
+        from api_builders.trading_builder import TradingService
+        try:
+            trading = TradingService(self.profile)
+            return trading.reconcile_entry_order(order)
+        except Exception as e:
+            self.logger.error(f"[Backpack] reconcile_entry_order() failed: {e}")
+            return {"status": "resting", "position_id": None}
+
     def validate_balance_for_trade(self, sale_action: str, symbol: str) -> tuple:
         from api_builders.trading_builder import TradingService
         try:

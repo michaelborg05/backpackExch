@@ -166,13 +166,19 @@ class MonitoringService:
         """Internal monitoring loop - runs in background thread"""
         self.logger.debug("Monitoring loop starting...")
         self.logger.debug(f"Log level set to {self.config.log_level}")
-    
-        try:
-            while self.is_running:
+
+        # Track consecutive failed iterations so a transient error (e.g. a DB
+        # connection dropped mid-query by Neon serverless) is logged and retried
+        # on the next tick instead of killing the whole loop. Retry forever with
+        # backoff — the loop self-heals whether the outage is seconds or minutes.
+        consecutive_errors = 0
+
+        while self.is_running:
+            try:
                 self.call_count += 1
                 self.position_validation_counter += 1
                 self._atr_update_counter += 1
-                self._circuit_breaker_counter += 1 
+                self._circuit_breaker_counter += 1
                 self._dust_conversion_counter += 1
                 self._signal_check_counter += 1
                 self._trend_invalidation_counter += 1
@@ -183,10 +189,10 @@ class MonitoringService:
                 if self._retention_check_counter >= 20:
                     self._maybe_run_retention()
                     self._retention_check_counter = 0
-                    
+
                 # Monitor prices for all tickers
                 self._monitor_prices()
-                
+
                 # Get account balances
                 self._monitor_balances()
 
@@ -219,6 +225,17 @@ class MonitoringService:
                     self._check_signals()
                     self._signal_check_counter = 0
 
+                # A full iteration completed cleanly. If we were previously
+                # failing, announce the recovery before resetting the streak.
+                if consecutive_errors > 0:
+                    self._send_telegram(
+                        f"✅ <b>MONITORING RECOVERED</b>\n"
+                        f"Loop is healthy again after {consecutive_errors} "
+                        f"failed iteration(s).",
+                        MessagePriority.HIGH,
+                    )
+                consecutive_errors = 0
+
                 # Wait before next iteration
                 if self.is_running:  # Check again before sleeping
                     self.logger.info(
@@ -226,11 +243,37 @@ class MonitoringService:
                     )
                     time.sleep(self.config.monitor_delay_interval)
 
-        except KeyboardInterrupt:
-            self.logger.info("Monitoring loop interrupted by user")
-        except Exception as e:
-            self.logger.error(f"Unexpected error in monitoring loop: {e}", exc_info=True)
-            self.is_running = False
+            except KeyboardInterrupt:
+                self.logger.info("Monitoring loop interrupted by user")
+                self.is_running = False
+                break
+            except Exception as e:
+                # A single iteration failed (transient DB drop, network blip,
+                # exchange API error, ...). Log it, back off, and keep looping so
+                # the service recovers on its own rather than dying and requiring
+                # a manual restart. HealthAlertingService still pages while the
+                # loop is unhealthy, so persistent outages remain visible.
+                consecutive_errors += 1
+                self.logger.error(
+                    f"Error in monitoring iteration #{self.call_count} "
+                    f"(consecutive failures: {consecutive_errors}): {e}",
+                    exc_info=True,
+                )
+                # Notify on the first failure only — the loop self-heals, but a
+                # heads-up means a blip is visible even when it recovers next tick.
+                # Further consecutive failures are covered by HealthAlertingService.
+                if consecutive_errors == 1:
+                    self._send_telegram(
+                        f"⚠️ <b>MONITORING ITERATION FAILED</b>\n"
+                        f"Loop #{self.call_count} hit an error and will retry "
+                        f"after backoff (self-healing):\n"
+                        f"{type(e).__name__}: {e}",
+                        MessagePriority.HIGH,
+                    )
+                if self.is_running:
+                    time.sleep(self.config.monitor_delay_interval)
+
+        self.logger.info("Monitoring loop exited")
     
     def _monitor_prices(self):
         """Monitor prices for all tickers"""
@@ -324,8 +367,15 @@ class MonitoringService:
                 adapter = get_adapter(profile)
 
                 for order in open_orders:
+                    # ENTRY orders (maker-first entries) use the entry reconciler,
+                    # which OPENS a position on fill. TP/SL/trailing use the
+                    # existing close-side path below.
+                    if getattr(order, "purpose", None) == "ENTRY":
+                        self._reconcile_maker_entry(adapter, profile, order)
+                        continue
+
                     order_response = adapter.process_limit_order(order=order, position_id=order.position_id)
-                    
+
                     if order_response and order_response.status == OrderStatus.FILLED:
                         entry_price = order_response.entry_price if order_response.entry_price  else "N/A"
                         exit_price = order_response.exit_price if order_response.exit_price  else  "N/A"
@@ -1332,20 +1382,17 @@ class MonitoringService:
                     )
                     return
 
-            # Execute market order (direction-aware)
-            order_kwargs = dict(
-                symbol=signal.symbol,
-                quantity=str(quantity),
-                source=f"SIGNAL_{signal.strength.name}",
-                profile_name=profile.name,
-                signal_snapshot=signal.signal_snapshot,
+            # Execute the entry order (direction-aware). Maker-first vs taker is
+            # decided by profile.entry_order_mode; taker is the unchanged default.
+            result, fill_type = self._place_entry_order(
+                adapter, profile, signal, quantity, is_long_signal
             )
-            if is_long_signal:
-                result = adapter.order_buy(**order_kwargs)
-            else:
-                # SHORT: open via order_sell with no position_id (entry, not close)
-                result = adapter.order_sell(**order_kwargs)
-            
+
+            # Maker entry is resting: no position yet. It opens (or falls back to
+            # taker) later in _monitor_orders. Skip the immediate-fill handling.
+            if fill_type == "pending_maker":
+                return
+
             if result:
 
                 executed_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
@@ -1367,11 +1414,21 @@ class MonitoringService:
                         ai_log_id=ai_log_id,
                     )
 
+                # Record maker/taker attribution on the freshly-opened position,
+                # for the fee-saving report. Best-effort; never blocks the trade.
+                if fill_type:
+                    self._stamp_fill_type_on_position(
+                        symbol=signal.symbol,
+                        profile_name=profile.name,
+                        fill_type=fill_type,
+                    )
+
                 self._send_telegram(
                     f"🎯 Signal Trade Executed [{profile.display_name if profile.display_name else profile.name}]\n"
                     f"Symbol: {signal.symbol}\n"
                     f"Strength: {signal.strength.name} ({signal.confidence:.0f}%)\n"
                     f"Price: ${executed_price:.4f}\n"
+                    f"Fill: {(fill_type or 'taker').title()}\n"
                     f"Quantity: {result.executed_quantity}"
                     + (f" (BB scalar: {float(scalar):.2f}x)" if scalar != Decimal("1.0") else "") + "\n"
                     f"Reasons:\n" + "\n".join(f"  {r}" for r in signal.reasons),
@@ -1438,6 +1495,206 @@ class MonitoringService:
                 f"Failed to stamp ai_log_id={ai_log_id} onto position: {e}",
                 exc_info=True
             )
+
+    def _place_entry_order(self, adapter, profile, signal, quantity, is_long_signal):
+        """Place the entry order and return (result, fill_type).
+
+        Two paths, chosen by profile.entry_order_mode:
+          * "taker" (default) — byte-identical to the previous behaviour: a
+            market order that fills and opens the position synchronously.
+          * "maker_then_taker" — rests a PostOnly limit at the signal price and
+            RETURNS IMMEDIATELY. The position is opened later, when the order
+            fills, by _monitor_orders -> adapter.reconcile_entry_order (the same
+            async, orders-table, crash-safe pattern the TP/SL orders use). The
+            taker fallback happens in _monitor_orders on timeout.
+
+        fill_type values: "taker" (position opened now) | "pending_maker"
+        (resting; no position yet) | None (nothing placed).
+        See docs/maker_execution_plan.md.
+        """
+        common_kwargs = dict(
+            source=f"SIGNAL_{signal.strength.name}",
+            profile_name=profile.name,
+            signal_snapshot=signal.signal_snapshot,
+        )
+
+        def _taker():
+            if is_long_signal:
+                return adapter.order_buy(symbol=signal.symbol, quantity=str(quantity), **common_kwargs)
+            # SHORT: open via order_sell with no position_id (entry, not close)
+            return adapter.order_sell(symbol=signal.symbol, quantity=str(quantity), **common_kwargs)
+
+        mode = (getattr(profile, "entry_order_mode", None) or "taker").lower()
+        if mode != "maker_then_taker":
+            return _taker(), "taker"
+
+        # Maker-first path. Rest AT the signal price (never price-improve — the
+        # adverse-selection test showed improving forfeits the winners).
+        limit_price = self.price_cache.get_price(signal.symbol)
+        if not limit_price or limit_price <= 0:
+            self.logger.warning(
+                f"[{profile.name}] maker mode but no price for {signal.symbol}; using taker"
+            )
+            return _taker(), "taker"
+
+        resting = adapter.place_maker_entry_order(
+            symbol=signal.symbol,
+            quantity=str(quantity),
+            limit_price=str(limit_price),
+            is_long=is_long_signal,
+            source=f"SIGNAL_{signal.strength.name}",
+        )
+        if resting is None:
+            # Adapter can't rest a maker entry (unsupported / rejected) -> take.
+            self.logger.info(f"[{profile.name}] maker entry not resting; using taker for {signal.symbol}")
+            return _taker(), "taker"
+
+        # Resting order recorded; the position opens on fill in _monitor_orders.
+        self.logger.info(
+            f"[{profile.name}] 🅼 maker entry resting for {signal.symbol} @ {limit_price} "
+            f"(will fill or fall back to taker on timeout)"
+        )
+        return None, "pending_maker"
+
+    def _reconcile_maker_entry(self, adapter, profile, order) -> None:
+        """Drive one resting maker ENTRY order forward (called each cycle).
+
+        Fill  -> reconcile_entry_order opened the position; stamp fill_type,
+                 notify.
+        Timeout (still resting past maker_timeout_sec) -> cancel and fall back to
+                 a taker market order (which opens the position the usual way).
+        This is the async, crash-safe half of maker-first entry: state lives in
+        the orders table, so a restart resumes cleanly. See docs/maker_execution_plan.md.
+        """
+        from datetime import datetime, timezone
+        from services.maker_execution import MAKER_DEFAULT_TIMEOUT_SEC
+
+        try:
+            outcome = adapter.reconcile_entry_order(order)
+        except Exception as e:  # noqa: BLE001
+            self.logger.error(f"[{profile.name}] entry reconcile error for {order.symbol}: {e}")
+            return
+
+        status = (outcome or {}).get("status", "resting")
+
+        if status == "filled":
+            self._stamp_fill_type_on_position(
+                symbol=order.symbol, profile_name=profile.name, fill_type="maker"
+            )
+            self._send_telegram(
+                f"🅼 Maker entry filled [{profile.display_name or profile.name}]\n"
+                f"Symbol: {order.symbol}\n"
+                f"Fill: Maker\n"
+                f"Position opened from resting limit.",
+                MessagePriority.NORMAL,
+            )
+            return
+
+        if status == "gone":
+            return  # order already terminal; nothing to do
+
+        # Still resting — enforce the timeout, then taker-fall back.
+        timeout = int(getattr(profile, "maker_timeout_sec", None) or MAKER_DEFAULT_TIMEOUT_SEC)
+        created = getattr(order, "created_at", None)
+        if created is None:
+            return
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created).total_seconds()
+        if age < timeout:
+            return  # give it more time
+
+        # Timed out: cancel the resting maker order, then take.
+        self.logger.info(
+            f"[{profile.name}] maker entry {order.symbol} unfilled after {age:.0f}s "
+            f"(> {timeout}s); cancelling and falling back to taker"
+        )
+        try:
+            adapter.cancel_order(order.exchange_order_id, order.symbol)
+        except Exception as e:  # noqa: BLE001
+            self.logger.warning(f"[{profile.name}] cancel of {order.exchange_order_id} failed: {e}")
+        # LIVE: a fill could race the cancel — reconcile once more before taking,
+        # so we never open two positions for one signal.
+        try:
+            recheck = adapter.reconcile_entry_order(order)
+            if (recheck or {}).get("status") == "filled":
+                self._stamp_fill_type_on_position(order.symbol, profile.name, "maker")
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        # Mark the DB order cancelled, then place the taker fallback.
+        try:
+            from db.crud import update_order
+            with get_db_session() as db:
+                update_order(db, profile.name, order.exchange_order_id, status="Cancelled")
+        except Exception:  # noqa: BLE001
+            pass
+        is_long = str(order.side).upper() == "BID"
+        try:
+            if is_long:
+                res = adapter.order_buy(symbol=order.symbol, quantity=str(order.quantity),
+                                        source="MAKER_TIMEOUT_TAKER", profile_name=profile.name)
+            else:
+                res = adapter.order_sell(symbol=order.symbol, quantity=str(order.quantity),
+                                         source="MAKER_TIMEOUT_TAKER", profile_name=profile.name)
+            if res:
+                self._stamp_fill_type_on_position(order.symbol, profile.name, "taker")
+                self.logger.info(f"[{profile.name}] taker fallback filled for {order.symbol}")
+                try:
+                    executed_price = float(res.executed_quote_quantity) / float(res.executed_quantity)
+                    price_line = f"Price: ${executed_price:.4f}\n"
+                except Exception:  # noqa: BLE001
+                    price_line = ""
+                self._send_telegram(
+                    f"🎯 Maker→Taker entry filled [{profile.display_name or profile.name}]\n"
+                    f"Symbol: {order.symbol}\n"
+                    f"Fill: Taker (maker timed out after {age:.0f}s)\n"
+                    f"{price_line}"
+                    f"Quantity: {res.executed_quantity}",
+                    MessagePriority.NORMAL,
+                )
+            else:
+                self._send_telegram(
+                    f"⚠️ Maker→Taker fallback returned no fill [{profile.display_name or profile.name}]\n"
+                    f"Symbol: {order.symbol}\nEntry NOT opened — check the exchange.",
+                    MessagePriority.HIGH,
+                )
+        except Exception as e:  # noqa: BLE001
+            self.logger.error(f"[{profile.name}] taker fallback failed for {order.symbol}: {e}")
+            self._send_telegram(
+                f"❌ Maker→Taker fallback FAILED [{profile.display_name or profile.name}]\n"
+                f"Symbol: {order.symbol}\nError: {e}",
+                MessagePriority.HIGH,
+            )
+
+    def _stamp_fill_type_on_position(self, symbol: str, profile_name: str, fill_type: str) -> None:
+        """Write maker/taker attribution onto the freshly-opened OPEN position.
+
+        Mirrors _stamp_ai_log_id_on_position: newest OPEN position for this
+        symbol/profile that has no fill_type yet. Best-effort — a failure here
+        must never affect the trade.
+        """
+        try:
+            from db.models import Position
+            with get_db_session() as db:
+                position = (
+                    db.query(Position)
+                    .filter(
+                        Position.profile_name == profile_name,
+                        Position.symbol == symbol,
+                        Position.status == "OPEN",
+                        Position.fill_type.is_(None),
+                    )
+                    .order_by(Position.created_at.desc())
+                    .first()
+                )
+                if position:
+                    position.fill_type = fill_type
+                    db.commit()
+        except Exception as e:
+            # Swallow: attribution is reporting-only. Column may not exist yet if
+            # the maker migration has not been applied — that must not break trading.
+            self.logger.debug(f"[{profile_name}] fill_type stamp skipped: {e}")
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
