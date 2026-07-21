@@ -19,6 +19,11 @@ class TradingProfile(BaseModel):
     strategy_type: StrategyType = Field(StrategyType.TREND_FOLLOWING, description="Type of strategy (e.g., 'trend_following', 'mean_reversion')")
     market_type: str = Field("SPOT", description="Market type: 'SPOT' or 'PERP'")
 
+    # Maker execution (see docs/maker_execution_plan.md). Loaded into the domain
+    # object so the execution engine (_place_entry_order) can read it.
+    entry_order_mode: str = Field("taker", description="'taker' | 'maker_then_taker'")
+    maker_timeout_sec: Optional[int] = Field(None, description="Maker limit rest time before taker fallback")
+
     # Position management settings (as percentages)
     take_profit_pct: Optional[Decimal] = Field(None, description="Take profit percentage (e.g., 5.0 for 5%)")
     stop_loss_pct: Optional[Decimal] = Field(None, description="Stop loss percentage (e.g., 2.0 for 2%)")
@@ -225,6 +230,10 @@ class ProfileUpdateRequest(BaseModel):
     risk_group: Optional[str] = None
     max_portfolio_exposure_pct: Optional[float] = None
     leverage_multiplier: Optional[float] = None
+
+    # Maker execution (see docs/maker_execution_plan.md)
+    entry_order_mode: Optional[str] = None       # "taker" | "maker_then_taker"
+    maker_timeout_sec: Optional[int] = None
 
     signal_cooldown_minutes: Optional[int] = None
     sl_cooldown_minutes: Optional[int] = None
