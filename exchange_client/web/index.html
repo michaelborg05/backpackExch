@@ -102,12 +102,7 @@
     </div>
 
     <div class="panel" id="p-market">
-      <div class="g2">
-        <div class="card fi"><div class="ch"><span class="ct">Market Prices</span><span class="cb">LIVE</span></div><div id="mrows"><div style="color:var(--txd);text-align:center;padding:24px">Loading...</div></div></div>
-        <div class="card fi"><div class="ch"><span class="ct">ATR / Volatility</span></div>
-        <table class="dt"><thead><tr><th>Symbol</th><th>ATR</th><th>ATR %</th><th>Trend</th></tr></thead>
-        <tbody id="atb"><tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody></table></div>
-      </div>
+      <div class="card fi"><div class="ch"><span class="ct">Market Prices</span><span class="cb">LIVE</span></div><div id="mrows"><div style="color:var(--txd);text-align:center;padding:24px">Loading...</div></div></div>
       <div class="card fi" style="margin-top:16px">
         <div class="ch"><span class="ct">Monitored Symbols</span><span style="color:var(--txd);font-size:11px" id="ms-count"></span><button class="btn-new" style="margin-left:auto" onclick="openAddMonitoredSymbol()">+ Add Symbol</button></div>
         <table class="dt"><thead><tr><th>Symbol</th><th>Status</th><th>Added</th><th style="text-align:right">Actions</th></tr></thead>
@@ -357,8 +352,8 @@
               Active only
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd);cursor:pointer;user-select:none" title="Use regular expression for filtering">
-              <input type="checkbox" id="profile-filter-regex" onchange="renderSidebar()" style="cursor:pointer">
-              Regex
+              <input type="checkbox" id="profile-filter-signal-active" onchange="renderSidebar()" style="cursor:pointer">
+              Signal Active Only
             </label>
           </div>
         </div>
@@ -491,9 +486,8 @@
                 <div class="toggle-row"><input type="checkbox" id="f-use_market_regime_filter"><div><div class="toggle-label">Market Regime Filter</div><div class="toggle-sub">Block trades in choppy/high-risk conditions</div></div></div>
                 <div class="toggle-row"><input type="checkbox" id="f-use_trend_filter"><div><div class="toggle-label">Trend Filter (HTF)</div><div class="toggle-sub">Require bullish 60m trend before entry</div></div></div>
                 <div class="toggle-row"><input type="checkbox" id="f-use_entry_filter"><div><div class="toggle-label">Entry Filter (LTF)</div><div class="toggle-sub">Require entry indicators on signal TF</div></div></div>
-                <div class="toggle-row"><input type="checkbox" id="f-use_atr_filter"><div><div class="toggle-label">ATR Filter</div><div class="toggle-sub">Only trade when volatility meets threshold</div></div></div>
               </div>
-              <div style="margin-top:8px;font-size:10px;color:var(--txd)">Min indicators required — edit in the Indicators tab.</div>
+              <div style="margin-top:8px;font-size:10px;color:var(--txd)">Min indicators required, and the ATR volatility gate (add an <b>atr_regime</b> indicator) — edit in the Indicators tab.</div>
             </div>
             <div class="form-section">
               <div class="section-title">Position Exit Logic</div>
@@ -1404,9 +1398,6 @@ async function loadMkt(){
       return '<div class="mr"><div class="msy">'+r.symbol+'</div><div class="mpr">$'+(pr?fpr(pr):'—')+'</div><div class="mch '+(pos?'tg':'tr2')+'">'+chStr+'</div>'+rangeSvg+'</div>';
     }).join('');
   }else{c.innerHTML='<div style="color:var(--txd);text-align:center;padding:24px">No tickers \u2014 add via /monitoring/add-ticker</div>';}
-  const mon=await api('/monitoring/status');
-  const atb=document.getElementById('atb');
-  if(mon&&atb){const atrs=mon.atr_data??mon.atr??[];atb.innerHTML=Array.isArray(atrs)&&atrs.length?atrs.map(a=>'<tr><td class="ts">'+a.symbol+'</td><td class="tm">'+fpr(a.atr??0)+'</td><td class="tm">'+((a.atr_pct??0).toFixed(2))+'%</td><td class="tm '+((a.trend??'').toUpperCase()==='BULL'?'tg':'tr2')+'">'+a.trend+'</td></tr>').join(''):'<tr><td colspan="4" style="text-align:center;color:var(--txd);padding:24px">No ATR data</td></tr>';}
   loadMonitoredSymbols();
 }
 
@@ -2136,19 +2127,19 @@ function renderSidebar() {
   }
   const q = document.getElementById('profile-filter')?.value ?? '';
   const activeOnly = document.getElementById('profile-active-only')?.checked ?? true;
-  const useRegex = document.getElementById('profile-filter-regex')?.checked ?? false;
+  const signalActiveOnly = document.getElementById('profile-filter-signal-active')?.checked ?? true;
+  const useRegex = true;
   let regexObj = null;
   if (q && useRegex) {
     try { regexObj = new RegExp(q, 'i'); } catch (_) { regexObj = null; }
   }
   const visible = _allProfiles.filter(p => {
     if (activeOnly && !p.is_active) return false;
+    if (signalActiveOnly && p.enable_signal_generation === false) return false;
     if (q) {
       if (useRegex && regexObj) {
         if (!regexObj.test(p.display_name)) return false;
-      } else if (useRegex) {
-        return false; // invalid regex — show nothing
-      } else {
+      } else  {
         const ql = q.toLowerCase();
         if (!p.display_name.toLowerCase().includes(ql) && !p.name.toLowerCase().includes(ql)) return false;
       }
@@ -2270,7 +2261,6 @@ function fillSettings(p) {
   set('f-regime_timeframe', p.regime_timeframe ?? '');
   set('f-use_trend_filter', p.use_trend_filter);
   set('f-use_entry_filter', p.use_entry_filter);
-  set('f-use_atr_filter', p.use_atr_filter);
   set('f-min_indicators_required', p.min_indicators_required);
   set('f-min_entry_indicators_required', p.min_entry_indicators_required);
   set('f-use_trend_invalidation_exit', p.use_trend_invalidation_exit);
@@ -2466,7 +2456,6 @@ async function saveSettings() {
     regime_timeframe:               getStr('f-regime_timeframe') ?? '',  // '' clears the override
     use_trend_filter:               getBool('f-use_trend_filter'),
     use_entry_filter:               getBool('f-use_entry_filter'),
-    use_atr_filter:                 getBool('f-use_atr_filter'),
     min_indicators_required:        getInt('f-min_indicators_required'),
     min_entry_indicators_required:  getInt('f-min_entry_indicators_required'),
     min_exit_indicators_required:   getInt('f-min_exit_indicators_required'),
@@ -2982,6 +2971,7 @@ const IND_SCHEMAS = {
   ema_slope:                   [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01},{k:'max_slope_pct',t:'number',d:null}],
   bollinger_bands:             [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:null},{k:'lookback_candles',t:'number',d:null}],
   adx_regime:                  [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
+  atr_regime:                  [{k:'max_pct',t:'number',d:0.70},{k:'min_pct',t:'number',d:null},{k:'period',t:'number',d:14}],
   rsi_momentum:                [{k:'min_momentum',t:'number',d:null},{k:'max_momentum',t:'number',d:null},{k:'lookback_candles',t:'number',d:1}],
   rsi_threshold:               [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
   rsi_range:                   [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
