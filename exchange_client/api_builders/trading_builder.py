@@ -1061,10 +1061,19 @@ class TradingService:
             try:
                 order_response = self.ExecuteOrder(order)
             except ExchangeAPIError as e:
-                self.logger.info(f"[maker-entry] PostOnly rejected by exchange ({e.message}); caller will take")
+                self.logger.warning(
+                    f"[maker-entry] PostOnly REJECTED by exchange for {symbol} @ {limit_price}: "
+                    f"{getattr(e, 'message', e)} — falling back to taker. "
+                    f"(PostOnly rejects when the limit would cross the book.)"
+                )
                 return None
             if order_response is None:
+                self.logger.warning(f"[maker-entry] ExecuteOrder returned None for {symbol} @ {limit_price}")
                 return None
+            self.logger.info(
+                f"[maker-entry] exchange accepted resting order for {symbol} @ {limit_price} "
+                f"status={getattr(order_response, 'status', '?')} id={getattr(order_response, 'id', '?')}"
+            )
             db = SessionLocal()
             saved = save_order(db, order_response, self.profile.name,
                                position_id=None, purpose="ENTRY")

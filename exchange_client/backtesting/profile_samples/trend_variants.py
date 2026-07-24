@@ -206,11 +206,13 @@ def _bk5(htf_band=(56, 66), gap_max=1.5, adx_min=30, tp=1.2, sl=0.7,
         ],
         min_indicators_required=5,
         entry_indicators=[
-            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 55, "use_momentum": True, "early_threshold": 50, "hard_stop": True}},
+            {"type": "rsi_threshold",  "params": {"period": 14, "min_value": 55, 
+                                                  "use_momentum": True, "early_threshold": 50, "hard_stop": True}},
             {"type": "rsi_momentum",   "params": {"min_momentum": 1.0, "max_momentum": 8.0}},
-            {"type": "rsi_overbought", "params": {"min_value": 72, "hard_stop": True}},
-            {"type": "volume_spike",   "params": {"min_ratio": vol[0], "max_ratio": vol[1], **({"hard_stop": True} if vol_hard else {})}},
             {"type": "ema_slope",      "params": {"ema": 20, "direction": "rising", "min_slope_pct": 0.03, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"min_value": 72, "hard_stop": True}},
+            {"type": "volume_spike",   "params": {"min_ratio": vol[0], "max_ratio": vol[1], 
+                                                  **({"hard_stop": True} if vol_hard else {})}},
             {"type": "price_vs_ema",   "params": {"ema": 20, "min_gap_pct": -0.3, "max_gap_pct": 1.5}},
             {"type": "price_vs_vwap",  "params": {}},
             {"type": "ema_cross",      "params": {"hard_stop": True}},
@@ -411,51 +413,43 @@ TREND_VARIANTS = {
         "take_profit_pct": 50.0, "trailing_stop_pct": 0.25, "arm_trailing_stop_pct": 0.35,
     },
 
-    # ===== V8a — TP CEILING SWEEP on the trailing exit: RESOLVED =============
-    # Entries identical across the sweep (20T; 8 early / 12 late), so this is a
-    # clean read on the ceiling alone. 60d totals and how often the cap binds:
+    # ================= V9 — 2-YEAR ITERATION (Jul 20 2026) ===================
+    # First iteration with enough data to select on QUARTERLY CONSISTENCY rather
+    # than total PnL. 9 quarters, 2024-Q3..2026-Q3, spanning 2 UP, 2 CHOP and 4
+    # DOWN quarters. Baseline to beat:
     #
-    #   TP cap   EARLY     LATE     total    binds    best non-TP win
-    #   1.8%    +2.65%   +6.03%    +8.68%   2/20      +1.49%
-    #   2.0%    +2.85%   +6.23%    +9.08%   2/20      +1.49%
-    #   2.5%    +3.35%   +6.73%   +10.08%   2/20      +1.49%
-    #   3.0%    +3.24%   +7.23%   +10.47%   1/20      +2.39%
-    #   4.0%    +3.24%   +7.03%   +10.27%   0/20      +2.80%
-    #   none    +3.24%   +7.03%   +10.27%   0/20      +2.80%
+    #   tf_v8_band5468_trail   231T  7/9 quarters +  +16.3%  1.28x   ++-+-++++
+    #   tf_v8_trail_tp30       193T  6/9           +13.7%  1.31x   ++---++++
+    #   tf_v4_zone3855_tp9     244T  3/9            -5.8%  0.92x   ------+++  (prod)
+    #   tf_v3_rsizone_17t      303T  3/9            -3.9%  0.96x   --+---++-  (prod)
     #
-    # Plateaus at 2.5-3.0%. Below 2.5% the cap starts clipping runners (-1.8pp
-    # at 1.8%). Above 3.0% it never binds and adds nothing. 3.0% is marginally
-    # BETTER than uncapped (+10.47 vs +10.27) because it banked one runner
-    # before giveback. USE TP 3.0% — real safety ceiling, binds ~5% of the time,
-    # costs nothing. 2.5% if you want it to bind ~10%.
-    "tf_v8_trail_tp30":   _bk5(tp=3.0, sl=0.8, trail=0.25, arm=0.35),
-    "tf_v8_trail_tp25":   _bk5(tp=2.5, sl=0.8, trail=0.25, arm=0.35),
+    # Selection rule for this round: a change must hold or improve the 7/9
+    # quarterly hit rate. Total PnL and PF are tiebreakers only — every previous
+    # round of this project was led astray by optimising them directly.
+    "tf_v9_base":        _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35),
 
-    # ===== V8b — REPLACEMENT for tf_v3_rsizone_17t: band5468_trail ===========
-    # OVERLAP ANALYSIS (shared symbol+entry-day with tf_v4_zone3855_tp9, which
-    # is being kept) — this is why rsizone_17t should go:
-    #   tf_v3_rsizone_17t      14/17 entry-days shared  (82%)  <-- near-duplicate
-    #   tf_v7_raw_atrcap045     3/27 shared             (11%)
-    #   tf_v8_band5468_trail    0/18 shared             ( 0%)
-    #   tf_v8_adx25_trail       0/23 shared             ( 0%)
-    # rsizone_17t is 82% redundant with zone3855 AND fails the half-split
-    # (late -1.37%, 0.4x). It is paying twice for the same exposure.
-    #
-    # CANDIDATES (all positive in both halves):
-    #   tf_v8_band5468_trail  24T 83% +12.26% 5.58x  [E 9T +3.21 / L 15T +9.05]
-    #   tf_v8_adx25_trail     37T 68%  +9.00% 2.29x  [E 18T +1.37 / L 19T +7.63]
-    #   tf_v8_gap25_trail     28T 71%  +9.73% 2.66x  [E 11T +1.96 / L 17T +7.77]
-    #   tf_v7_raw_atrcap045   43T 65% +11.83% 2.01x  [E 15T +6.10 / L 28T +5.73]
-    #
-    # PICK: tf_v8_band5468_trail — best quality with zero overlap.
-    # NOTE the caveat: the same band (54-68) FAILED the half-split in V5 with a
-    # fixed TP (early -0.16%). The trailing exit is what flipped it (+3.21%).
-    # That is consistent with trailing helping most in the weak early window,
-    # but it means this config's early-half result is exit-dependent and rests
-    # on 9 trades. tf_v8_adx25_trail is the higher-sample alternative if you
-    # would rather have 37T at lower PF.
-    "tf_v8_band5468_trail":  _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35),
-    "tf_v8_adx25_trail":     _bk5(adx_min=25,        tp=3.0, sl=0.8, trail=0.25, arm=0.35),
-    "tf_v8_gap25_trail":     _bk5(gap_max=2.5,       tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+    # ---- band width around the 54-68 winner ----
+    "tf_v9_band5270":    _bk5(htf_band=(52, 70), tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+    "tf_v9_band5666":    _bk5(htf_band=(56, 66), tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+    "tf_v9_band5072":    _bk5(htf_band=(50, 72), tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+
+    # ---- trailing geometry: how much giveback, and how early it arms ----
+    "tf_v9_trail20":     _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.20, arm=0.35),
+    "tf_v9_trail35":     _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.35, arm=0.35),
+    "tf_v9_arm25":       _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.25),
+    "tf_v9_arm50":       _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.50),
+
+    # ---- stop width ----
+    "tf_v9_sl06":        _bk5(htf_band=(54, 68), tp=3.0, sl=0.6, trail=0.25, arm=0.35),
+    "tf_v9_sl10":        _bk5(htf_band=(54, 68), tp=3.0, sl=1.0, trail=0.25, arm=0.35),
+
+    # ---- the two gates that define the family ----
+    "tf_v9_adx25":       _bk5(htf_band=(54, 68), adx_min=25, tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+    "tf_v9_gap25":       _bk5(htf_band=(54, 68), gap_max=2.5, tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+    "tf_v9_gap10":       _bk5(htf_band=(54, 68), gap_max=1.0, tp=3.0, sl=0.8, trail=0.25, arm=0.35),
+
+    # ---- intraday vol ceiling, which held up on the 60d window ----
+    "tf_v9_atrcap":      _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35) | {"max_entry_atr_pct": 0.45},
+    "tf_v9_atrcap070":   _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35) | {"max_entry_atr_pct": 0.70},
 
 }

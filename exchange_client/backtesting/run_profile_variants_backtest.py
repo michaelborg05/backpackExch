@@ -11,7 +11,7 @@ from backtesting.period import DAYS_HELP, parse_period, print_period
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    default="30-60",  #Can now give a range. 0-30, 60-90
+parser.add_argument("--days",    default="0-90",  #Can now give a range. 0-30, 60-90
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")

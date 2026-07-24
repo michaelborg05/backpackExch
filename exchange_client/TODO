@@ -1,3 +1,10 @@
+LONG tail analysis from AI
+tf_v9_atrcap070 for magnitude (+11.3 net, ATR cap makes it robust on the wider/volatile token set), or
+tf_v9_trail20 for consistency (+10.1 net, 5/5 recent quarters).
+Maker entry widens the margin (+2.5 bps) but isn't load-bearing — the gross edge clears even taker. Your Phase-1 maker infra (services/maker_execution.py, flag-gated) is the right first use, but you can go live taker-only and still be positive.
+Start shadow / small-size live to confirm the tick-fill haircut matches modeled.
+
+
 TO DO
 # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
 # make dynamic stop losses as per chat gpt suggestions
