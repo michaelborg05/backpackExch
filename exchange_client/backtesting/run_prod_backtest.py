@@ -32,7 +32,7 @@ PROD_PROFILES = {c["display_name"]: c for c in _PROD_PROFILES_LIST}
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run prod profile backtests")
-parser.add_argument("--days",    default="90",
+parser.add_argument("--days",    default="30",
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")
@@ -44,10 +44,26 @@ parser.add_argument("--csv",     default="/home/michael/Downloads/prod_backtest.
                     help="Export all trades to CSV (requires --trades)")
 parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
+parser.add_argument("--data-source", default="shadow", choices=["log", "shadow"],
+                    help="Candle source. 'log' = trend_analysis_log (TradingView webhooks, "
+                         "~60-90d of history, missing new symbols). 'shadow' = trend_analysis_shadow "
+                         "(programmatically fetched candles, years of history). Default: shadow")
+parser.add_argument("--shadow-source", default=None,
+                    help="Which shadow feed to read, e.g. binance:USDT. Default: whichever "
+                         "source has the most rows for the symbol. Only used with "
+                         "--data-source shadow.")
+parser.add_argument("--tick-source", default="path1m", choices=["webhook", "path1m"],
+                    help="Where intra-candle price path comes from in tick mode. "
+                         "'webhook' = webhook_price_ticks (~2min sample, ~60d history, missing "
+                         "new symbols). 'path1m' = price_path_shadow 1m OHLC expanded to O/H/L/C "
+                         "(full history, consistent across all symbols). Default: path1m")
 args = parser.parse_args()
 
 start, end, period_label = parse_period(args.days)
 print_period(start, end, period_label)
+print(f"Candle source: {args.data_source}"
+      + (f" ({args.shadow_source})" if args.shadow_source else "")
+      + f"   |   tick source: {args.tick_source}")
 
 # ---------------------------------------------------------------------------
 # Profile selection
@@ -121,6 +137,9 @@ with get_db_session() as db:
                 price_source="ticks",
                 profile_caps=profile_caps,
                 sl_breakers=sl_breakers,
+                data_source=args.data_source,
+                shadow_source=args.shadow_source,
+                tick_source=args.tick_source,
             )
 
             for r in symbol_results:

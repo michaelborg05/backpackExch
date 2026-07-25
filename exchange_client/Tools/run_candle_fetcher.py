@@ -29,7 +29,7 @@ from db.utils import get_db_session
 from services.candle_fetcher import SYMBOL_MAP, fetch_and_store, fetch_and_store_paths
 
 DEFAULT_SYMBOLS = ["SOL_USDC", "ETH_USDC", "BTC_USDC", 
-                   "BNB_USDC", "XRP_USDC", "ZEC_USDC"]
+                   "BNB_USDC", "XRP_USDC", "ZEC_USDC","DOGE_USDC","SEI_USDC","SUI_USDC"]
 DEFAULT_TFS = ["15", "60","240"]
 
 
