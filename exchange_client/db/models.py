@@ -60,7 +60,8 @@ class TradingProfileDB(Base):
     regime_timeframe = Column(String, nullable=True)  # regime check TF override (e.g. "240"); None = strategy-based default
     use_trend_filter = Column(Boolean, default=True)
     use_entry_filter = Column(Boolean, default=True)
-    use_atr_filter = Column(Boolean, default=False)
+    # ATR volatility gating lives in the indicators JSON as an `atr_regime`
+    # indicator (hard_stop), not a profile column.
     enable_signal_generation = Column(Boolean, default=False, server_default=text("false"))
     
     # Logic Settings

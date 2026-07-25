@@ -49,11 +49,6 @@ class SettingsHelper:
     
     # Monitoring intervals
     @property
-    def atr_update_interval(self) -> int:
-        """How often to update ATR (in monitoring cycles)"""
-        return self._get_int('atr_update_interval', 5)
-    
-    @property
     def circuit_breaker_interval(self) -> int:
         """How often to check circuit breakers (in monitoring cycles)"""
         return self._get_int('circuit_breaker_interval', 2)

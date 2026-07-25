@@ -10,7 +10,6 @@ from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, Tra
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price, get_market_info, check_ticker
 from api_builders.factory import get_adapter
-from api_builders.atr_calculator import get_atr_calculator
 from api_builders.dust_conversion import get_dust_converter
 from cache.balance_cache import get_balance_cache
 from cache.price_cache import get_price_cache
@@ -81,9 +80,6 @@ class MonitoringService:
 
         self.market_info_cache = get_market_info_cache()
         self._markets_initialized = False
-
-        self.atr_calculator = get_atr_calculator()
-        self._atr_update_counter = 0
 
         self.circuit_breaker = get_circuit_breaker()
         self._circuit_breaker_counter = 0
@@ -177,7 +173,6 @@ class MonitoringService:
             try:
                 self.call_count += 1
                 self.position_validation_counter += 1
-                self._atr_update_counter += 1
                 self._circuit_breaker_counter += 1
                 self._dust_conversion_counter += 1
                 self._signal_check_counter += 1
@@ -205,11 +200,6 @@ class MonitoringService:
 
                 # Monitor open balances and check for SL/TP/Trailing SL
                 self._monitor_open_positions()
-
-                # Update ATR periodically (less frequently than prices)
-                if self._atr_update_counter >= self.settings.atr_update_interval:
-                    self._monitor_atr()
-                    self._atr_update_counter = 0
 
                 # Validate positions periodically (less frequently)
                 if self.position_validation_counter >= self.settings.position_validation_interval:
@@ -940,46 +930,6 @@ class MonitoringService:
                 f"❌ Unexpected error closing position for {position.symbol} [{profile.display_name if profile.display_name else profile.name}]: {str(e)}",
                 MessagePriority.HIGH
             )
-
-    def _monitor_atr(self):
-        """Monitor ATR for all tickers"""
-        try:
-            # Update ATR for all monitored tickers
-            # You can specify different timeframes for different profiles
-            profile_manager = get_profile_manager()
-
-            atr_timeframes = {
-                profile.atr_timeframe
-                for profile in profile_manager.get_all_profiles()
-                if profile.use_atr_filter
-            }
- 
-            for timeframe in atr_timeframes:
-                results = self.atr_calculator.update_multiple(
-                    symbols=self.tickers,
-                    timeframe=timeframe
-                )
-
-                for symbol, atr_data in results.items():
-                    if not atr_data:
-                        self.logger.warning(
-                            f"Failed to update ATR for {symbol} [{timeframe}]"
-                        )
-                        continue
-
-                    ratio = atr_data.get_ratio()
-                    volatile = atr_data.is_volatile()
-
-                    self.logger.info(
-                        f"ATR[{timeframe}] {symbol}: "
-                        f"{atr_data.atr:.6f} "
-                        f"(SMA: {atr_data.atr_sma:.6f}, "
-                        f"Ratio: {ratio:.2f}, "
-                        f"Volatile: {'YES' if volatile else 'NO'})"
-                    )
-                     
-        except Exception as e:
-            self.logger.error(f"Error monitoring ATR: {e}", exc_info=True)
 
     def _send_telegram(self, message: str, priority: MessagePriority = MessagePriority.NORMAL):
         """

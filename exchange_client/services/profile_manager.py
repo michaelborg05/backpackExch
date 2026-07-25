@@ -121,12 +121,6 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
     exit_indicator_groups = cfg.get("exit_indicator_groups", None)
     exit_timeframe = cfg.get("exit_timeframe", None)
 
-    # ── ATR filter ───────────────────────────────────────────────────────────
-    use_atr_filter = cfg.get("use_atr_filter", False)
-    atr_timeframe = cfg.get("atr_timeframe", "1m")
-    atr_threshold = cfg.get("atr_threshold", 1.05)
-    atr_filter_mode = cfg.get("atr_filter_mode", "require_high")
-
     profile = TradingProfile(
         id=profile_id,
         name=name,
@@ -169,11 +163,6 @@ def _build_profile(name: str, cfg: dict, api_key: str, secret: str) -> TradingPr
         min_exit_indicators_required=min_exit_indicators_required,
         exit_indicator_groups=exit_indicator_groups,
         exit_timeframe=exit_timeframe,
-        # ATR filter
-        use_atr_filter=use_atr_filter,
-        atr_timeframe=atr_timeframe,
-        atr_threshold=atr_threshold,
-        atr_filter_mode=atr_filter_mode,
         # Signal generation
         enable_signal_generation=cfg.get("enable_signal_generation", False),
         signal_cooldown_minutes=cfg.get("signal_cooldown_minutes", 15),
@@ -243,10 +232,6 @@ def _log_profile_filters(
     entry_timeframe: str,
     entry_indicators,
     min_entry_indicators_required: int,
-    use_atr_filter: bool,
-    atr_timeframe: str,
-    atr_threshold: float,
-    atr_filter_mode: str,
 ):
     filter_info = []
 
@@ -261,11 +246,6 @@ def _log_profile_filters(
         filter_info.append(
             f"Entry: {entry_timeframe} ({min_entry_indicators_required}/{len(entry_indicators)} required: {', '.join(types)})"
         )
-
-    if use_atr_filter:
-        atr_desc = f"ATR: {atr_timeframe} (threshold: {atr_threshold}, mode: {atr_filter_mode}"
-        atr_desc += ")"
-        filter_info.append(atr_desc)
 
     if filter_info:
         print(f"  └─ {name}: {' | '.join(filter_info)}")
@@ -379,8 +359,6 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             "min_exit_indicators_required": row.min_exit_indicators_required or 2,
             "exit_indicator_groups": row.exit_indicator_groups or None,
             "exit_timeframe": row.exit_timeframe or None,
-            # ATR filter
-            "use_atr_filter": bool(row.use_atr_filter),
             # Signal generation
             "enable_signal_generation": bool(row.enable_signal_generation),
             "signal_cooldown_minutes": row.signal_cooldown_minutes or 15,
@@ -440,10 +418,6 @@ def load_profiles_from_db(db_session) -> ProfileManager:
             cfg["entry_timeframe"],
             entry_indicators or [],
             cfg["min_entry_indicators_required"],
-            cfg["use_atr_filter"],
-            getattr(row, "atr_timeframe", "1m"),
-            getattr(row, "atr_threshold", 1.05),
-            getattr(row, "atr_filter_mode", "require_high"),
         )
 
     print(f"\nLoaded {len(profiles)} active profiles from DB")
@@ -496,10 +470,6 @@ def load_profiles(path: Path | None = None) -> ProfileManager:
             p.entry_timeframe,
             p.entry_indicators or [],
             p.min_entry_indicators_required,
-            p.use_atr_filter,
-            p.atr_timeframe,
-            p.atr_threshold,
-            p.atr_filter_mode,
         )
 
     print(f"\nLoaded {len(profiles)} enabled profiles from YAML")

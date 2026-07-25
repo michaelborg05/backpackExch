@@ -22,7 +22,6 @@ import time
 from utils.constants import StrategyType, MarketRegime
 from utils.logging import log_manager
 from cache.trend_cache import get_trend_cache
-from cache.atr_cache import get_atr_cache
 
 
 class RegimeFilter:
@@ -36,8 +35,7 @@ class RegimeFilter:
     def __init__(self):
         self.logger = log_manager.get_logger("RegimeFilter")
         self.trend_cache = get_trend_cache()
-        self.atr_cache = get_atr_cache()
-        
+
         # ------------------------------------------------------------------
         # RISK DETECTION THRESHOLDS (permissive - only catch real danger)
         # ------------------------------------------------------------------
@@ -50,8 +48,7 @@ class RegimeFilter:
         # 2. EXTREME CONDITIONS  
         self.rsi_panic = 30                 # Panic selling
         self.rsi_euphoria = 78              # Euphoric buying
-        self.atr_spike = 1.8                # Volatility explosion
-        
+
         # 3. VOLUME QUALITY
         self.min_volume_ratio = 0.4         # Below 0.4x = dead market
         self.min_volume_ratio_confirm = 0.5  # NEW: Stricter for 15m
@@ -188,14 +185,7 @@ class RegimeFilter:
             if rsi > self.rsi_euphoria:
                 return True, f"Euphoria zone - RSI {rsi:.0f} indicates exhaustion"
 
-        # 3. VOLATILITY SPIKE - Risk expanded beyond normal (same for all strategies)
-        atr_data = self.atr_cache.get(symbol, primary_timeframe)
-        if atr_data is not None:
-            atr_ratio = atr_data.get_ratio()
-            if atr_ratio > self.atr_spike:
-                return True, f"Volatility spike - ATR {atr_ratio:.2f}x normal (stops unreliable)"
-
-        # 4. WHIPSAW / REVERSAL / SUSTAINED-TREND DETECTION
+        # 3. WHIPSAW / REVERSAL / SUSTAINED-TREND DETECTION
         primary_diff_pct = ((primary_trend.ema20 - primary_trend.ema50) / primary_trend.ema50) * 100
 
         if strategy_type == StrategyType.SHORT_TREND_FOLLOWING:

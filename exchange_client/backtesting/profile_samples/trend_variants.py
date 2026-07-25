@@ -221,6 +221,29 @@ def _bk5(htf_band=(56, 66), gap_max=1.5, adx_min=30, tp=1.2, sl=0.7,
     )
 
 
+def _with_atr_ind(cfg, max_pct=None, min_pct=None, period=14):
+    """Append an atr_regime hard-stop indicator to entry_indicators and bump
+    min_entry_indicators_required by 1.
+
+    This reproduces a profile-level max/min_entry_atr_pct gate as an indicator:
+    because the counter (trend_cache._validate_timeframe_indicators) tallies a
+    passing hard_stop like any other indicator and short-circuits on a failing
+    one, +1 indicator and +1 required cancel out when ATR is in band, and the
+    signal hard-fails when it is not — identical outcome, configured per-TF.
+    """
+    cfg = {**cfg}
+    params = {"hard_stop": True, "period": period}
+    if max_pct is not None:
+        params["max_pct"] = max_pct
+    if min_pct is not None:
+        params["min_pct"] = min_pct
+    cfg["entry_indicators"] = list(cfg.get("entry_indicators", [])) + [
+        {"type": "atr_regime", "params": params}
+    ]
+    cfg["min_entry_indicators_required"] = cfg.get("min_entry_indicators_required", 0) + 1
+    return cfg
+
+
 TREND_VARIANTS = {
 
     # ======================= CONTROLS (prod + best legacy) ====================
@@ -451,5 +474,13 @@ TREND_VARIANTS = {
     # ---- intraday vol ceiling, which held up on the 60d window ----
     "tf_v9_atrcap":      _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35) | {"max_entry_atr_pct": 0.45},
     "tf_v9_atrcap070":   _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35) | {"max_entry_atr_pct": 0.70},
+
+    # ---- indicator form of the vol ceiling (parity check vs the profile-param
+    #      version above): atr_regime hard_stop in entry_indicators + min_entry
+    #      bumped by 1, so a passing ATR is net-neutral and a failing ATR hard-
+    #      stops the signal. Same outcome as max_entry_atr_pct, but configured as
+    #      an indicator (per-timeframe, declutters profile settings).
+    "tf_v9_atrcap070_ind": _with_atr_ind(
+        _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35), max_pct=0.70),
 
 }

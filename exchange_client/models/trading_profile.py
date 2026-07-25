@@ -57,11 +57,8 @@ class TradingProfile(BaseModel):
     exit_indicator_groups: Optional[Dict[str, Any]] = None
     exit_timeframe: Optional[str] = None  # None = fall back to entry_timeframe
 
-    # ATR Filters
-    use_atr_filter: bool = False
-    atr_timeframe: str = "15m"
-    atr_threshold: float = 1.05
-    atr_filter_mode: str = "require_high"
+    # ATR volatility gating is configured as an `atr_regime` indicator inside
+    # trend_indicators / entry_indicators (hard_stop), not a profile-level param.
 
     enable_signal_generation: bool = False          # Enable automated signal generation
     signal_cooldown_minutes: Optional[int] = 15     # Scan throttle: min minutes between signal evaluations for same symbol
@@ -126,21 +123,8 @@ class TradingProfile(BaseModel):
             f"Entry filter: ENABLED on {self.entry_timeframe} - "
             f"Require {self.min_entry_indicators_required}/{len(self.entry_indicators)} "
             f"({', '.join(indicator_names)})"
-        )    
-
-    def get_atr_config_summary(self) -> str:
-        """Get human-readable ATR config summary"""
-        if not self.use_atr_filter:
-            return "ATR filter: disabled"
-        
-        summary = (
-            f"ATR filter: {self.atr_timeframe}, "
-            f"threshold={self.atr_threshold}, "
-            f"mode={self.atr_filter_mode}"
         )
-                
-        return summary
-    
+
  
 class ProfileCreateRequest(BaseModel):
     name: str
@@ -183,7 +167,6 @@ class ProfileCreateRequest(BaseModel):
     regime_timeframe: Optional[str] = None
     use_trend_filter: Optional[bool] = False
     use_entry_filter: Optional[bool] = False
-    use_atr_filter: Optional[bool] = False
 
     # Indicator thresholds
     min_indicators_required: Optional[int] = 2
@@ -248,7 +231,6 @@ class ProfileUpdateRequest(BaseModel):
     regime_timeframe: Optional[str] = None  # "" clears the override (back to strategy default)
     use_trend_filter: Optional[bool] = None
     use_entry_filter: Optional[bool] = None
-    use_atr_filter: Optional[bool] = None
     enable_signal_generation: Optional[bool] = None
 
     min_indicators_required: Optional[int] = None

@@ -522,7 +522,6 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                 existing.use_market_regime_filter = bool(cfg.get("use_market_regime_filter", False))
                 existing.use_trend_filter = bool(cfg.get("use_trend_filter", False))
                 existing.use_entry_filter = bool(cfg.get("use_entry_filter", False))
-                existing.use_atr_filter = bool(cfg.get("use_atr_filter", False))
                 existing.trend_timeframe = str(cfg.get("trend_timeframe","60"))
                 existing.entry_timeframe = str(cfg.get("entry_timeframe","15"))
                 existing.min_indicators_required = int(cfg.get("min_indicators_required",0))
@@ -563,7 +562,6 @@ def migrate_yaml_profiles(dry_run: bool = False) -> None:
                     use_market_regime_filter=bool(cfg.get("use_market_regime_filter", False)),
                     use_trend_filter=bool(cfg.get("use_trend_filter", False)),
                     use_entry_filter=bool(cfg.get("use_entry_filter", False)),
-                    use_atr_filter=bool(cfg.get("use_atr_filter", False)),
 
                     # Timeframes & thresholds
                     trend_timeframe=str(cfg.get("trend_timeframe", "60")),
@@ -929,7 +927,6 @@ def add_new_profile():
             use_market_regime_filter=True,
             use_trend_filter=True,
             use_entry_filter=True,
-            use_atr_filter=False,
 
             # Timeframes & thresholds
             trend_timeframe=60,
@@ -1002,7 +999,6 @@ def populate_default_settings():
             # Initialize default settings
             default_settings = {
                 # Monitoring intervals (in cycles)
-                'atr_update_interval': '5',  # Update ATR every 5 cycles
                 'circuit_breaker_interval': '2',  # Check circuit breakers every 2 cycles
                 'dust_conversion_interval': '2880',  # Convert dust every 2880 cycles (24h if cycle is 30s)
                 'signal_check_interval': '10',  # Check signals every 10 cycles (5 min if cycle is 30s)

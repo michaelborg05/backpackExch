@@ -154,9 +154,10 @@ class ReplayTrendCache:
                             'low':   pc.prev_low,
                             'close': pc.prev_close,
                         })
-                        # Keep last 6 candles — no pattern needs more than 3
-                        if len(self._candle_history[key]) > 6:
-                            self._candle_history[key] = self._candle_history[key][-6:]
+                        # Keep last 20 candles — reversal patterns need ≤3, the
+                        # atr_regime indicator needs period+1 (15) closed bars.
+                        if len(self._candle_history[key]) > 20:
+                            self._candle_history[key] = self._candle_history[key][-20:]
             
 
 
@@ -168,6 +169,18 @@ class ReplayTrendCache:
     def get(self, symbol: str, timeframe: str):
         """Return cached TrendData — no staleness check in replay mode."""
         return self._cache.get(f"{symbol}_{timeframe}")
+
+    def get_atr_pct(self, symbol: str, timeframe: str, period: int = 14):
+        """ATR14 (% of close) from closed-candle history — same as prod TrendCache."""
+        from services.indicators import atr_pct as _atr_pct
+        candles = self._candle_history.get(f"{symbol}_{timeframe}", [])
+        if len(candles) < period + 1:
+            return None
+        series = _atr_pct([c['high'] for c in candles],
+                          [c['low'] for c in candles],
+                          [c['close'] for c in candles], period=period)
+        last = series[-1] if series else None
+        return float(last) if last is not None else None
 
     def is_bullish(
         self,
@@ -1317,6 +1330,30 @@ class ReplayTrendCache:
                         f"{arrow}{rsi_mom:+.2f} [{rsi_dir}] "
                         f"(need {bound_str} over {lookback_candles} candle{'s' if lookback_candles != 1 else ''})"
                     )
+
+            elif indicator_type == "atr_regime":
+                # ATR14 (% of close) volatility gate on this timeframe. Skip when
+                # ATR is above max_pct or below min_pct. Insufficient candle
+                # history => pass (matches the old max_entry_atr_pct skip, which
+                # only filtered once ATR was available). Use hard_stop:true so a
+                # fail kills the whole signal and a pass adds one to the count
+                # (offset by bumping min_*_indicators_required by one).
+                max_pct = params.get("max_pct")
+                min_pct = params.get("min_pct")
+                period  = int(params.get("period", 14))
+                atr_v = self.get_atr_pct(symbol, timeframe, period)
+                if atr_v is None:
+                    is_bull = True
+                    msg = f"ATR regime: ✓ (n/a — <{period + 1} candles)"
+                else:
+                    below_max = (max_pct is None) or (atr_v <= float(max_pct))
+                    above_min = (min_pct is None) or (atr_v >= float(min_pct))
+                    is_bull = below_max and above_min
+                    if is_bull:
+                        msg = f"ATR regime: ✓ (ATR={atr_v:.2f}% in [{min_pct},{max_pct}])"
+                    else:
+                        reason = f"ATR={atr_v:.2f}% > {max_pct}" if not below_max else f"ATR={atr_v:.2f}% < {min_pct}"
+                        msg = f"ATR regime: ✗ ({reason})"
 
             else:
                 is_bull = False

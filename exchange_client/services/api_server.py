@@ -20,7 +20,6 @@ from api_builders.account_builder import get_balances
 from api_builders.market_builder import get_price
 from api_builders.factory import get_adapter
 from cache.trend_cache import get_trend_cache
-from cache.atr_cache import get_atr_cache
 from cache.market_info_cache import get_market_info_cache
 from cache.portfolio_cache import get_portfolio_cache
 from cache.balance_cache import get_balance_cache
@@ -630,8 +629,7 @@ async def tradingview_webhook(
         
         # Get caches and services
         trend_cache = get_trend_cache()
-        atr_cache = get_atr_cache()
-        circuit_breaker = get_circuit_breaker() 
+        circuit_breaker = get_circuit_breaker()
         
         # Import position size calculator
         from utils.position_calculator import get_position_size_calculator
@@ -721,53 +719,11 @@ async def tradingview_webhook(
                 
                 # 4. BUY ORDER SPECIFIC CHECKS
                 if alert.action.lower() == "buy":
-                    # 5. Check ATR filter if enabled
-                    if profile.use_atr_filter:
-                        apiserver_logger.debug(
-                            f"[{profile_name}] Checking ATR filter: "
-                            f"timeframe={profile.atr_timeframe}, "
-                            f"threshold={profile.atr_threshold}"
-                        )
-                        
-                        is_volatile, reason = atr_cache.is_volatile(
-                            symbol=alert.symbol,
-                            timeframe=profile.atr_timeframe,
-                            threshold=profile.atr_threshold
-                        )
-                        
-                        if profile.atr_filter_mode == "require_high" and not is_volatile:
-                            apiserver_logger.info(
-                                f"[{profile_name}] ⊘ Skipping BUY - ATR too low: {reason}"
-                            )
-                            results.append({
-                                "profile": profile_name,
-                                "success": False,
-                                "error": f"ATR filter: {reason}",
-                                "error_type": "atr_filter"
-                            })
-                            errors.append(f"[{profile_name}] ATR filter blocked trade")
-                            continue
-                        
-                        elif profile.atr_filter_mode == "require_low" and is_volatile:
-                            apiserver_logger.info(
-                                f"[{profile_name}] ⊘ Skipping BUY - ATR too high: {reason}"
-                            )
-                            results.append({
-                                "profile": profile_name,
-                                "success": False,
-                                "error": f"ATR filter: {reason}",
-                                "error_type": "atr_filter"
-                            })
-                            errors.append(f"[{profile_name}] ATR filter blocked trade")
-                            continue
-                        
-                        else:
-                            reasons.append(f"ATR filter: {reason}")
-                            apiserver_logger.info(
-                                f"[{profile_name}] ✓ ATR check passed: {reason}"
-                            )
-                    
-                    # 6. Check trend filter if enabled
+                    # ATR volatility gating (if configured) is an `atr_regime`
+                    # indicator inside trend_indicators / entry_indicators, so it
+                    # is enforced by the is_bullish checks below.
+
+                    # 5. Check trend filter if enabled
                     if profile.use_trend_filter:
                         apiserver_logger.debug(
                             f"[{profile_name}] Checking trend filter: {profile.get_trend_config_summary()}"
@@ -1308,34 +1264,21 @@ async def get_trend_status(symbol: str, timeframe: str):
 
 @app.get("/atr/{symbol}/{timeframe}")
 async def get_atr_status(symbol: str, timeframe: str):
-    """Get current ATR status for a symbol"""
-    atr_cache = get_atr_cache()
-    atr_data = atr_cache.get(symbol, timeframe)
-    
-    if not atr_data:
+    """Current entry-TF ATR14 (% of close) from cached candle history."""
+    trend_cache = get_trend_cache()
+    atr_pct = trend_cache.get_atr_pct(symbol, timeframe)
+
+    if atr_pct is None:
         raise HTTPException(
             status_code=404,
-            detail=f"No ATR data for {symbol} ({timeframe})"
+            detail=f"ATR not available for {symbol} ({timeframe}) — need ≥15 closed candles cached"
         )
-    
-    is_volatile, reason = atr_cache.is_volatile(symbol, timeframe)
-    
+
     return {
         "symbol": symbol,
         "timeframe": timeframe,
-        "atr": str(atr_data.atr),
-        "atr_sma": str(atr_data.atr_sma),
-        "ratio": str(atr_data.get_ratio()),
-        "is_volatile": is_volatile,
-        "reason": reason,
-        "timestamp": atr_data.timestamp.isoformat()
+        "atr_pct": round(atr_pct, 4),
     }
-
-@app.get("/atr/all")
-async def get_all_atr():
-    """Get all ATR data from cache"""
-    atr_cache = get_atr_cache()
-    return atr_cache.get_cache_info()
 
 @app.get("/circuit-breaker/status")
 async def get_circuit_breaker_status():
@@ -1489,7 +1432,6 @@ async def get_signal_status(profile_name: str):
         "trend_timeframe": signal_gen.trend_timeframe,
         "min_volume_ratio": signal_gen.min_volume_ratio,
         "min_confidence": signal_gen.min_confidence,
-        "atr_filter_enabled": profile.use_atr_filter,
         "trend_filter_enabled": profile.use_trend_filter
     }
 
@@ -3268,7 +3210,6 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
             regime_timeframe=body.regime_timeframe or None,
             use_trend_filter=body.use_trend_filter,
             use_entry_filter=body.use_entry_filter,
-            use_atr_filter=body.use_atr_filter,
             min_indicators_required=body.min_indicators_required,
             min_entry_indicators_required=body.min_entry_indicators_required,
             min_exit_indicators_required=body.min_exit_indicators_required,
@@ -3355,7 +3296,7 @@ async def update_profile_endpoint(profile_name: str, body: ProfileUpdateRequest)
         "min_signal_confidence", "min_volume_ratio",
         "trend_timeframe", "entry_timeframe",
         "use_market_regime_filter", "regime_timeframe", "use_trend_filter",
-        "use_entry_filter", "use_atr_filter", "enable_signal_generation",
+        "use_entry_filter", "enable_signal_generation",
         "min_indicators_required", "min_entry_indicators_required", "min_exit_indicators_required",
         "trend_indicator_groups", "entry_indicator_groups", "exit_indicator_groups",
         "use_trend_invalidation_exit", "trend_invalidation_indicators",
@@ -3743,7 +3684,6 @@ def _render_profile_python_dict(p, indicators, hours, symbols, cb=None) -> str:
         _field("min_volume_ratio", float(p.min_volume_ratio) if p.min_volume_ratio else 1.0),
         _field("use_trend_filter", bool(p.use_trend_filter)),
         _field("use_entry_filter", bool(p.use_entry_filter)),
-        _field("use_atr_filter", bool(p.use_atr_filter)),
         _field("max_position_hours", p.max_position_hours or 12),
         _field("use_market_regime_filter", bool(p.use_market_regime_filter)),
         _field("regime_timeframe", p.regime_timeframe or None),
@@ -3973,7 +3913,6 @@ def _serialize_profile(p, cb=None) -> dict:
         "regime_timeframe":            p.regime_timeframe or None,
         "use_trend_filter":            bool(p.use_trend_filter),
         "use_entry_filter":            bool(p.use_entry_filter),
-        "use_atr_filter":              bool(p.use_atr_filter),
         "enable_signal_generation":    bool(p.enable_signal_generation) if p.enable_signal_generation is not None else False,
 
         # Indicator thresholds

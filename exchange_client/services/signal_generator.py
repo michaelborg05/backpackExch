@@ -6,7 +6,6 @@ import time
 from utils.logging import log_manager
 from utils.constants import TradeSide, StrategyType, TradingType, TradeReason
 from cache.trend_cache import get_trend_cache
-from cache.atr_cache import get_atr_cache
 from cache.price_cache import get_price_cache
 from models.trading_profile import TradingProfile
 from models.trading_signal import TradingSignal, SignalStrength
@@ -42,7 +41,6 @@ class SignalGenerator:
         self._adapter = get_adapter(profile)
         self.logger = log_manager.get_logger(f"SignalGenerator[{profile.display_name}]")
         self.trend_cache = get_trend_cache()
-        self.atr_cache = get_atr_cache()
         self.price_cache = get_price_cache()
         self.regime_filter = get_regime_filter()
 
@@ -270,13 +268,9 @@ class SignalGenerator:
             reasons.append(f"⚠️  Volume: {volume_reason}")
             confidence_score += self.volume_weight * 0.3
         
-        # 7. ATR/VOLATILITY CHECK (optional)
-        if self.profile.use_atr_filter:
-            atr_check, atr_reason = self._check_atr(symbol)
-            indicators['atr'] = atr_check
-            if not atr_check['is_valid']:
-                self.logger.debug(f"{symbol}: ❌ ATR check failed - {atr_reason}")
-            reasons.append(f"✅ ATR: {atr_reason}")
+        # NOTE: ATR volatility gating is configured as an `atr_regime` entry/trend
+        # indicator (hard_stop) — evaluated inside the trend/entry filter above —
+        # not as a separate profile-level check.
 
         # 8. RSI SAFETY CHECK (direction-aware)
         if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
@@ -457,6 +451,8 @@ class SignalGenerator:
         if self.use_entry_filter:
             try:
                 entry_check, entry_reason = self._check_entry_filter(symbol, self.entry_timeframe)
+                # ATR gating (if configured) is an atr_regime hard_stop indicator
+                # inside the entry filter, so entry_check already reflects it.
                 rules_would_enter = entry_check
                 indicators['entry_filter'] = entry_check
 
@@ -514,13 +510,6 @@ class SignalGenerator:
                 else:
                     reasons.append(f"⚠️  Volume: {volume_reason}")
                     confidence_score += self.volume_weight * 0.3
-
-                if self.profile.use_atr_filter:
-                    atr_check, atr_reason = self._check_atr(symbol)
-                    indicators['atr'] = atr_check
-                    if not atr_check['is_valid']:
-                        self.logger.debug(f"{symbol}: ❌ ATR check failed - {atr_reason}")
-                    reasons.append(f"✅ ATR: {atr_reason}")
 
                 if self.strategy_type in (StrategyType.TREND_FOLLOWING, StrategyType.RANGE_TRADING):
                     overbought_check, ob_reason = self._check_not_overbought(symbol, self.entry_timeframe)
@@ -707,33 +696,6 @@ class SignalGenerator:
                     "has_volume": False,
                     "volume_ratio": float(volume_ratio)
                 }, f"Only {volume_ratio:.1f}x average (need {self.min_volume_ratio}x)"
-    
-    def _check_atr(self, symbol: str) -> Tuple[dict, str]:
-        """Check ATR/volatility conditions"""
-        atr_data = self.atr_cache.get(symbol, self.profile.atr_timeframe)
-        
-        if atr_data is None:
-            return {"is_valid": False}, f"No ATR data"
-        
-        is_volatile, reason = self.atr_cache.is_volatile(
-            symbol=symbol,
-            timeframe=self.profile.atr_timeframe,
-            threshold=self.profile.atr_threshold
-        )
-        
-        # Check filter mode
-        if self.profile.atr_filter_mode == "require_high":
-            is_valid = is_volatile
-        elif self.profile.atr_filter_mode == "require_low":
-            is_valid = not is_volatile
-        else:
-            is_valid = True
-        
-        return {
-            "is_valid": is_valid,
-            "is_volatile": is_volatile,
-            "ratio": float(atr_data.get_ratio())
-        }, reason
     
     def _check_not_overbought(self, symbol: str, timeframe: str) -> Tuple[dict, str]:
         """Ensure we're not buying into overbought conditions (trend following only)"""
@@ -1058,31 +1020,6 @@ class SignalGenerator:
             self.logger.debug(
                 f"{symbol} Range Score | "
                 f"VWAP gap: {vwap_gap_pct:+.2f}% → bonus +{vwap_bonus:.1f}"
-            )
-
-        # ------------------------------------------------------------------
-        # FACTOR 5: ATR Containment (+2 points)
-        # Low ATR means the range is intact. If ATR is spiking, the range is
-        # likely breaking and we should have less confidence.
-        # Note: ATR filter in the profile will hard-block if ratio > threshold,
-        # but here we reward for being well within that limit.
-        # ------------------------------------------------------------------
-        atr_bonus = 0.0
-        atr_data = self.atr_cache.get(symbol, self.profile.atr_timeframe
-                                    if hasattr(self.profile, 'atr_timeframe') else timeframe)
-        if atr_data is not None:
-            atr_ratio = float(atr_data.get_ratio())
-            if atr_ratio < 0.8:
-                atr_bonus = 2.0   # Very low volatility — strong range containment
-            elif atr_ratio < 1.0:
-                atr_bonus = 1.5   # Below average — range solid
-            elif atr_ratio < 1.2:
-                atr_bonus = 0.5   # Slightly elevated — range may be testing edges
-
-            bonus_points += atr_bonus
-            self.logger.debug(
-                f"{symbol} Range Score | "
-                f"ATR ratio: {atr_ratio:.2f}x → bonus +{atr_bonus:.1f}"
             )
 
         # ------------------------------------------------------------------

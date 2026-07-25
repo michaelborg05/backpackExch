@@ -594,7 +594,6 @@ class TelegramService:
 
     def get_summary_data(self):
         from cache.trend_cache import get_trend_cache
-        from cache.atr_cache import get_atr_cache
         try:
             
             trend_cache = get_trend_cache()

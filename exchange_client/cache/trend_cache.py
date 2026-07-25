@@ -152,9 +152,10 @@ class TrendCache:
                             'low':   pc.prev_low,
                             'close': pc.prev_close,
                         })
-                        # Keep last 6 candles — no pattern needs more than 3
-                        if len(self._candle_history[key]) > 6:
-                            self._candle_history[key] = self._candle_history[key][-6:]
+                        # Keep last 20 candles — reversal patterns need ≤3, but the
+                        # entry-TF ATR14 volatility gate needs period+1 (15) closed bars.
+                        if len(self._candle_history[key]) > 20:
+                            self._candle_history[key] = self._candle_history[key][-20:]
             
             # Persist to database if enabled
             if persist_to_db:
@@ -464,9 +465,30 @@ class TrendCache:
                 return trend_data
             else:
                 self.logger.warning(f"Stale trend data for {key} (age: {age:.0f}s)")
-        
+
         return None
-    
+
+    def get_atr_pct(self, symbol: str, timeframe: str, period: int = 14) -> Optional[float]:
+        """Latest ATR14 as a percentage of close, from the closed-candle history.
+
+        Backs the `atr_regime` indicator. True Range averaged over `period` closed
+        bars, divided by the last close. Uses the same candle OHLC source that
+        drives the trend indicators — no exchange API call. Returns None until
+        ≥ period+1 closed bars are cached.
+        """
+        from services.indicators import atr_pct as _atr_pct
+
+        key = f"{symbol}_{timeframe}"
+        candles = self._candle_history.get(key, [])
+        if len(candles) < period + 1:
+            return None
+        highs  = [c['high']  for c in candles]
+        lows   = [c['low']   for c in candles]
+        closes = [c['close'] for c in candles]
+        series = _atr_pct(highs, lows, closes, period=period)
+        last = series[-1] if series else None
+        return float(last) if last is not None else None
+
     def is_bullish(
         self,
         symbol: str,
@@ -2005,6 +2027,30 @@ class TrendCache:
                         f"{arrow}{rsi_momentum:+.2f} [{rsi_direction}] "
                         f"(need {bound_str} over {lookback_candles} candle{'s' if lookback_candles != 1 else ''})"
                     )
+
+            elif indicator_type == "atr_regime":
+                # ATR14 (% of close) volatility gate on this timeframe. Skip when
+                # ATR is above max_pct or below min_pct. Insufficient candle
+                # history => pass (only filter once ATR is available). Use
+                # hard_stop:true so a fail kills the signal and a pass adds one to
+                # the count (offset by bumping min_*_indicators_required by one) —
+                # identical outcome to the retired profile-level max_entry_atr_pct.
+                max_pct = params.get("max_pct")
+                min_pct = params.get("min_pct")
+                period  = int(params.get("period", 14))
+                atr_v = self.get_atr_pct(symbol, timeframe, period)
+                if atr_v is None:
+                    is_bullish = True
+                    msg = f"ATR regime: ✓ (n/a — <{period + 1} candles)"
+                else:
+                    below_max = (max_pct is None) or (atr_v <= float(max_pct))
+                    above_min = (min_pct is None) or (atr_v >= float(min_pct))
+                    is_bullish = below_max and above_min
+                    if is_bullish:
+                        msg = f"ATR regime: ✓ (ATR={atr_v:.2f}% in [{min_pct},{max_pct}])"
+                    else:
+                        reason = f"ATR={atr_v:.2f}% > {max_pct}" if not below_max else f"ATR={atr_v:.2f}% < {min_pct}"
+                        msg = f"ATR regime: ✗ ({reason})"
 
             results.append((is_bullish, msg))
             indicator_groups_list.append(indicator_group)

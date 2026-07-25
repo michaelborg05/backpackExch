@@ -162,10 +162,10 @@ Examples:
   python -m tools.settings_manager list --profile trader_1
   
   # Get a setting value
-  python -m tools.settings_manager get atr_update_interval
-  
+  python -m tools.settings_manager get circuit_breaker_interval
+
   # Set a global setting
-  python -m tools.settings_manager set atr_update_interval 10
+  python -m tools.settings_manager set circuit_breaker_interval 2
   
   # Set a profile-specific setting
   python -m tools.settings_manager set signal_cooldown_seconds 180 --profile trader_1
