@@ -222,6 +222,9 @@ class HealthAlertingService:
         suffix = key.rsplit("_", 1)[-1]
         if suffix.isdigit():
             tf_seconds = int(suffix) * 60
+        elif suffix[:-1].isdigit() and suffix[-1] in ("D", "W"):
+            # Day/week timeframes ("1D", "1W") — entry only refreshes at close.
+            tf_seconds = int(suffix[:-1]) * (1440 if suffix[-1] == "D" else 10080) * 60
         return max(self.trend_max_age, tf_seconds + fetch_interval + 180)
 
     def _check_trend_cache(self) -> None:
