@@ -54,7 +54,8 @@ def run_all_variants(
     price_source: str = "candle",
     profile_caps: dict = None,  # variant_name -> ProfileOpenPositionCap; shared across symbol runs
     sl_breakers: dict = None,   # variant_name -> ConsecutiveSLBreaker; shared across symbol runs
-    data_source: str = "log",   # "log" = trend_analysis_log | "shadow" = trend_analysis_shadow
+    data_source: str = "log",   # "log"/"shadow" both read trend_analysis_log (kept as synonyms
+                                # for back-compat with pre-cutover callers)
     shadow_source: str = None,  # e.g. "binance:USDT"; None = whichever source has most rows
     tick_source: str = "webhook",  # "webhook" | "path1m" (1m OHLC expanded to a path)
 ) -> list:

@@ -436,21 +436,26 @@ class Settings(Base):
 
 class TrendAnalysisLog(Base):
     """
-    Longer-term storage (48-72h) for pattern analysis.
-    Stores OHLC and Indicators as flat columns.
+    Primary trend/candle feed used for signal evaluation and cache warmup.
+    Stores OHLC and indicators as flat columns, one row per closed bar.
+
+    Sourced from the programmatic Binance candle fetcher (services/candle_fetcher.py)
+    since the 2026-07 cutover away from TradingView webhooks. Pre-cutover
+    TradingView-sourced history was renamed to trend_analysis_log_tv_archive
+    (see TrendAnalysisLogTvArchive) rather than dropped.
     """
     __tablename__ = "trend_analysis_log"
 
     id = Column(Integer, primary_key=True)
     symbol = Column(String, nullable=False, index=True)
     timeframe = Column(String, nullable=False, index=True)
-    
-    # OHLC Data (from prev_candle)
+
+    # OHLC of the last CLOSED candle
     open = Column(Float)
     high = Column(Float)
     low = Column(Float)
     close = Column(Float)
-    
+
     # Live price at time of signal (distinct from prev_candle close)
     price = Column(Float)
 
@@ -466,13 +471,61 @@ class TrendAnalysisLog(Base):
     volume_ratio = Column(Float)
     volume_sma = Column(Float)
     adx = Column(Float, nullable=True)
-    
-    # Explicitly store the TV bar timestamp and the DB arrival time
-    timestamp = Column(DateTime(timezone=True), index=True) 
+    atr_pct = Column(Float, nullable=True)
+
+    # Explicitly store the bar-close timestamp and the DB arrival time
+    timestamp = Column(DateTime(timezone=True), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Provenance
+    source = Column(String, nullable=False, index=True)   # e.g. "binance:USDT"
+    source_symbol = Column(String)                        # e.g. "SOLUSDT"
+    is_backfill = Column(Boolean, default=False)
 
     __table_args__ = (
         Index('ix_trend_log_lookup', 'symbol', 'timeframe', 'timestamp'),
+        UniqueConstraint('symbol', 'timeframe', 'timestamp', 'source',
+                         name='uq_trend_log_bar'),
+    )
+
+
+class TrendAnalysisLogTvArchive(Base):
+    """Frozen pre-cutover TradingView-sourced trend history.
+
+    Was `trend_analysis_log` until the 2026-07 cutover to the Binance candle
+    fetcher; renamed rather than dropped so the data isn't lost. Not written to
+    or read from by any live code path — query directly for historical/manual
+    analysis only.
+    """
+    __tablename__ = "trend_analysis_log_tv_archive"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, index=True)
+
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+    price = Column(Float)
+
+    rsi = Column(Float)
+    ema20 = Column(Float)
+    ema50 = Column(Float)
+    vwap = Column(Float)
+    bb_upper = Column(Float)
+    bb_lower = Column(Float)
+    bb_basis = Column(Float)
+    volume = Column(Float)
+    volume_ratio = Column(Float)
+    volume_sma = Column(Float)
+    adx = Column(Float, nullable=True)
+
+    timestamp = Column(DateTime(timezone=True), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('ix_trend_log_tv_archive_lookup', 'symbol', 'timeframe', 'timestamp'),
     )
 
 
@@ -904,58 +957,6 @@ class TdmWebhookEvent(Base):
     query_params = Column(JSONB, nullable=True)
     body = Column(JSONB, nullable=True)                    # parsed JSON payload
     body_text = Column(Text, nullable=True)                # raw fallback when not JSON
-
-class TrendAnalysisShadow(Base):
-    """Parallel-run staging table for the programmatic candle fetcher.
-
-    Mirrors TrendAnalysisLog exactly, plus provenance columns. Kept separate so
-    the fetcher can run alongside the TradingView webhook path without any risk
-    to the live signal source. Compare with Tools/compare_shadow.py; once the
-    diff is clean, the fetcher can be pointed at trend_analysis_log directly and
-    this table dropped.
-    """
-    __tablename__ = "trend_analysis_shadow"
-
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String, nullable=False, index=True)
-    timeframe = Column(String, nullable=False, index=True)
-
-    # OHLC of the last CLOSED candle — matches TrendAnalysisLog's prev_candle
-    # convention, so rows from the two tables are directly comparable.
-    open = Column(Float)
-    high = Column(Float)
-    low = Column(Float)
-    close = Column(Float)
-
-    price = Column(Float)
-
-    rsi = Column(Float)
-    ema20 = Column(Float)
-    ema50 = Column(Float)
-    vwap = Column(Float)
-    bb_upper = Column(Float)
-    bb_lower = Column(Float)
-    bb_basis = Column(Float)
-    volume = Column(Float)
-    volume_ratio = Column(Float)
-    volume_sma = Column(Float)
-    adx = Column(Float, nullable=True)
-    atr_pct = Column(Float, nullable=True)   # not in TV feed; computed locally
-
-    timestamp = Column(DateTime(timezone=True), index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Provenance
-    source = Column(String, nullable=False, index=True)   # e.g. "binance"
-    source_symbol = Column(String)                        # e.g. "SOLUSDT"
-    is_backfill = Column(Boolean, default=False)
-
-    __table_args__ = (
-        Index('ix_trend_shadow_lookup', 'symbol', 'timeframe', 'timestamp'),
-        UniqueConstraint('symbol', 'timeframe', 'timestamp', 'source',
-                         name='uq_trend_shadow_bar'),
-    )
-
 
 class PricePathShadow(Base):
     """1-minute OHLC used to reconstruct the intra-candle price path.

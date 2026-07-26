@@ -1,10 +1,11 @@
-"""Programmatic candle fetcher — replaces (eventually) the TradingView webhook feed.
+"""Programmatic candle fetcher — the primary trend/candle data feed.
 
-Why this exists: TradingView alerts only produce data forward from the moment
-the alert is created. That is the binding constraint on every backtest
-conclusion in this project — new symbols cannot be tested for weeks, and the
-usable window is stuck around 60 days, which gives 8-trade validation halves.
-An exchange REST feed gives multi-year history on demand.
+Replaced the TradingView webhook feed in the 2026-07 cutover. Why this exists:
+TradingView alerts only produce data forward from the moment the alert is
+created. That was the binding constraint on every backtest conclusion in this
+project — new symbols could not be tested for weeks, and the usable window was
+stuck around 60 days, giving 8-trade validation halves. An exchange REST feed
+gives multi-year history on demand.
 
 Design notes that matter:
 
@@ -283,7 +284,7 @@ def compute_rows(symbol: str, timeframe: str, candles: Sequence[Candle],
 
     # Source carries the quote asset: a USDT-sourced bar and a USDC-sourced bar
     # for the same symbol/timeframe/timestamp are DIFFERENT observations and must
-    # not collide on uq_trend_shadow_bar.
+    # not collide on uq_trend_log_bar.
     source = source or f"binance:{get_quote()}"
     tf_min = TF_MINUTES[timeframe]
 
@@ -317,13 +318,13 @@ def compute_rows(symbol: str, timeframe: str, candles: Sequence[Candle],
     return rows
 
 
-def write_shadow_rows(db, rows: Sequence[dict]) -> int:
-    """Upsert rows into trend_analysis_shadow. Idempotent on (sym, tf, ts, source)."""
+def write_trend_rows(db, rows: Sequence[dict]) -> int:
+    """Upsert rows into trend_analysis_log. Idempotent on (sym, tf, ts, source)."""
     if not rows:
         return 0
     from sqlalchemy.dialects.postgresql import insert
 
-    from db.models import TrendAnalysisShadow
+    from db.models import TrendAnalysisLog
 
     written = 0
     CHUNK = 500
@@ -331,14 +332,14 @@ def write_shadow_rows(db, rows: Sequence[dict]) -> int:
         chunk = [r for r in rows[i:i + CHUNK] if r.get("rsi") is not None]
         if not chunk:
             continue
-        stmt = insert(TrendAnalysisShadow).values(chunk)
+        stmt = insert(TrendAnalysisLog).values(chunk)
         # DO UPDATE, not DO NOTHING. A bar can legitimately be re-fetched with
         # better data than the first write — most importantly if a partial
         # (in-progress) bar ever gets persisted, DO NOTHING would freeze it
         # permanently. With DO UPDATE, re-running a backfill over any window
         # repairs that window, so the table is self-healing.
         stmt = stmt.on_conflict_do_update(
-            constraint="uq_trend_shadow_bar",
+            constraint="uq_trend_log_bar",
             set_={c: stmt.excluded[c] for c in (
                 "open", "high", "low", "close", "price",
                 "rsi", "ema20", "ema50", "vwap",
@@ -347,7 +348,7 @@ def write_shadow_rows(db, rows: Sequence[dict]) -> int:
                 "adx", "atr_pct", "source_symbol", "is_backfill",
             )},
         )
-        res = db.execute(stmt.returning(TrendAnalysisShadow.id))
+        res = db.execute(stmt.returning(TrendAnalysisLog.id))
         written += len(res.fetchall())
     db.commit()
     return written
@@ -368,7 +369,7 @@ def fetch_and_store(db, symbol: str, timeframe: str, start: datetime, end: datet
     rows = compute_rows(symbol, timeframe, candles, source=source, is_backfill=is_backfill)
     rows = [r for r in rows if r["timestamp"] >= start]
     report.returned = len(rows)
-    report.written = write_shadow_rows(db, rows)
+    report.written = write_trend_rows(db, rows)
     return report
 
 

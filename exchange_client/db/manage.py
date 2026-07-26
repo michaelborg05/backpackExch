@@ -1015,14 +1015,16 @@ def populate_default_settings():
                 'alert_startup_grace_period': '120',# grace period before enabling the alerting logic
                 # Data retention (days)
                 'retention_trans_history_days': '90',   # orders, positions, trades, ai_signal_log
-                'retention_trenddata_history_days': '90', # trend_analysis_log
+                'retention_trenddata_history_days': '365', # trend_analysis_log — kept a full year
+                                                            # for backtesting depth since the 2026-07
+                                                            # cutover to the Binance candle fetcher.
                 'retention_audit_history_days': '28',          # circuit_breaker_events, config_audit_log, daily_balance_snapshots
 
-                # ── Candle fetcher (CandleFetcherService -> trend_analysis_shadow) ──
-                # Programmatic candle feed running in parallel with the TradingView
-                # webhooks. Writes ONLY to trend_analysis_shadow; the live signal
-                # path is untouched. The on/off switch is the ENABLE_CANDLE_FETCHER
-                # env var (read before a DB session exists) — everything else here.
+                # ── Candle fetcher (CandleFetcherService -> trend_analysis_log) ──
+                # Programmatic candle feed — the primary trend data source since the
+                # 2026-07 cutover from TradingView webhooks. The on/off switch is the
+                # ENABLE_CANDLE_FETCHER env var (read before a DB session exists) —
+                # everything else here.
                 'candle_fetcher_quote': 'USDT',          # quote asset on the source venue.
                                                          # MUST match the TradingView feed's quote during the
                                                          # parallel run: the USDT/USDC basis is only -0.057% on

@@ -1,31 +1,17 @@
-LONG tail analysis from AI
-tf_v9_atrcap070 for magnitude (+11.3 net, ATR cap makes it robust on the wider/volatile token set), or
-tf_v9_trail20 for consistency (+10.1 net, 5/5 recent quarters).
-Maker entry widens the margin (+2.5 bps) but isn't load-bearing — the gross edge clears even taker. Your Phase-1 maker infra (services/maker_execution.py, flag-gated) is the right first use, but you can go live taker-only and still be positive.
-Start shadow / small-size live to confirm the tick-fill haircut matches modeled.
-
-
 TO DO
 # validate balances against open positions. If something doesn't match, sell it (No open positions but still have a balance)
-# make dynamic stop losses as per chat gpt suggestions
-# Add profile param for how many indicators needed for trend invalidation
 # possibility - Add price momentum check to TI: If price drops below entry within first 10 minutes, treat as instant TI
-# ability to add a deposit/withdrawal in the system to update snapshotdata and not let it trigger a circuit breaker
 # smarter TP/SL - Different per token. Maybe variable based on market
 # add backtest to web UI
-# Add TP and SL from AI suggestion to override defaults
 # web page changes
   - Add "exchange accounts" tab similar to profiles
-# When adding new profile, it doesnt keep the spot/perps setting I choose i nthe modal when it loadst he profle page
-# The profit figures don't match with balance changes. Find out why. Possibilities
-    - close price being recorded is the theoretical price but maybe my actual trade is triggering at a differnt price
-    - Maybe its not including fees
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
-#Use Claude to determine good EXIT conditions
 # Abiliy to move profiles to different accounts
 
 
 No need
+# make dynamic stop losses as per chat gpt suggestions - Backtest didnt show benefit
+# Add TP and SL from AI suggestion to override defaults
  # split into separate modules so i can migrate to Azure
  # look at option to extend profit % by 50% if all 3 trend indicators are bullish
  # remove trades table. not required unless i use this for limit orders to track whats open?
@@ -131,3 +117,10 @@ Improvement: The "Mean Reversion" Check
 # clean up the trend cache to remove the unused reasons summaries. Add it to the validation and remove the column from trades table
 # Api call to manually refresh caches for various things - like settings, profiles, etc
 # Add EXIT indicators and trend invalidation should evaluate the exit indicators
+# Add profile param for how many indicators needed for trend invalidation
+# ability to add a deposit/withdrawal in the system to update snapshotdata and not let it trigger a circuit breaker
+# When adding new profile, it doesnt keep the spot/perps setting I choose i nthe modal when it loadst he profle page
+# The profit figures don't match with balance changes. Find out why. Possibilities
+    - close price being recorded is the theoretical price but maybe my actual trade is triggering at a differnt price
+    - Maybe its not including fees
+#Use Claude to determine good EXIT conditions

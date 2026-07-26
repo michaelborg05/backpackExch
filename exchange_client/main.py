@@ -43,10 +43,10 @@ if __name__ == "__main__":
     health_alerter.start()
 
     # -------------------------------------------------------------------------
-    # Candle fetcher — migration parallel-run. Own thread, writes ONLY to
-    # trend_analysis_shadow; the live signal path is untouched. Disabled unless
-    # ENABLE_CANDLE_FETCHER=true, so deploying this file changes nothing by
-    # default. See Tools/compare_shadow.py for the cutover check.
+    # Candle fetcher — PRIMARY trend data feed (Binance) since the 2026-07
+    # cutover from TradingView webhooks. Own thread; also replays newly
+    # fetched rows into TrendCache so signals stay current. Gated on
+    # ENABLE_CANDLE_FETCHER=true (see .env).
     # -------------------------------------------------------------------------
     candle_fetcher = initialize_candle_fetcher_service()
     if candle_fetcher:

@@ -1,4 +1,7 @@
-"""Detect and repair bad rows in trend_analysis_shadow.
+"""Detect and repair bad rows in trend_analysis_log (Binance candle fetcher feed).
+
+Table was trend_analysis_shadow until the 2026-07 cutover; renamed to
+trend_analysis_log when it was promoted to be the primary feed.
 
 Finds two classes of problem:
 
@@ -79,7 +82,7 @@ def main():
                     if w_lo < start:
                         w_lo = start
                     rows = db.execute(text("""
-                        SELECT timestamp, close, volume FROM trend_analysis_shadow
+                        SELECT timestamp, close, volume FROM trend_analysis_log
                         WHERE symbol=:s AND timeframe=:t AND source=:src
                           AND timestamp BETWEEN :lo AND :hi
                         ORDER BY timestamp

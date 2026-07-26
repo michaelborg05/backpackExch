@@ -197,7 +197,7 @@ class SettingsHelper:
     @property
     def retention_trenddata_history_days(self) -> int:
         """Days to retain trend_analysis_log"""
-        return self._get_int('retention_trenddata_history_days', 90)
+        return self._get_int('retention_trenddata_history_days', 365)
 
     @property
     def retention_audit_history_days(self) -> int:

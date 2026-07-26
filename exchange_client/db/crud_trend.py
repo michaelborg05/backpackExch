@@ -90,6 +90,46 @@ def load_trend_data_from_history(row: TrendAnalysisLog) -> TrendData:
     )
 
 
+def get_latest_trend_timestamp(db: Session, symbol: str, timeframe: str) -> Optional[datetime]:
+    """Most recent bar timestamp already stored for a symbol/timeframe, or None."""
+    return (
+        db.query(func.max(TrendAnalysisLog.timestamp))
+        .filter(
+            TrendAnalysisLog.symbol == symbol,
+            TrendAnalysisLog.timeframe == timeframe,
+        )
+        .scalar()
+    )
+
+
+def get_trend_rows_after(
+    db: Session,
+    symbol: str,
+    timeframe: str,
+    since: Optional[datetime],
+    limit: int = 50,
+) -> List[TrendAnalysisLog]:
+    """Rows strictly newer than `since`, oldest-first — for replaying fresh bars
+    into TrendCache after a candle fetcher cycle writes them.
+
+    `since=None` (no prior cache state) falls back to the last WARMUP_ENTRIES
+    rows, matching startup warmup behavior.
+    """
+    if since is None:
+        return get_trend_history(db, symbol, timeframe, limit=WARMUP_ENTRIES)
+    return (
+        db.query(TrendAnalysisLog)
+        .filter(
+            TrendAnalysisLog.symbol == symbol,
+            TrendAnalysisLog.timeframe == timeframe,
+            TrendAnalysisLog.timestamp > since,
+        )
+        .order_by(TrendAnalysisLog.timestamp)
+        .limit(limit)
+        .all()
+    )
+
+
 def get_trend_history_stats(db: Session) -> Dict[str, Any]:
     """
     Return record counts per symbol/timeframe from trend_analysis_log.
@@ -140,7 +180,8 @@ def log_trend_for_analysis(db: Session, trend_data: TrendData, retention_hours: 
         volume_sma=float(trend_data.volume_sma) if trend_data.volume_sma else None,
         volume_ratio=float(trend_data.volume_ratio) if trend_data.volume_ratio else None,
         adx=float(trend_data.adx) if trend_data.adx else None,
-        timestamp=datetime.fromtimestamp(trend_data.timestamp, tz=timezone.utc)
+        timestamp=datetime.fromtimestamp(trend_data.timestamp, tz=timezone.utc),
+        source="webhook:tradingview",
     )
     
     db.add(new_log)

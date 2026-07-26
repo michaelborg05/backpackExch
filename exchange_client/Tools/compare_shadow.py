@@ -1,5 +1,11 @@
 """Step 3 of the migration: diff the shadow feed against the live TradingView feed.
 
+OBSOLETE after the 2026-07 cutover — trend_analysis_shadow was renamed to
+trend_analysis_log (now the live table) and the old trend_analysis_log was
+archived to trend_analysis_log_tv_archive, so the queries below no longer
+resolve. Kept for reference / as a template if a future feed migration needs
+the same pre-cutover comparison. See db/models.py TrendAnalysisLogTvArchive.
+
 Run this after the fetcher has been running in parallel for a while. It answers
 the only question that matters before cutover: would the new feed have produced
 the same signals as the old one?

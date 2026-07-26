@@ -2297,8 +2297,10 @@ class BacktestEngine:
         end: datetime,
         price_mode: str = "auto",
         price_source: str = "candle",  # "candle" | "ticks"
-        data_source: str = "log",      # "log" = trend_analysis_log (TradingView)
-                                       # "shadow" = trend_analysis_shadow (fetched candles)
+        data_source: str = "log",      # "log"/"shadow" both read trend_analysis_log —
+                                       # kept as synonyms for back-compat with existing
+                                       # scripts/CLI flags from before the 2026-07 cutover,
+                                       # when they were two different tables.
         shadow_source: Optional[str] = None,  # e.g. "binance:USDT"; None = most rows
         tick_source: str = "webhook",  # "webhook" = webhook_price_ticks (~2min sample, ~60d)
                                        # "path1m"  = price_path_shadow expanded to O/H/L/C
@@ -2306,16 +2308,11 @@ class BacktestEngine:
         profile_cap: Optional["ProfileOpenPositionCap"] = None,
         sl_breaker: Optional["ConsecutiveSLBreaker"] = None,
     ) -> BacktestResult:
-        from db.models import TrendAnalysisLog, TrendAnalysisShadow
+        from db.models import TrendAnalysisLog
 
-        # Candle source. "shadow" reads the programmatically fetched table, which
-        # carries years of history rather than the ~60 days the TradingView
-        # webhooks accumulated — the binding constraint on every backtest
-        # conclusion in this project. Column names are identical between the two
-        # tables, so everything downstream is unchanged.
         if data_source not in ("log", "shadow"):
             raise ValueError(f"data_source must be 'log' or 'shadow', got {data_source!r}")
-        CandleModel = TrendAnalysisShadow if data_source == "shadow" else TrendAnalysisLog
+        CandleModel = TrendAnalysisLog
 
         is_short = "short" in getattr(self.profile, "strategy_type", "")
 
@@ -2407,24 +2404,24 @@ class BacktestEngine:
                 CandleModel.timestamp <= end,
             )
         )
-        if data_source == "shadow":
-            src = shadow_source
-            if src is None:
-                # Default to whichever source has the most rows for this symbol,
-                # so a mixed table (e.g. binance:USDT + binance:USDC) never
-                # silently interleaves two different quotes into one series.
-                src_row = (
-                    self.db.query(CandleModel.source, func.count(CandleModel.id))
-                    .filter(CandleModel.symbol == symbol,
-                            CandleModel.timestamp >= start,
-                            CandleModel.timestamp <= end)
-                    .group_by(CandleModel.source)
-                    .order_by(func.count(CandleModel.id).desc())
-                    .first()
-                )
-                src = src_row[0] if src_row else None
-            if src:
-                _q = _q.filter(CandleModel.source == src)
+        # trend_analysis_log carries a provenance `source` column (e.g.
+        # "binance:USDT" vs "binance:USDC") — disambiguate so a mixed table
+        # never silently interleaves two different quotes into one series.
+        src = shadow_source
+        if src is None:
+            # Default to whichever source has the most rows for this symbol.
+            src_row = (
+                self.db.query(CandleModel.source, func.count(CandleModel.id))
+                .filter(CandleModel.symbol == symbol,
+                        CandleModel.timestamp >= start,
+                        CandleModel.timestamp <= end)
+                .group_by(CandleModel.source)
+                .order_by(func.count(CandleModel.id).desc())
+                .first()
+            )
+            src = src_row[0] if src_row else None
+        if src:
+            _q = _q.filter(CandleModel.source == src)
         all_rows = _q.order_by(CandleModel.timestamp).all()
 
         if not all_rows:

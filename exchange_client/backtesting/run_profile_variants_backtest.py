@@ -28,13 +28,13 @@ parser.add_argument("--verbose", action="store_true",
 parser.add_argument("--profile", default=None,
                     help="Run only this variant, e.g. p3_v4_ema50drop")
 parser.add_argument("--data-source", default="log", choices=["log", "shadow"],
-                    help="Candle source. 'log' = trend_analysis_log (TradingView webhooks, "
-                         "~60d of history). 'shadow' = trend_analysis_shadow (programmatically "
-                         "fetched candles, years of history). Default: log")
+                    help="Candle source. Both values now read trend_analysis_log — kept as "
+                         "synonyms for back-compat with pre-cutover scripts, when 'log' was "
+                         "TradingView webhook data and 'shadow' was the fetched-candle table. "
+                         "Default: log")
 parser.add_argument("--shadow-source", default=None,
-                    help="Which shadow feed to read, e.g. binance:USDT. Default: whichever "
-                         "source has the most rows for the symbol. Only used with "
-                         "--data-source shadow.")
+                    help="Which provenance source to read, e.g. binance:USDT. Default: "
+                         "whichever source has the most rows for the symbol.")
 parser.add_argument("--tick-source", default="webhook", choices=["webhook", "path1m"],
                     help="Where intra-candle price path comes from in tick mode. "
                          "'webhook' = webhook_price_ticks (~2min sample, ~60d history). "

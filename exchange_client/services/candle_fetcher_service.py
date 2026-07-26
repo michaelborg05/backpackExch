@@ -1,18 +1,16 @@
-"""Background service that keeps trend_analysis_shadow topped up.
+"""Background service that keeps trend_analysis_log topped up.
 
-Runs the programmatic candle fetcher on an interval, in its own daemon thread,
-so the Binance-sourced feed accumulates alongside the live TradingView webhook
-feed during the parallel-run migration period.
+Runs the programmatic candle fetcher on an interval, in its own daemon thread.
+Since the 2026-07 cutover this is the PRIMARY trend data feed — the
+TradingView webhook path (/webhook/tradingview/trend) is now a no-op, so
+TrendCache is only ever refreshed from here (plus once at startup, replayed
+from history by cache/trend_cache_warmup.py). If this service is down for
+longer than `max_age` (TrendCache), signals go stale silently.
 
 Deliberately isolated from trading:
   * Own thread — a hang or crash here cannot stall the monitoring loop.
   * Every exception is swallowed and logged; the thread never dies.
-  * Writes ONLY to trend_analysis_shadow. The live signal path reads
-    trend_analysis_log and is completely untouched.
-  * OFF by default. Set ENABLE_CANDLE_FETCHER=true to turn it on.
-
-Once Tools/compare_shadow.py shows an acceptable gate-flip rate, the fetcher can
-be pointed at trend_analysis_log and this service becomes the primary feed.
+  * Set ENABLE_CANDLE_FETCHER=true to turn it on (see .env).
 """
 from __future__ import annotations
 
@@ -23,7 +21,9 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from cache.settings_cache import get_settings_cache
+from cache.trend_cache import get_trend_cache
 from db.crud_monitored_symbols import get_enabled_symbols_set
+from db.crud_trend import get_latest_trend_timestamp, get_trend_rows_after, load_trend_data_from_history
 from db.utils import get_db_session
 from services.candle_fetcher import SYMBOL_MAP, fetch_and_store, get_quote
 from utils.logging import log_manager
@@ -31,12 +31,13 @@ from utils.symbols import normalize_symbol
 
 
 class CandleFetcherService:
-    """Periodically fetch candles and write them to the shadow table.
+    """Periodically fetch candles, write them to trend_analysis_log, and replay
+    the new rows into TrendCache so signals see fresh data.
 
     Configuration lives in the DB (`settings` table, via SettingsCache) and the
-    symbol list comes from `monitored_symbols` — the same list the webhook and
-    monitoring loop use. Only the on/off switch is an env var, because it has to
-    be readable before the DB session exists and it is a deploy-time decision.
+    symbol list comes from `monitored_symbols` — the same list the monitoring
+    loop uses. Only the on/off switch is an env var, because it has to be
+    readable before the DB session exists and it is a deploy-time decision.
 
     Settings (all global, i.e. profile_name NULL):
         candle_fetcher_quote            default "USDT"
@@ -162,7 +163,7 @@ class CandleFetcherService:
             f"✅ CandleFetcherService started (symbols={len(symbols)}: {symbols}, "
             f"timeframes={self.timeframes}, interval={self.interval}s, "
             f"lookback={self.lookback_hours}h, quote={get_quote()}) "
-            f"-> trend_analysis_shadow"
+            f"-> trend_analysis_log"
         )
 
     def stop(self) -> None:
@@ -222,6 +223,8 @@ class CandleFetcherService:
         end = datetime.now(tz=timezone.utc)
         start = end - timedelta(hours=self.lookback_hours)
         total, gapped, failed = 0, [], []
+        trend_cache = get_trend_cache()
+        cache_updates = 0
 
         with get_db_session() as db:
             for symbol in symbols:
@@ -229,16 +232,33 @@ class CandleFetcherService:
                     if self._stop_event.is_set():
                         return
                     try:
+                        # Capture the newest bar already on record BEFORE this
+                        # cycle's fetch, so afterwards we know exactly which
+                        # rows are new and must be replayed into TrendCache —
+                        # replaying already-seen bars would double-count them
+                        # in the RSI/EMA/BB history TrendCache keeps for slope
+                        # and momentum calculations.
+                        since = get_latest_trend_timestamp(db, symbol, tf)
                         report = fetch_and_store(db, symbol, tf, start, end)
                         total += report.written
                         if not report.contiguous:
                             gapped.append(report.describe())
+                        if report.written:
+                            new_rows = get_trend_rows_after(db, symbol, tf, since)
+                            for row in new_rows:
+                                trend_cache.update(
+                                    load_trend_data_from_history(row), persist_to_db=False
+                                )
+                                cache_updates += 1
                     except Exception as e:  # noqa: BLE001 — one symbol must not stop the rest
                         failed.append(f"{symbol}/{tf}: {e}")
 
         self._last_run_ts = time.time()
         self._last_rows = total
-        self.logger.info(f"Candle fetch cycle complete — {total} shadow rows written")
+        self.logger.info(
+            f"Candle fetch cycle complete — {total} rows written, "
+            f"{cache_updates} TrendCache update(s) replayed"
+        )
         if gapped:
             # Wilder recursions (RSI/ADX) drift across gaps; surface loudly.
             self.logger.warning(f"Gaps detected in {len(gapped)} series: {'; '.join(gapped[:5])}")
