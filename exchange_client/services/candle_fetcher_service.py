@@ -25,9 +25,19 @@ from cache.trend_cache import get_trend_cache
 from db.crud_monitored_symbols import get_enabled_symbols_set
 from db.crud_trend import get_latest_trend_timestamp, get_trend_rows_after, load_trend_data_from_history
 from db.utils import get_db_session
-from services.candle_fetcher import SYMBOL_MAP, fetch_and_store, get_quote
+from services.candle_fetcher import SYMBOL_MAP, TF_MINUTES, fetch_and_store, get_quote
 from utils.logging import log_manager
 from utils.symbols import normalize_symbol
+
+# candle_fetcher.compute_rows() only emits rows once it has fetched more than
+# WARMUP_BARS(300) + 5 candles. The backward warmup extension always supplies
+# the first 300; candle_fetcher_lookback_hours supplies the rest as "new" bars
+# to catch up on. That setting is sized for fast timeframes (30h is hundreds
+# of 15m bars) but is far too small for slow ones — 30h is ~1 daily bar, so
+# 1D never clears the threshold and silently writes nothing every cycle. Force
+# a floor of MIN_CATCHUP_BARS bars of *this* timeframe regardless of the
+# global setting, so every timeframe reliably clears the +5 margin.
+MIN_CATCHUP_BARS = 10
 
 
 class CandleFetcherService:
@@ -239,7 +249,10 @@ class CandleFetcherService:
                         # in the RSI/EMA/BB history TrendCache keeps for slope
                         # and momentum calculations.
                         since = get_latest_trend_timestamp(db, symbol, tf)
-                        report = fetch_and_store(db, symbol, tf, start, end)
+                        tf_start = min(start, end - timedelta(
+                            minutes=TF_MINUTES[tf] * MIN_CATCHUP_BARS
+                        ))
+                        report = fetch_and_store(db, symbol, tf, tf_start, end)
                         total += report.written
                         if not report.contiguous:
                             gapped.append(report.describe())
