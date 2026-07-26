@@ -23,8 +23,9 @@ class HealthAlertingService:
     Checks:
       1. Monitoring loop is alive (thread running + recent activity)
       2. API server is responding
-      3. Trend cache is fresh (TradingView webhooks still arriving)
+      3. Trend cache is fresh (candle fetcher / Binance feed still updating it)
       4. Price cache is fresh (exchange price fetches still working)
+      5. Candle fetcher service itself is alive and completing cycles
     
     Sends Telegram alerts when issues are detected, with cooldown to avoid spam.
     """
@@ -124,6 +125,7 @@ class HealthAlertingService:
         self._check_api_server()
         self._check_trend_cache()
         self._check_price_cache()
+        self._check_candle_fetcher()
 
     # -------------------------------------------------------------------------
     # Individual checks
@@ -198,8 +200,8 @@ class HealthAlertingService:
     def _check_trend_cache(self) -> None:
         """
         Check that the trend cache has been updated recently.
-        TradingView sends webhooks every 3 mins; max_age is 1200s (20 mins).
-        Alert if any cached symbol's data is older than trend_max_age.
+        The candle fetcher refreshes it every cycle (default 900s); max_age is
+        1200s (20 mins). Alert if any cached symbol's data is older than that.
         """
         issue_key = "trend_cache_stale"
 
@@ -254,11 +256,12 @@ class HealthAlertingService:
                     issue_key=issue_key,
                     message=(
                         f"📡 <b>TREND DATA STALE</b>\n\n"
-                        f"TradingView webhooks may have stopped sending.\n\n"
+                        f"The Binance candle fetcher may have stopped updating TrendCache.\n\n"
                         f"Stale symbols (>{self.trend_max_age}s):\n{stale_list}\n\n"
                         f"Oldest: {int(oldest_age)}s ago "
                         f"({oldest_age / 60:.1f} mins)\n\n"
-                        "Check your TradingView alerts — they may have expired."
+                        "Check CandleFetcherService logs — see the CANDLE FETCHER "
+                        "alert if one also fired."
                     ),
                 )
             else:
@@ -266,7 +269,7 @@ class HealthAlertingService:
                     issue_key=issue_key,
                     recovery_message=(
                         "✅ <b>Trend cache recovered</b> — "
-                        "TradingView webhooks are arriving again."
+                        "the candle fetcher is updating it again."
                     ),
                 )
 
@@ -336,6 +339,65 @@ class HealthAlertingService:
 
         except Exception as e:
             self.logger.error(f"Error checking price cache: {e}")
+
+    def _check_candle_fetcher(self) -> None:
+        """
+        Check that CandleFetcherService — the primary trend/candle data feed
+        since the 2026-07 cutover from TradingView webhooks — is alive and
+        completing cycles. Catches a dead/failing feed within a cycle or two,
+        rather than waiting for _check_trend_cache's 20-minute staleness window.
+        """
+        issue_key = "candle_fetcher_down"
+
+        try:
+            from services.candle_fetcher_service import get_candle_fetcher_service
+            service = get_candle_fetcher_service()
+
+            if service is None:
+                # ENABLE_CANDLE_FETCHER is off — nothing to check.
+                return
+
+            status = service.status()
+
+            if not status["running"]:
+                self._trigger_alert(
+                    issue_key=issue_key,
+                    message=(
+                        "🚨 <b>CANDLE FETCHER DOWN</b>\n\n"
+                        "CandleFetcherService's thread is not running. This is the "
+                        "primary trend data feed — TrendCache will go stale and "
+                        "signals will stop updating on new candles."
+                    ),
+                )
+                return
+
+            if status["last_run"] is None:
+                # Hasn't completed its first cycle yet since startup — nothing
+                # to judge yet, avoid a false positive here.
+                return
+
+            if not status["healthy"]:
+                self._trigger_alert(
+                    issue_key=issue_key,
+                    message=(
+                        f"🚨 <b>CANDLE FETCHER UNHEALTHY</b>\n\n"
+                        f"Last completed cycle: {status['last_run']}\n"
+                        f"Consecutive failures: {status['consecutive_failures']}\n\n"
+                        "Binance candle fetching has stalled or is failing repeatedly. "
+                        "TrendCache is not receiving fresh data."
+                    ),
+                )
+            else:
+                self._clear_alert(
+                    issue_key=issue_key,
+                    recovery_message=(
+                        "✅ <b>Candle fetcher recovered</b> — "
+                        "Binance fetch cycles are completing normally."
+                    ),
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error checking candle fetcher: {e}")
 
     def _inspect_price_cache_directly(self, price_cache) -> Optional[dict]:
         """
