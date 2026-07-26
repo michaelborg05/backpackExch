@@ -39,7 +39,7 @@ class HealthAlertingService:
         self.settings = get_settings_helper()
 
         self.check_interval = self.settings.alert_healthcheck_interval      # How often to run health checks
-        self.trend_max_age = self.settings.alert_trend_max_age              # How stale trend data can be before we alert (matches TrendCache.max_age)
+        self.trend_max_age = self.settings.alert_trend_max_age              # Floor for the per-timeframe trend staleness thresholds (see _trend_allowed_age)
         self.price_max_age = self.settings.alert_price_max_age              # How stale price data can be before we alert (monitoring loop runs every 30s)
         self.re_alert_cooldown = self.settings.alert_re_alert_cooldown      # How often to re-alert on the same issue (avoid spam)
         self.startup_grace_period = self.settings.alert_startup_grace_period    #time after startup before enabling the alerting
@@ -197,11 +197,40 @@ class HealthAlertingService:
         except Exception as e:
             self.logger.error(f"Error checking API server: {e}")
 
+    def _candle_fetch_interval(self) -> int:
+        """Current candle fetcher cycle length, falling back to the 900s default."""
+        try:
+            from services.candle_fetcher_service import get_candle_fetcher_service
+            service = get_candle_fetcher_service()
+            if service is not None:
+                return service.interval
+        except Exception:
+            pass
+        return 900
+
+    def _trend_allowed_age(self, key: str, fetch_interval: int) -> int:
+        """
+        Staleness threshold for one TrendCache entry (key = SYMBOL_QUOTE_TF).
+
+        The candle fetcher only replays an entry into TrendCache when a NEW
+        closed candle exists for its timeframe, so a 240m entry is legitimately
+        up to 4 hours old even when the fetcher is healthy. Allow one full
+        candle period plus a fetch cycle plus slack; alert_trend_max_age acts
+        as a floor so short timeframes keep a minimum grace period.
+        """
+        tf_seconds = 0
+        suffix = key.rsplit("_", 1)[-1]
+        if suffix.isdigit():
+            tf_seconds = int(suffix) * 60
+        return max(self.trend_max_age, tf_seconds + fetch_interval + 180)
+
     def _check_trend_cache(self) -> None:
         """
         Check that the trend cache has been updated recently.
-        The candle fetcher refreshes it every cycle (default 900s); max_age is
-        1200s (20 mins). Alert if any cached symbol's data is older than that.
+
+        Each entry only refreshes when a new candle CLOSES on its timeframe,
+        so the allowed age is per-timeframe (see _trend_allowed_age) rather
+        than a single flat threshold.
         """
         issue_key = "trend_cache_stale"
 
@@ -237,27 +266,30 @@ class HealthAlertingService:
             except Exception:
                 monitored = None  # Fall back to checking all cached entries
 
-            now = time.time()
-            stale_entries = [
-                e for e in entries
-                if e.get("age_seconds", 0) > self.trend_max_age
-                and (monitored is None or any(
-                    e.get("key", "").startswith(sym + "_") for sym in monitored
-                ))
-            ]
+            fetch_interval = self._candle_fetch_interval()
+            stale_entries = []
+            for e in entries:
+                key = e.get("key", "")
+                if monitored is not None and not any(
+                    key.startswith(sym + "_") for sym in monitored
+                ):
+                    continue
+                allowed = self._trend_allowed_age(key, fetch_interval)
+                if e.get("age_seconds", 0) > allowed:
+                    stale_entries.append((e, allowed))
 
             if stale_entries:
                 stale_list = "\n".join(
-                    f"  • {e['key']}: {int(e['age_seconds'])}s old"
-                    for e in stale_entries
+                    f"  • {e['key']}: {int(e['age_seconds'])}s old (limit {allowed}s)"
+                    for e, allowed in stale_entries
                 )
-                oldest_age = max(e["age_seconds"] for e in stale_entries)
+                oldest_age = max(e["age_seconds"] for e, _ in stale_entries)
                 self._trigger_alert(
                     issue_key=issue_key,
                     message=(
                         f"📡 <b>TREND DATA STALE</b>\n\n"
                         f"The Binance candle fetcher may have stopped updating TrendCache.\n\n"
-                        f"Stale symbols (>{self.trend_max_age}s):\n{stale_list}\n\n"
+                        f"Symbols older than one candle period + fetch cycle:\n{stale_list}\n\n"
                         f"Oldest: {int(oldest_age)}s ago "
                         f"({oldest_age / 60:.1f} mins)\n\n"
                         "Check CandleFetcherService logs — see the CANDLE FETCHER "
