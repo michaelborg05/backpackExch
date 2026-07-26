@@ -561,7 +561,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Signal Generation</div><div class="tgl-sub">Enable automated scanning</div></div><label class="tgl-sw"><input type="checkbox" id="f-sig-gen"><span class="tgl-track"></span></label></div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Market Regime Filter</div><div class="tgl-sub">Block trades in choppy conditions</div></div><label class="tgl-sw"><input type="checkbox" id="f-regime"><span class="tgl-track"></span></label></div>
             <div class="frow single" style="padding:6px 0 2px">
-              <div class="field"><label>Regime Timeframe</label><select id="f-regime-tf"><option value="">Strategy default</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select></div>
+              <div class="field"><label>Regime Timeframe</label><select id="f-regime-tf"><option value="">Strategy default</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1D">1d</option></select></div>
             </div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Trend Filter (HTF)</div><div class="tgl-sub">Require bullish trend before entry</div></div><label class="tgl-sw"><input type="checkbox" id="f-trend"><span class="tgl-track"></span></label></div>
             <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Entry Filter (LTF)</div><div class="tgl-sub">Require entry indicators on signal TF</div></div><label class="tgl-sw"><input type="checkbox" id="f-entry"><span class="tgl-track"></span></label></div>
@@ -584,7 +584,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           </div>
           <div class="frow" style="margin-top:11px">
             <div class="field"><label>Invalidation Indicators</label><select id="f-inval-indicators"><option value="entry">Entry indicators</option><option value="trend">Trend indicators</option><option value="exit">Exit indicators</option><option value="mean_reversion">Mean reversion</option></select></div>
-            <div class="field"><label>Exit Timeframe</label><select id="f-exit-tf"><option value="">Use entry TF</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select></div>
+            <div class="field"><label>Exit Timeframe</label><select id="f-exit-tf"><option value="">Use entry TF</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1D">1d</option></select></div>
           </div>
           <div class="frow">
             <div class="field"><label>Min Position Age (min)</label><input id="f-min-age" type="number" step="15" placeholder="120"></div>

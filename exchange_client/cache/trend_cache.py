@@ -152,10 +152,12 @@ class TrendCache:
                             'low':   pc.prev_low,
                             'close': pc.prev_close,
                         })
-                        # Keep last 20 candles — reversal patterns need ≤3, but the
-                        # entry-TF ATR14 volatility gate needs period+1 (15) closed bars.
-                        if len(self._candle_history[key]) > 20:
-                            self._candle_history[key] = self._candle_history[key][-20:]
+                        # Keep last 100 candles — reversal patterns need <=3, the
+                        # ATR14 volatility gate needs period+1 (15), and
+                        # distance_from_high needs lookback_bars (e.g. 60 for a
+                        # 10-day rolling high off 4h candles).
+                        if len(self._candle_history[key]) > 100:
+                            self._candle_history[key] = self._candle_history[key][-100:]
             
             # Persist to database if enabled
             if persist_to_db:
@@ -2051,6 +2053,38 @@ class TrendCache:
                     else:
                         reason = f"ATR={atr_v:.2f}% > {max_pct}" if not below_max else f"ATR={atr_v:.2f}% < {min_pct}"
                         msg = f"ATR regime: ✗ ({reason})"
+
+            elif indicator_type == "distance_from_high":
+                # Bullish when price sits between min/max % below the rolling
+                # high over the lookback window — a "how far off the recent
+                # high" dip filter, independent of any EMA. Default is the
+                # validated 7-day lookback (42 4h bars); the original 30-day/
+                # 180-bar version was a single-symbol concentration artifact
+                # (see backtesting/profile_samples/dip_buy_variants.py).
+                # Caller must keep lookback_bars <= the cache's retention cap
+                # (see the "Keep last N candles" truncation in feed() above)
+                # or this silently uses fewer bars than requested — the msg
+                # below reports the bar count actually used so a mismatch is
+                # visible rather than silently wrong.
+                # params: { lookback_bars: 42, min_pct_below: 5.0, max_pct_below: 20.0 }
+                lookback_bars = int(params.get("lookback_bars", 42))
+                min_pct_below = float(params.get("min_pct_below", 5.0))
+                max_pct_below = float(params.get("max_pct_below", 20.0))
+                key = f"{symbol}_{timeframe}"
+                candles = self._candle_history.get(key, [])
+                window = candles[-lookback_bars:]
+                min_needed = min(20, lookback_bars)
+                if len(window) < min_needed:
+                    is_bullish = True
+                    msg = f"Distance from high: ✓ (n/a — <{min_needed} candles)"
+                else:
+                    recent_high = max(c['high'] for c in window)
+                    pct_below = (recent_high - current_price) / recent_high * 100
+                    is_bullish = min_pct_below <= pct_below <= max_pct_below
+                    truncated = f", requested {lookback_bars} but cache only holds {len(window)}" if len(window) < lookback_bars else ""
+                    msg = (f"Distance from high: {'✓' if is_bullish else '✗'} "
+                           f"({pct_below:.1f}% below {len(window)}-bar high {recent_high:.4f} "
+                           f"— need {min_pct_below}-{max_pct_below}%{truncated})")
 
             results.append((is_bullish, msg))
             indicator_groups_list.append(indicator_group)

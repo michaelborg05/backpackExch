@@ -459,7 +459,7 @@
               <div class="form-grid">
                 <div class="field"><label>Trend Timeframe (min)</label><input id="f-trend_timeframe" type="text" placeholder="60"></div>
                 <div class="field"><label>Entry Timeframe (min)</label><input id="f-entry_timeframe" type="text" placeholder="15"></div>
-                <div class="field"><label>Regime Timeframe</label><select id="f-regime_timeframe"><option value="">Strategy default</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select><div class="field-hint">TF for the Market Regime Filter. 4h blocks counter-trend entries against sustained multi-day trends</div></div>
+                <div class="field"><label>Regime Timeframe</label><select id="f-regime_timeframe"><option value="">Strategy default</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1D">1d</option></select><div class="field-hint">TF for the Market Regime Filter. 4h blocks counter-trend entries against sustained multi-day trends</div></div>
                 <div class="field">
                   <label>Scan Cooldown (minutes)</label>
                   <input id="f-signal_cooldown_minutes" type="number" step="1" placeholder="15">
@@ -497,7 +497,7 @@
               </div>
               <div class="form-grid" style="margin-top:12px;max-width:600px">
                 <div class="field"><label>Invalidation Indicators</label><select id="f-trend_invalidation_indicators"><option value="entry">Entry indicators</option><option value="trend">Trend indicators</option><option value="exit">Exit indicators</option><option value="mean_reversion">Mean reversion</option></select></div>
-                <div class="field"><label>Exit Timeframe</label><select id="f-exit_timeframe"><option value="">Use entry timeframe</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option></select><div class="field-hint">Timeframe used for exit indicator evaluation</div></div>
+                <div class="field"><label>Exit Timeframe</label><select id="f-exit_timeframe"><option value="">Use entry timeframe</option><option value="15">15m</option><option value="60">1h</option><option value="240">4h</option><option value="1D">1d</option></select><div class="field-hint">Timeframe used for exit indicator evaluation</div></div>
                 <div class="field"><label>Min Position Age (min)</label><input id="f-min_position_age_for_trend_check" type="number" step="15" placeholder="120"><div class="field-hint">Don't check until position is this old</div></div>
                 <div class="field"><label>Max Position Hours</label><input id="f-max_position_hours" type="number" step="1" placeholder="18"><div class="field-hint">Force-exit if stuck (leave blank to disable)</div></div>
               </div>
