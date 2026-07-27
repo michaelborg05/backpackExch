@@ -14,6 +14,18 @@ from api_builders.factory import get_adapter
 from cache.regime_filter import get_regime_filter
 from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
 
+
+def _tf_label(tf) -> str:
+    """Human-readable timeframe for logging: '240' -> '240m', '1D' -> '1D'.
+
+    Every timeframe used to be minute-based, so log lines unconditionally
+    appended 'm'. That broke once '1D' (calendar-day, not minutes) became a
+    real timeframe — logs showed the confusing '1Dm'.
+    """
+    s = str(tf)
+    return f"{s}m" if s.isdigit() else s
+
+
 class SignalGenerator:
     """
     REFACTORED: Fully YAML-driven signal generation with zero hardcoded logic
@@ -93,17 +105,17 @@ class SignalGenerator:
         
         log_msg = (
             f"✨ Initialized SignalGenerator [{self.strategy_type.value}]: "
-            f"entry_tf={self.entry_timeframe}m, "
-            f"trend_tf={self.trend_timeframe}m"
+            f"entry_tf={_tf_label(self.entry_timeframe)}, "
+            f"trend_tf={_tf_label(self.trend_timeframe)}"
         )
         
         if self.use_entry_filter:
-            log_msg += f", entry_filter=ON (entry_tf={self.entry_timeframe}m)"
+            log_msg += f", entry_filter=ON (entry_tf={_tf_label(self.entry_timeframe)})"
         else:
             log_msg += f", entry_filter=OFF (single-TF mode)"
         
         log_msg += (
-            f", regime_tf={self.regime_primary_tf}m, "
+            f", regime_tf={_tf_label(self.regime_primary_tf)}, "
             f"min_volume={self.min_volume_ratio}x, "
             f"min_confidence={self.min_confidence}%"
         )
@@ -213,15 +225,15 @@ class SignalGenerator:
 
             if not trend_check:
                 self.logger.info(
-                    f"{symbol}: ❌ Trend filter failed ({self.trend_timeframe}m) - {trend_reason}"
+                    f"{symbol}: ❌ Trend filter failed ({_tf_label(self.trend_timeframe)}) - {trend_reason}"
                 )
                 return None
             else:
                 self.logger.info(
-                    f"{symbol}: ✅ Trend filter passed ({self.trend_timeframe}m) - {trend_reason}"
+                    f"{symbol}: ✅ Trend filter passed ({_tf_label(self.trend_timeframe)}) - {trend_reason}"
                 )
 
-            reasons.append(f"✅ Trend ({self.trend_timeframe}m): {trend_reason}")
+            reasons.append(f"✅ Trend ({_tf_label(self.trend_timeframe)}): {trend_reason}")
             confidence_score += self.trend_weight
 
         else:
@@ -246,15 +258,15 @@ class SignalGenerator:
 
             if not entry_check:
                 self.logger.info(
-                    f"{symbol}: ❌ Entry filter failed ({self.entry_timeframe}m) - {entry_reason}"
+                    f"{symbol}: ❌ Entry filter failed ({_tf_label(self.entry_timeframe)}) - {entry_reason}"
                 )
                 return None
             else:
                 self.logger.info(
-                    f"{symbol}: ✅ Entry filter passed ({self.entry_timeframe}m) - {entry_reason}"
+                    f"{symbol}: ✅ Entry filter passed ({_tf_label(self.entry_timeframe)}) - {entry_reason}"
                 )
             
-            reasons.append(f"✅ Entry ({self.entry_timeframe}m): {entry_reason}")
+            reasons.append(f"✅ Entry ({_tf_label(self.entry_timeframe)}): {entry_reason}")
             confidence_score += self.entry_weight
         
         # 6. VOLUME CONFIRMATION
@@ -458,14 +470,14 @@ class SignalGenerator:
 
                 if not entry_check:
                     self.logger.info(
-                        f"{symbol}: ❌ Entry filter failed ({self.entry_timeframe}m) - {entry_reason}"
+                        f"{symbol}: ❌ Entry filter failed ({_tf_label(self.entry_timeframe)}) - {entry_reason}"
                     )
                 else:
                     self.logger.info(
-                        f"{symbol}: ✅ Entry filter passed ({self.entry_timeframe}m) - {entry_reason}"
+                        f"{symbol}: ✅ Entry filter passed ({_tf_label(self.entry_timeframe)}) - {entry_reason}"
                     )
                 
-                reasons.append(f"✅ Entry ({self.entry_timeframe}m): {entry_reason}")
+                reasons.append(f"✅ Entry ({_tf_label(self.entry_timeframe)}): {entry_reason}")
                 confidence_score += self.entry_weight
 
             except Exception as e:
