@@ -227,6 +227,16 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   border-radius:50%;background:var(--txd);transition:all .18s}
 .tgl-sw input:checked+.tgl-track{background:rgba(0,255,157,.12);border-color:var(--grn)}
 .tgl-sw input:checked+.tgl-track::after{left:19px;background:var(--grn)}
+.tgl-sw.sm .tgl-track{width:32px;height:18px;border-radius:9px}
+.tgl-sw.sm .tgl-track::after{width:12px;height:12px;top:2px;left:2px}
+.tgl-sw.sm input:checked+.tgl-track::after{left:16px}
+
+/* ── PROFILE FILTER BAR ─────────────────────────────────────────── */
+.prof-filter-bar{background:var(--bg2);border:1px solid var(--brd);margin-bottom:10px;
+  padding:9px 13px;display:flex;align-items:center;gap:18px}
+.pf-item{display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--txd)}
+.pf-item .tgl-sw{margin-left:0}
 
 /* ── SAVE BAR ───────────────────────────────────────────────────── */
 .save-bar{display:flex;gap:8px;margin:13px 0 4px}
@@ -441,6 +451,18 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <div class="panel" id="p-profiles">
       <div class="panel-hdr" style="margin-bottom:8px">
         <span class="panel-title">Profiles</span>
+      </div>
+
+      <!-- Profile filters -->
+      <div class="prof-filter-bar">
+        <div class="pf-item">
+          <span>Active only</span>
+          <label class="tgl-sw sm"><input type="checkbox" id="pf-active-only" checked onchange="renderProfileSelect()"><span class="tgl-track"></span></label>
+        </div>
+        <div class="pf-item">
+          <span>Signals only</span>
+          <label class="tgl-sw sm"><input type="checkbox" id="pf-signal-only" checked onchange="renderProfileSelect()"><span class="tgl-track"></span></label>
+        </div>
       </div>
 
       <!-- Profile selector -->
@@ -964,7 +986,7 @@ function navTo(name) {
   document.getElementById('scroll-area').scrollTop = 0;
   if (name === 'positions') loadPositions();
   else if (name === 'balances') loadBalances();
-  else if (name === 'profiles' && _profiles.length && !_currentProfile) setProfile(_profiles[0].name);
+  else if (name === 'profiles' && _profiles.length && !_currentProfile) renderProfileSelect();
 }
 
 // ── Health ────────────────────────────────────────────────────────
@@ -1173,12 +1195,34 @@ async function loadAllProfiles() {
   try {
     _profiles = await safeFetch('/profiles');
     if (!Array.isArray(_profiles)) _profiles = [];
-    const sel = document.getElementById('prof-select');
-    sel.innerHTML = _profiles.map(p =>
-      `<option value="${escAttr(p.name)}">${escHtml(p.display_name||p.name)}</option>`
-    ).join('');
-    if (_profiles.length) setProfile(_profiles[0].name);
+    renderProfileSelect();
   } catch(e) { console.warn('loadAllProfiles', e); }
+}
+
+function profileMatchesFilters(p) {
+  const activeOnly = document.getElementById('pf-active-only')?.checked ?? true;
+  const signalOnly = document.getElementById('pf-signal-only')?.checked ?? true;
+  if (activeOnly && !p.is_active) return false;
+  if (signalOnly && p.enable_signal_generation === false) return false;
+  return true;
+}
+
+function visibleProfiles() { return _profiles.filter(profileMatchesFilters); }
+
+function renderProfileSelect() {
+  const sel = document.getElementById('prof-select');
+  const visible = visibleProfiles();
+  if (!visible.length) {
+    sel.innerHTML = '<option value="">No matching profiles</option>';
+    return;
+  }
+  sel.innerHTML = visible.map(p =>
+    `<option value="${escAttr(p.name)}">${escHtml(p.display_name||p.name)}</option>`
+  ).join('');
+  const keep = _currentProfile && visible.some(p => p.name === _currentProfile.name);
+  const target = keep ? _currentProfile.name : visible[0].name;
+  sel.value = target;
+  if (!keep) setProfile(target);
 }
 
 function onProfChange() { setProfile(document.getElementById('prof-select').value); }
@@ -1330,7 +1374,11 @@ async function toggleActive() {
     await api('/profiles/' + _currentProfile.name + '/activate', { method: 'POST' });
     showToast(_currentProfile.is_active ? 'Profile deactivated' : 'Profile activated');
     _currentProfile = await safeFetch('/profiles/' + _currentProfile.name);
-    if (_currentProfile) updateProfileUI(_currentProfile);
+    if (_currentProfile) {
+      updateProfileUI(_currentProfile);
+      const idx = _profiles.findIndex(pr => pr.name === _currentProfile.name);
+      if (idx >= 0) _profiles[idx] = _currentProfile;
+    }
   } catch(e) { showToast(e.message || 'Failed', true); }
   finally { btn.disabled = false; }
 }
