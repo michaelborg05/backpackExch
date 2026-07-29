@@ -24,6 +24,12 @@ from utils.logging import log_manager
 from cache.trend_cache import get_trend_cache
 
 
+def _tf_label(tf) -> str:
+    """Human-readable timeframe for logging: '240' -> '240m', '1D' -> '1D'."""
+    s = str(tf)
+    return f"{s}m" if s.isdigit() else s
+
+
 class RegimeFilter:
     """
     Risk-based regime filter focused on WHAT YOUR TREND LOGIC DOESN'T SEE
@@ -96,7 +102,7 @@ class RegimeFilter:
         confirm_trend = self.trend_cache.get(symbol, confirm_timeframe)
         
         if primary_trend is None:
-            return MarketRegime.UNKNOWN, f"No {primary_timeframe}m data - cannot assess risk"
+            return MarketRegime.UNKNOWN, f"No {_tf_label(primary_timeframe)} data - cannot assess risk"
         
 
         from cache.price_cache import get_price_cache
@@ -193,7 +199,7 @@ class RegimeFilter:
             # has been grinding up for days (e.g. 4h EMA20 > EMA50 by 2%+)
             if primary_diff_pct > self.sustained_trend_spread_pct:
                 return True, (
-                    f"Sustained {primary_timeframe}m uptrend - EMA20/50 spread "
+                    f"Sustained {_tf_label(primary_timeframe)} uptrend - EMA20/50 spread "
                     f"{primary_diff_pct:+.2f}% > {self.sustained_trend_spread_pct}% — no shorting into strength"
                 )
             # Block: strong bearish HTF + bullish LTF reversal = short squeeze forming
@@ -212,7 +218,7 @@ class RegimeFilter:
             # setup, not a safety signal — what matters is the higher-TF trend.
             if primary_diff_pct > self.sustained_trend_spread_pct:
                 return True, (
-                    f"Sustained {primary_timeframe}m rally - EMA20/50 spread "
+                    f"Sustained {_tf_label(primary_timeframe)} rally - EMA20/50 spread "
                     f"{primary_diff_pct:+.2f}% > {self.sustained_trend_spread_pct}% — wait for exhaustion"
                 )
         elif strategy_type == StrategyType.MEAN_REVERSION:
@@ -220,7 +226,7 @@ class RegimeFilter:
             # a sustained downtrend on the regime timeframe
             if primary_diff_pct < -self.sustained_trend_spread_pct:
                 return True, (
-                    f"Sustained {primary_timeframe}m downtrend - EMA20/50 spread "
+                    f"Sustained {_tf_label(primary_timeframe)} downtrend - EMA20/50 spread "
                     f"{primary_diff_pct:+.2f}% < -{self.sustained_trend_spread_pct}% — no dip-buying a falling market"
                 )
         elif strategy_type == StrategyType.RANGE_TRADING:

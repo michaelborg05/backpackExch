@@ -456,17 +456,41 @@ class TrendCache:
 
         return total_change, direction
 
+    def _effective_max_age(self, timeframe: str) -> float:
+        """Staleness threshold for a given timeframe.
+
+        self.max_age (default 1200s/20min) dates from the TradingView-webhook
+        era, when indicators were pushed continuously and any one timeframe's
+        cache entry refreshed many times per candle. Since the 2026-07 cutover
+        to the Binance candle fetcher, a cache entry's timestamp only advances
+        once per CLOSED candle — every 60min for "60", every 24h for "1D" —
+        so a flat 20min TTL means a 60m timeframe reads as stale 40 of every
+        60 minutes, and a 1D timeframe is stale ~98.6% of the time (blocking
+        it almost permanently). Scale the threshold to the timeframe's own
+        candle interval instead, with headroom for one fetch cycle's lag.
+        """
+        try:
+            from services.candle_fetcher import TF_MINUTES
+            candle_seconds = TF_MINUTES[timeframe] * 60
+        except (ImportError, KeyError):
+            return self.max_age
+        return max(self.max_age, candle_seconds * 1.5)
+
     def get(self, symbol: str, timeframe: str) -> Optional[TrendData]:
         """Get cached trend data if available and not stale"""
         key = f"{symbol}_{timeframe}"
         trend_data = self._cache.get(key)
-        
+
         if trend_data and hasattr(trend_data, 'timestamp'):
             age = time.time() - trend_data.timestamp
-            if age <= self.max_age:
+            effective_max_age = self._effective_max_age(timeframe)
+            if age <= effective_max_age:
                 return trend_data
             else:
-                self.logger.warning(f"Stale trend data for {key} (age: {age:.0f}s)")
+                self.logger.warning(
+                    f"Stale trend data for {key} (age: {age:.0f}s, "
+                    f"threshold: {effective_max_age:.0f}s)"
+                )
 
         return None
 
