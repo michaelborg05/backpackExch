@@ -3219,6 +3219,185 @@ async def create_profile_endpoint(body: ProfileCreateRequest, current_user=Depen
 
 
 # ---------------------------------------------------------------------------
+# POST /profiles/{source_profile}/clone  — deep-copy an entire profile
+# ---------------------------------------------------------------------------
+class ProfileCloneRequest(BaseModel):
+    new_name: str
+    new_display_name: Optional[str] = None
+
+
+@app.post("/profiles/{source_profile}/clone", dependencies=[Depends(require_admin_permission)])
+async def clone_profile_endpoint(
+    source_profile: str,
+    body: ProfileCloneRequest,
+    current_user=Depends(get_dashboard_user),
+):
+    """Deep-copy an entire profile: settings, circuit breaker, symbol configs,
+    indicators and trading hours.
+
+    The clone is created with signal generation DISABLED so a freshly duplicated
+    profile never starts trading until it's been reviewed and turned on manually.
+    """
+    import copy as _copy
+    from sqlalchemy import inspect as sa_inspect
+    from db.utils import get_db_session
+    from db.models import (
+        TradingProfileDB, CircuitBreakerConfig, SymbolConfig,
+        IndicatorDB, ProfileTradingHours, UserProfileMapping,
+    )
+    from services.audit import write_audit
+    from services.profile_manager import refresh_profiles_from_db
+
+    new_name = (body.new_name or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="new_name is required")
+
+    with get_db_session() as db:
+        src = db.query(TradingProfileDB).filter(
+            TradingProfileDB.name == source_profile
+        ).first()
+        if not src:
+            raise HTTPException(status_code=404, detail=f"Profile '{source_profile}' not found")
+
+        new_display_name = (body.new_display_name or "").strip() or f"{src.display_name} (copy)"
+
+        # Enforce name/display_name uniqueness up front for clear error messages
+        if db.query(TradingProfileDB).filter(TradingProfileDB.name == new_name).first():
+            raise HTTPException(status_code=409, detail=f"Profile '{new_name}' already exists")
+        if db.query(TradingProfileDB).filter(TradingProfileDB.display_name == new_display_name).first():
+            raise HTTPException(status_code=409, detail=f"Display name '{new_display_name}' already in use")
+
+        # Copy every scalar column except identity/timestamps, deep-copying JSON values
+        skip_cols = {"id", "name", "display_name", "created_at", "updated_at"}
+        col_data = {}
+        for c in sa_inspect(TradingProfileDB).column_attrs:
+            key = c.key
+            if key in skip_cols:
+                continue
+            val = getattr(src, key)
+            col_data[key] = _copy.deepcopy(val) if isinstance(val, (dict, list)) else val
+
+        # Never let a fresh clone start trading on its own
+        col_data["enable_signal_generation"] = False
+
+        new_prof = TradingProfileDB(name=new_name, display_name=new_display_name, **col_data)
+        db.add(new_prof)
+        db.flush()  # assign new_prof.id
+
+        # Circuit breaker config (keyed by profile_name)
+        cb_copied = 0
+        src_cb = db.query(CircuitBreakerConfig).filter(
+            CircuitBreakerConfig.profile_name == src.name
+        ).first()
+        if src_cb:
+            cb_data = {}
+            for c in sa_inspect(CircuitBreakerConfig).column_attrs:
+                if c.key in {"id", "profile_name", "created_at", "updated_at"}:
+                    continue
+                cb_data[c.key] = getattr(src_cb, c.key)
+            db.add(CircuitBreakerConfig(profile_name=new_name, **cb_data))
+            cb_copied = 1
+        else:
+            # Fall back to sane defaults so the clone still has a breaker
+            db.add(CircuitBreakerConfig(
+                profile_name=new_name,
+                max_daily_profit_pct=Decimal("5.0"),
+                max_daily_loss_pct=Decimal("3.0"),
+                profit_lock_hours=6,
+                loss_lock_hours=12,
+                is_active=True,
+            ))
+
+        # Symbol configs (keyed by profile_name)
+        sym_copied = 0
+        for sc in db.query(SymbolConfig).filter(SymbolConfig.profile_name == src.name).all():
+            sc_data = {}
+            for c in sa_inspect(SymbolConfig).column_attrs:
+                if c.key in {"id", "profile_name", "created_at", "updated_at"}:
+                    continue
+                sc_data[c.key] = getattr(sc, c.key)
+            db.add(SymbolConfig(profile_name=new_name, **sc_data))
+            sym_copied += 1
+
+        # Indicators (keyed by profile_id)
+        ind_copied = 0
+        for ind in db.query(IndicatorDB).filter(IndicatorDB.profile_id == src.id).all():
+            db.add(IndicatorDB(
+                profile_id=new_prof.id,
+                category=ind.category,
+                indicator_type=ind.indicator_type,
+                params=dict(ind.params) if ind.params else {},
+                is_hard_stop=ind.is_hard_stop,
+                enabled=ind.enabled,
+                indicator_group=ind.indicator_group,
+            ))
+            ind_copied += 1
+
+        # Trading hours (keyed by profile_id)
+        hours_copied = 0
+        for th in db.query(ProfileTradingHours).filter(
+            ProfileTradingHours.profile_id == src.id
+        ).all():
+            db.add(ProfileTradingHours(
+                profile_id=new_prof.id,
+                day_of_week=th.day_of_week,
+                start_time=th.start_time,
+                end_time=th.end_time,
+                enabled=th.enabled,
+            ))
+            hours_copied += 1
+
+        # Link the clone to the current dashboard user
+        db.add(UserProfileMapping(
+            user_id=current_user.user_id,
+            profile_name=new_name,
+            is_active=new_prof.is_active,
+        ))
+
+        write_audit(
+            db=db,
+            type="profile",
+            subtype="clone",
+            action="create",
+            entity_id=new_prof.id,
+            entity_name=new_prof.name,
+            before=None,
+            after={
+                "cloned_from":  src.name,
+                "name":         new_prof.name,
+                "display_name": new_prof.display_name,
+                "indicators":   ind_copied,
+                "symbols":      sym_copied,
+                "trading_hours": hours_copied,
+            },
+        )
+
+        db.commit()
+        db.refresh(new_prof)
+        refresh_profiles_from_db()
+
+        apiserver_logger.info(
+            f"Cloned profile '{src.name}' -> '{new_name}' "
+            f"(indicators={ind_copied}, symbols={sym_copied}, "
+            f"circuit_breaker={cb_copied}, trading_hours={hours_copied})"
+        )
+        return {
+            "name":          new_prof.name,
+            "display_name":  new_prof.display_name,
+            "cloned_from":   src.name,
+            "indicators":    ind_copied,
+            "symbols":       sym_copied,
+            "trading_hours": hours_copied,
+            "message": (
+                f"Cloned '{src.name}' -> '{new_name}' "
+                f"({ind_copied} indicators, {sym_copied} symbols, "
+                f"{hours_copied} trading-hour windows). "
+                f"Signal generation is OFF — review and enable it when ready."
+            ),
+        }
+
+
+# ---------------------------------------------------------------------------
 # PUT /profiles/{profile_name}  — partial update
 # ---------------------------------------------------------------------------
 @app.put("/profiles/{profile_name}", dependencies=[Depends(require_admin_permission)])

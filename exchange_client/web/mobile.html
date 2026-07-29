@@ -679,6 +679,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="ind-add-btn" style="margin-top:0;flex:1" onclick="addHoursRowMobile()">+ ADD WINDOW</button>
             <button class="ind-add-btn" style="margin-top:0;flex:1" onclick="prefillWeekdaysMobile()">PRE-FILL MON&ndash;FRI</button>
+            <button class="ind-add-btn" style="margin-top:0;flex:1;border-color:var(--red);color:var(--red)" onclick="clearAllHoursMobile()">CLEAR ALL</button>
           </div>
           <div class="save-bar">
             <button class="btn-save" onclick="saveTradingHoursMobile()">SAVE TRADING HOURS</button>
@@ -1472,7 +1473,10 @@ function renderSymList() {
           ${!s.enabled ? '<span class="badge off">disabled</span>' : ''}
         </div>
       </div>
-      <button class="ind-edit-btn" onclick="openEditSymbolMobile('${escAttr(s.symbol)}')">EDIT</button>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="ind-edit-btn" onclick="openEditSymbolMobile('${escAttr(s.symbol)}')">EDIT</button>
+        <button class="ind-edit-btn" style="border-color:var(--red);color:var(--red)" onclick="deleteSymbolRowMobile('${escAttr(s.symbol)}')">DEL</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1541,6 +1545,16 @@ async function deleteSymbolMobile() {
   } catch(e) { showToast(e.message || 'Delete failed', true); }
 }
 
+// One-click delete straight from the symbols list (no edit sheet needed)
+async function deleteSymbolRowMobile(symbol) {
+  if (!symbol || !_currentProfile) return;
+  if (!confirm('Delete config for ' + symbol + '?')) return;
+  try {
+    await api('/config/symbol/' + _currentProfile.name + '/' + symbol, { method: 'DELETE' });
+    showToast('Symbol config deleted'); loadSymbols(_currentProfile.name);
+  } catch(e) { showToast(e.message || 'Delete failed', true); }
+}
+
 // ── Trading Hours ─────────────────────────────────────────────────
 const DAY_NAMES_M = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
@@ -1597,6 +1611,13 @@ function prefillWeekdaysMobile() {
     div.innerHTML = hoursRowHtmlMobile({ day_of_week: day, start_time: start, end_time: end, enabled: true }, i);
     container.appendChild(div.firstElementChild);
   });
+}
+
+function clearAllHoursMobile() {
+  const container = document.getElementById('hours-list');
+  const hasRows = !!container.querySelector('[data-row]');
+  if (hasRows && !confirm('Clear ALL trading-hour windows? The profile will trade at any time. Remember to Save to apply.')) return;
+  container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:10px">No windows configured — trades any time</div>';
 }
 
 function collectHoursRowsMobile() {

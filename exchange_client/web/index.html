@@ -502,6 +502,11 @@
                 <div class="field"><label>Max Position Hours</label><input id="f-max_position_hours" type="number" step="1" placeholder="18"><div class="field-hint">Force-exit if stuck (leave blank to disable)</div></div>
               </div>
             </div>
+            <div class="form-section">
+              <div class="section-title">Duplicate Profile</div>
+              <div class="field-hint" style="margin-bottom:10px">Create a full copy of this profile — settings, circuit breaker, symbols, indicators and trading hours. The copy is created with <strong>signal generation OFF</strong> so it won't trade until you review and enable it.</div>
+              <button class="btn-new" onclick="openCloneProfileModal()">⧉ Copy Entire Profile</button>
+            </div>
           </div><!-- /tab-settings -->
 
           <!-- ── CIRCUIT BREAKER TAB ────────────────────────────────────── -->
@@ -637,6 +642,7 @@
               <div style="margin-top:12px;display:flex;gap:8px">
                 <button class="btn-new" onclick="addHoursRow()">+ Add Window</button>
                 <button class="btn-sm" onclick="prefillWeekdays()" style="font-size:10px;padding:4px 12px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;color:var(--tx)">Pre-fill Mon–Fri</button>
+                <button class="btn-sm" onclick="clearAllHours()" style="font-size:10px;padding:4px 12px;background:var(--bg2);border:1px solid var(--red);border-radius:4px;cursor:pointer;color:var(--red)">Clear All</button>
               </div>
             </div>
 
@@ -756,6 +762,33 @@
         <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
           <button class="btn-cancel" onclick="closeCopyIndicatorsModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Cancel</button>
           <button id="copy-ind-confirm" onclick="executeCopyIndicators()" style="padding:6px 14px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Clone Profile Modal ──────────────────────────────────────────── -->
+    <div class="modal-overlay" id="clone-profile-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeCloneProfileModal()">
+      <div class="modal-box" style="max-width:440px">
+        <div class="modal-header">
+          <span class="modal-title">Copy Entire Profile</span>
+          <button class="modal-close" onclick="closeCloneProfileModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--txd);margin-bottom:14px">Copying <strong id="clone-src-label" style="color:var(--tx)">—</strong>, including all settings, circuit breaker, symbols, indicators and trading hours.</div>
+          <div style="margin-bottom:14px">
+            <label style="font-size:11px;color:var(--txd);display:block;margin-bottom:4px">New Internal Name <span style="color:var(--txd)">(unique, no spaces)</span></label>
+            <input id="clone-new-name" type="text" placeholder="e.g. tf_v9_copy" style="width:100%;padding:6px 8px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;color:var(--tx);font-size:12px;font-family:'Space Mono',monospace">
+          </div>
+          <div style="margin-bottom:14px">
+            <label style="font-size:11px;color:var(--txd);display:block;margin-bottom:4px">New Display Name</label>
+            <input id="clone-new-display" type="text" placeholder="e.g. Trend v9 (copy)" style="width:100%;padding:6px 8px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;color:var(--tx);font-size:12px">
+          </div>
+          <div style="background:rgba(220,180,80,0.12);border:1px solid rgba(220,180,80,0.35);border-radius:4px;padding:8px 10px;font-size:11px;color:#d8b04a;margin-bottom:8px">The copy is created with <strong>signal generation OFF</strong>. Review it, then enable trading when ready.</div>
+          <div id="clone-err" style="font-size:11px;color:var(--red)"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--brd)">
+          <button class="btn-cancel" onclick="closeCloneProfileModal()" style="padding:6px 14px;background:var(--bg2);border:1px solid var(--brd);border-radius:4px;cursor:pointer;font-size:12px;color:var(--tx)">Cancel</button>
+          <button id="clone-confirm" onclick="executeCloneProfile()" style="padding:6px 14px;background:var(--acc);border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;font-weight:600">Create Copy</button>
         </div>
       </div>
     </div>
@@ -2692,6 +2725,13 @@ function prefillWeekdays() {
   tbody.appendChild(_makeHoursRow(4, '14:00', '21:00'));
 }
 
+function clearAllHours() {
+  const tbody = document.getElementById('hours-tbody');
+  const hasRows = !!tbody.querySelector('tr .hr-day');
+  if (hasRows && !confirm('Clear ALL trading-hour windows? The profile will trade at any time. Remember to Save to apply.')) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--txd);padding:24px">No windows configured — profile trades at any time. Click "+ Add Window" to restrict hours.</td></tr>';
+}
+
 function collectHoursRows() {
   const rows = [];
   document.querySelectorAll('#hours-tbody tr').forEach(tr => {
@@ -2896,7 +2936,7 @@ function renderSymTableP() {
       <td>${s.max_position_size_pct != null ? parseFloat(s.max_position_size_pct).toFixed(1) + '%' : '—'}</td>
       <td><span class="bs ${en ? 'bl2' : 'bsh'}">${en ? 'ACTIVE' : 'OFF'}</span></td>
       <td style="color:var(--txd);font-size:11px">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
-      <td style="text-align:right"><button class="btn-new" style="font-size:10px" onclick='openEditSymP(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn-new" style="font-size:10px" onclick='openEditSymP(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button><button class="btn-new" style="font-size:10px;margin-left:6px;border-color:var(--red);color:var(--red)" onclick="deleteSymRowP('${s.symbol}')">Delete</button></td>
     </tr>`;
   }).join('');
 }
@@ -2961,6 +3001,17 @@ async function deleteSymP() {
   closeSymModalP();
   try {
     await api('/config/symbol/' + _currentProfile.name + '/' + _symEditId, { method: 'DELETE' });
+    loadSymbolsP();
+    showToast('Symbol config deleted');
+  } catch (e) { showToast(e.message, true); }
+}
+
+// One-click delete straight from the symbols table row (no edit modal needed)
+async function deleteSymRowP(symbol) {
+  if (!symbol || !_currentProfile) return;
+  if (!confirm('Delete config for ' + symbol + '?')) return;
+  try {
+    await api('/config/symbol/' + _currentProfile.name + '/' + symbol, { method: 'DELETE' });
     loadSymbolsP();
     showToast('Symbol config deleted');
   } catch (e) { showToast(e.message, true); }
@@ -3317,6 +3368,52 @@ async function executeCopyIndicators() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Copy';
+  }
+}
+
+// ── Clone Entire Profile ─────────────────────────────────────────────────────
+
+function openCloneProfileModal() {
+  if (!_currentProfile) { showToast('Select a profile first', true); return; }
+  document.getElementById('clone-src-label').textContent =
+    _currentProfile.display_name || _currentProfile.name;
+  document.getElementById('clone-new-name').value = _currentProfile.name + '_copy';
+  document.getElementById('clone-new-display').value =
+    (_currentProfile.display_name || _currentProfile.name) + ' (copy)';
+  document.getElementById('clone-err').textContent = '';
+  document.getElementById('clone-profile-modal').style.display = 'flex';
+}
+
+function closeCloneProfileModal() {
+  document.getElementById('clone-profile-modal').style.display = 'none';
+}
+
+async function executeCloneProfile() {
+  const src = _currentProfile?.name;
+  const newName = document.getElementById('clone-new-name').value.trim();
+  const newDisplay = document.getElementById('clone-new-display').value.trim();
+  const errEl = document.getElementById('clone-err');
+  if (!src) return;
+  if (!newName) { errEl.textContent = 'New internal name is required'; return; }
+
+  const btn = document.getElementById('clone-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Copying…';
+  errEl.textContent = '';
+  try {
+    const result = await api('/profiles/' + src + '/clone', {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName, new_display_name: newDisplay || null }),
+    });
+    closeCloneProfileModal();
+    await loadProfiles();
+    await selectProfile(newName);
+    showToast(result.message || ('Profile copied to ' + newName));
+  } catch (e) {
+    errEl.textContent = e.message || 'Copy failed';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Copy';
   }
 }
 

@@ -7,7 +7,11 @@ TO DO
   - Add "exchange accounts" tab similar to profiles
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
 # Abiliy to move profiles to different accounts
-
+# add delete button next to symbols on profile/symbols page
+# Add a way to clear trading hours in 1 button
+# add option to copy entire profile
+# add way to see what exchange acct is used in the profile screen
+# get rid of default order size/max position size from profile screen. Make them mandatory when adding new symbol
 
 No need
 # make dynamic stop losses as per chat gpt suggestions - Backtest didnt show benefit
