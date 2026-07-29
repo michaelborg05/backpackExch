@@ -89,6 +89,14 @@ class MonitoringService:
 
         self._signal_check_counter = 0
 
+        # Thesis (signal reasons/strength) for resting maker ENTRY orders, keyed
+        # by exchange_order_id. Stashed when the maker order rests, popped when it
+        # fills or falls back to taker in _reconcile_maker_entry — so the fill
+        # notification carries the same trend/entry summary the taker path sends.
+        # In-memory only: maker orders are short-lived, so a restart just loses
+        # the thesis of any then-in-flight order (message degrades to no reasons).
+        self._pending_maker_theses: Dict[str, dict] = {}
+
         self._trend_invalidation_counter = 0
         self.position_validation_counter = 0
         self._profile_refresh_counter = 0
@@ -1557,6 +1565,18 @@ class MonitoringService:
             return _taker(), "taker"
 
         # Resting order recorded; the position opens on fill in _monitor_orders.
+        # Stash the thesis so the fill/fallback notification (fired later, from
+        # _reconcile_maker_entry, which only has the DB order) can include the
+        # same reasons the synchronous taker path sends. Keyed by exchange order
+        # id = resting.id, which matches order.exchange_order_id at reconcile time.
+        try:
+            self._pending_maker_theses[str(resting.id)] = {
+                "reasons": list(getattr(signal, "reasons", []) or []),
+                "strength": signal.strength.name,
+                "confidence": float(signal.confidence),
+            }
+        except Exception:  # noqa: BLE001 — never let bookkeeping block the trade
+            pass
         self.logger.info(
             f"[{profile.name}] 🅼 maker entry resting for {signal.symbol} @ {limit_price} "
             f"(will fill or fall back to taker on timeout)"
@@ -1589,16 +1609,20 @@ class MonitoringService:
             self._stamp_fill_type_on_position(
                 symbol=order.symbol, profile_name=profile.name, fill_type="maker"
             )
+            thesis = self._pending_maker_theses.pop(str(order.exchange_order_id), None)
             self._send_telegram(
                 f"🅼 Maker entry filled [{profile.display_name or profile.name}]\n"
                 f"Symbol: {order.symbol}\n"
-                f"Fill: Maker\n"
-                f"Position opened from resting limit.",
+                + self._thesis_header_lines(thesis)
+                + f"Fill: Maker\n"
+                f"Position opened from resting limit."
+                + self._thesis_reasons_block(thesis),
                 MessagePriority.NORMAL,
             )
             return
 
         if status == "gone":
+            self._pending_maker_theses.pop(str(order.exchange_order_id), None)
             return  # order already terminal; nothing to do
 
         # Still resting — enforce the timeout, then taker-fall back.
@@ -1627,6 +1651,7 @@ class MonitoringService:
             recheck = adapter.reconcile_entry_order(order)
             if (recheck or {}).get("status") == "filled":
                 self._stamp_fill_type_on_position(order.symbol, profile.name, "maker")
+                self._pending_maker_theses.pop(str(order.exchange_order_id), None)
                 return
         except Exception:  # noqa: BLE001
             pass
@@ -1653,27 +1678,55 @@ class MonitoringService:
                     price_line = f"Price: ${executed_price:.4f}\n"
                 except Exception:  # noqa: BLE001
                     price_line = ""
+                thesis = self._pending_maker_theses.pop(str(order.exchange_order_id), None)
                 self._send_telegram(
                     f"🎯 Maker→Taker entry filled [{profile.display_name or profile.name}]\n"
                     f"Symbol: {order.symbol}\n"
-                    f"Fill: Taker (maker timed out after {age:.0f}s)\n"
+                    + self._thesis_header_lines(thesis)
+                    + f"Fill: Taker (maker timed out after {age:.0f}s)\n"
                     f"{price_line}"
-                    f"Quantity: {res.executed_quantity}",
+                    f"Quantity: {res.executed_quantity}"
+                    + self._thesis_reasons_block(thesis),
                     MessagePriority.NORMAL,
                 )
             else:
+                self._pending_maker_theses.pop(str(order.exchange_order_id), None)
                 self._send_telegram(
                     f"⚠️ Maker→Taker fallback returned no fill [{profile.display_name or profile.name}]\n"
                     f"Symbol: {order.symbol}\nEntry NOT opened — check the exchange.",
                     MessagePriority.HIGH,
                 )
         except Exception as e:  # noqa: BLE001
+            self._pending_maker_theses.pop(str(order.exchange_order_id), None)
             self.logger.error(f"[{profile.name}] taker fallback failed for {order.symbol}: {e}")
             self._send_telegram(
                 f"❌ Maker→Taker fallback FAILED [{profile.display_name or profile.name}]\n"
                 f"Symbol: {order.symbol}\nError: {e}",
                 MessagePriority.HIGH,
             )
+
+    @staticmethod
+    def _thesis_header_lines(thesis: Optional[dict]) -> str:
+        """Strength/confidence lines for a maker fill notification, mirroring the
+        taker path's header. Empty string when no thesis was stashed (e.g. the
+        resting order outlived a restart)."""
+        if not thesis:
+            return ""
+        strength = thesis.get("strength")
+        confidence = thesis.get("confidence")
+        if strength is None or confidence is None:
+            return ""
+        return f"Strength: {strength} ({confidence:.0f}%)\n"
+
+    @staticmethod
+    def _thesis_reasons_block(thesis: Optional[dict]) -> str:
+        """Reasons block for a maker fill notification, mirroring the taker path
+        (the trend/entry summary). Leading newline so it appends onto the last
+        line; empty string when no reasons were stashed."""
+        reasons = (thesis or {}).get("reasons") or []
+        if not reasons:
+            return ""
+        return "\nReasons:\n" + "\n".join(f"  {r}" for r in reasons)
 
     def _stamp_fill_type_on_position(self, symbol: str, profile_name: str, fill_type: str) -> None:
         """Write maker/taker attribution onto the freshly-opened OPEN position.
