@@ -422,6 +422,18 @@ class MonitoringService:
             return 
         
         # Use the context manager - session is automatically closed
+        # Decide ONCE per cycle whether this is a trend-invalidation/stale-check
+        # cycle, and reset the counter here — not inside the per-position loop.
+        # Previously the reset lived inside `for position in open_positions`, so the
+        # first open position iterated consumed the check and zeroed the counter,
+        # starving every other open position of its trend-invalidation and stale
+        # exits (system-wide: with N positions open, N-1 were never checked).
+        do_trend_check = (
+            self._trend_invalidation_counter >= self.settings.trend_invalidation_interval
+        )
+        if do_trend_check:
+            self._trend_invalidation_counter = 0
+
         with get_db_session() as db:
             profiles = profile_manager._profiles.values()
             for profile in profiles:
@@ -573,8 +585,7 @@ class MonitoringService:
                             lowest_price=price,
                         )
 
-                    if self._trend_invalidation_counter >= self.settings.trend_invalidation_interval:
-                        self._trend_invalidation_counter = 0
+                    if do_trend_check:
                         # Trend Invalidation Check for long running trades
                         should_exit, exit_reason = position_manager.should_exit_position(
                             position=position,
