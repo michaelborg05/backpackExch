@@ -483,4 +483,10 @@ TREND_VARIANTS = {
     "tf_v9_atrcap070_ind": _with_atr_ind(
         _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35), max_pct=0.70),
 
+    # ---- trading_hours ablation: does the curated session window (inherited
+    #      from _TF_BASE) still matter for this short-hold momentum scalp, or
+    #      was that only load-bearing for the dip-buy/zone family? ----
+    "tf_v9_atrcap070_24h": _bk5(htf_band=(54, 68), tp=3.0, sl=0.8, trail=0.25, arm=0.35)
+        | {"max_entry_atr_pct": 0.70, "trading_hours": None},
+
 }

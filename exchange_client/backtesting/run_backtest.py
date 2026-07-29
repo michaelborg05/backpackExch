@@ -41,6 +41,7 @@ FILE_MAP = {
     "mr_short": ("backtesting.profile_samples.mean_reversion_short_variants", "MEAN_REV_SHORT_VARIANTS"),
     "trend":    ("backtesting.profile_samples.trend_variants",                "TREND_VARIANTS"),
     "trend_short": ("backtesting.profile_samples.trend_short_variants",                "TREND_SHORT_VARIANTS"),
+    "dip_buy":  ("backtesting.profile_samples.dip_buy_variants",              "DIP_BUY_VARIANTS"),
 }
 
 # Aliases so the full filename also works without extension

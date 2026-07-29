@@ -33,11 +33,12 @@ from  backtesting.profile_samples.range_variants import RANGE_VARIANTS
 from backtesting.profile_samples.trend_variants import TREND_VARIANTS
 from backtesting.profile_samples.mean_reversion_short_variants import MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS
 from backtesting.profile_samples.trend_short_variants import TREND_SHORT_VARIANTS
-from backtesting.profile_samples.fade_short_variants import FADE_SHORT_VARIANTS 
+from backtesting.profile_samples.fade_short_variants import FADE_SHORT_VARIANTS
+from backtesting.profile_samples.dip_buy_variants import DIP_BUY_VARIANTS
 # =============================================================================
 # Convenience: all variants in one dict
 # =============================================================================
-ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS}
+ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS, **DIP_BUY_VARIANTS}
 
 # =============================================================================
 # Quick sweep runner — use this to run all variants in one go
@@ -52,6 +53,10 @@ def run_all_variants(
     show_trades: bool = False,
     export_csv: str = None,
     price_source: str = "candle",
+    price_mode: str = "close",  # "auto" | "close" | "low" | "high" — engine.run()'s "auto"
+                                # picks "low" for mean_reversion strategy_type, which won't
+                                # match a profile validated with "close" (e.g. dip_buy's
+                                # logical-level exit design)
     profile_caps: dict = None,  # variant_name -> ProfileOpenPositionCap; shared across symbol runs
     sl_breakers: dict = None,   # variant_name -> ConsecutiveSLBreaker; shared across symbol runs
     data_source: str = "log",   # "log"/"shadow" both read trend_analysis_log (kept as synonyms
@@ -87,6 +92,7 @@ def run_all_variants(
         cap     = profile_caps.get(name) if profile_caps else None
         breaker = sl_breakers.get(name) if sl_breakers else None
         result  = engine.run(symbol=symbol, start=start, end=end, price_source=price_source,
+                             price_mode=price_mode,
                              profile_cap=cap, sl_breaker=breaker,
                              data_source=data_source, shadow_source=shadow_source,
                              tick_source=tick_source)

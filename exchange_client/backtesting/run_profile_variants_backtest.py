@@ -5,17 +5,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS,run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS,run_all_variants
 from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBreaker
 from backtesting.period import DAYS_HELP, parse_period, print_period
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run profile variant backtests")
-parser.add_argument("--days",    default="0-150",  #Can now give a range. 0-30, 60-90
+parser.add_argument("--days",    default="0-90",  #Can now give a range. 0-30, 60-90
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="trend", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp"],
+parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
@@ -27,14 +27,6 @@ parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
 parser.add_argument("--profile", default=None,
                     help="Run only this variant, e.g. p3_v4_ema50drop")
-parser.add_argument("--data-source", default="log", choices=["log", "shadow"],
-                    help="Candle source. Both values now read trend_analysis_log — kept as "
-                         "synonyms for back-compat with pre-cutover scripts, when 'log' was "
-                         "TradingView webhook data and 'shadow' was the fetched-candle table. "
-                         "Default: log")
-parser.add_argument("--shadow-source", default=None,
-                    help="Which provenance source to read, e.g. binance:USDT. Default: "
-                         "whichever source has the most rows for the symbol.")
 parser.add_argument("--tick-source", default="webhook", choices=["webhook", "path1m"],
                     help="Where intra-candle price path comes from in tick mode. "
                          "'webhook' = webhook_price_ticks (~2min sample, ~60d history). "
@@ -44,13 +36,17 @@ parser.add_argument("--price-source", default="ticks", choices=["ticks", "candle
                     help="Fill model. 'ticks' needs webhook_price_ticks coverage and falls "
                          "back to candle automatically when the window is not covered "
                          "(which is normal for long shadow backtests).")
+parser.add_argument("--price-mode", default="close", choices=["auto", "close", "low", "high"],
+                    help="Which candle price indicators/fills are evaluated against. "
+                         "'auto' resolves to 'low' for mean_reversion-strategy profiles and "
+                         "'close' otherwise (engine.run()'s default) — everything backtested "
+                         "in this repo so far was validated with 'close', so that's the "
+                         "default here too, not 'auto'.")
 args = parser.parse_args()
 
 start, end, period_label = parse_period(args.days)
 print_period(start, end, period_label)
-print(f"Candle source: {args.data_source}"
-      + (f" ({args.shadow_source})" if args.shadow_source else "")
-      + f"   |   fill model: {args.price_source}")
+print(f"fill model: {args.price_source}   |   price mode: {args.price_mode}")
 
 VARIANT_SETS = {
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
@@ -61,6 +57,7 @@ VARIANT_SETS = {
     "mrs_exp":     (MEAN_REV_SHORT_EXPERIMENTS,["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
     "trend_short": (TREND_SHORT_VARIANTS,      ["ETH_USDC", "XRP_USDC", "ZEC_USDC"]),
     "fade_short":  (FADE_SHORT_VARIANTS,      ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
+    "dip_buy":     (DIP_BUY_VARIANTS,          ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC"]),
 
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]
@@ -116,6 +113,8 @@ with get_db_session() as db:
             label   = "TREND FOLLOWING SHORT"
         elif set_name == "fade_short":
             label   = "FADE SHORT"
+        elif set_name == "dip_buy":
+            label   = "DIP BUY"
 
         # Build per-variant profile caps once, shared across all symbol runs for this set.
         # Each cap accumulates open positions across symbols so the limit is enforced
@@ -170,10 +169,9 @@ with get_db_session() as db:
                 show_trades=args.trades,
                 export_csv=csv_path,
                 price_source=args.price_source,
+                price_mode=args.price_mode,
                 profile_caps=profile_caps,
                 sl_breakers=sl_breakers,
-                data_source=args.data_source,
-                shadow_source=args.shadow_source,
                 tick_source=args.tick_source,
             )
 
