@@ -1704,10 +1704,13 @@ async function quickToggleInd(id) {
 
 // ── Indicator schemas ─────────────────────────────────────────────
 const IND_SCHEMAS = {
-  ema_slope:                [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01}],
+  ema_cross:                [{k:'use_slope',t:'bool',d:false},{k:'min_slope_pct',t:'number',d:0.01}],
+  ema_slope:                [{k:'ema',t:'number',d:20},{k:'direction',t:'select',o:['not_falling','rising','falling'],d:'not_falling'},{k:'min_slope_pct',t:'number',d:0.01},{k:'max_slope_pct',t:'number',d:null}],
   bollinger_bands:          [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:null},{k:'lookback_candles',t:'number',d:null}],
   adx_regime:               [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
   atr_regime:               [{k:'max_pct',t:'number',d:0.70},{k:'min_pct',t:'number',d:null},{k:'period',t:'number',d:14}],
+  distance_from_high:       [{k:'lookback_bars',t:'number',d:42},{k:'min_pct_below',t:'number',d:5},{k:'max_pct_below',t:'number',d:20}],
+  rsi_momentum:             [{k:'min_momentum',t:'number',d:null},{k:'max_momentum',t:'number',d:null},{k:'lookback_candles',t:'number',d:1}],
   rsi_threshold:            [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
   rsi_range:                [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
   rsi_oversold:             [{k:'max_value',t:'number',d:35},{k:'require_rising',t:'bool',d:true},{k:'min_momentum',t:'number',d:0.5}],
@@ -1723,7 +1726,7 @@ const IND_SCHEMAS = {
   price_extended_below_ema: [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:-0.7},{k:'max_gap_pct',t:'number',d:-10}],
   price_extended_above_ema: [{k:'ema',t:'number',d:20},{k:'min_gap_pct',t:'number',d:0.7},{k:'max_gap_pct',t:'number',d:10}],
   volume_spike:             [{k:'min_ratio',t:'number',d:1},{k:'max_ratio',t:'number',d:8}],
-  reversal_candle:          [{k:'pattern',t:'select',o:['hammer','doji','bull_close','higher_low','engulfing','shooting_star','bear_close','lower_high','bear_engulfing'],d:'hammer'},{k:'min_body_pct',t:'number',d:null},{k:'max_body_pct',t:'number',d:null},{k:'min_close_pct',t:'number',d:null},{k:'max_close_pct',t:'number',d:null}],
+  reversal_candle:          [{k:'pattern',t:'select',o:['hammer','doji','bull_close','higher_low','engulfing','shooting_star','bear_close','lower_high','bear_engulfing'],d:'hammer'},{k:'min_body_pct',t:'number',d:null},{k:'max_body_pct',t:'number',d:null},{k:'min_close_pct',t:'number',d:null},{k:'max_close_pct',t:'number',d:null},{k:'require_bull',t:'bool',d:null},{k:'require_bear',t:'bool',d:null},{k:'max_drop_from_close_pct',t:'number',d:null},{k:'max_rise_from_close_pct',t:'number',d:null}],
   bb_width_regime:          [{k:'required_direction',t:'select',o:['not_expanding','expanding','contracting'],d:'not_expanding'},{k:'lookback',t:'number',d:4}],
   bb_pct_b_momentum:        [{k:'required_direction',t:'select',o:['not_rising','rising','falling'],d:'not_rising'},{k:'lookback',t:'number',d:3}],
 };
@@ -1735,7 +1738,11 @@ function openEditInd(id) {
   document.getElementById('ind-sheet-title').textContent = 'Edit Indicator';
   document.getElementById('ind-del-btn').style.display = '';
   const typeSel = document.getElementById('ind-type');
-  typeSel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t===ind.indicator_type?' selected':''}>${t}</option>`).join('');
+  // Include the stored type even if it's missing from IND_SCHEMAS — otherwise
+  // the select silently falls back to the first option and a save would
+  // rewrite the indicator to a different type.
+  const typeList = IND_TYPES.includes(ind.indicator_type) ? IND_TYPES : [ind.indicator_type, ...IND_TYPES];
+  typeSel.innerHTML = typeList.map(t => `<option value="${t}"${t===ind.indicator_type?' selected':''}>${t}</option>`).join('');
   document.getElementById('ind-cat').value = ind.category || 'trend';
   document.getElementById('ind-enabled').checked = !!ind.enabled;
   document.getElementById('ind-hardstop').checked = !!ind.is_hard_stop;
