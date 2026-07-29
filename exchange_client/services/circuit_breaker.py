@@ -880,10 +880,11 @@ class CircuitBreakerService:
             cached_snap = self._snapshot_cache.get(key)
             current_value = self._get_portfolio_value(profile_name, account_id)
 
-            if current_value is None:
+            if current_value is None or current_value <= 0:
                 self.logger.warning(
                     f"[{profile_name}] Cannot update snapshot — "
-                    f"portfolio value unavailable"
+                    f"portfolio value unavailable or zero "
+                    f"(value={current_value})"
                 )
                 return
 

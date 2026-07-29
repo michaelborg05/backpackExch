@@ -937,7 +937,10 @@ def finalize_daily_snapshot(
     
     snapshot.ending_balance = ending_balance
     snapshot.pnl = ending_balance - snapshot.starting_balance
-    snapshot.pnl_pct = (snapshot.pnl / snapshot.starting_balance) * 100
+    if snapshot.starting_balance and snapshot.starting_balance != 0:
+        snapshot.pnl_pct = (snapshot.pnl / snapshot.starting_balance) * 100
+    else:
+        snapshot.pnl_pct = None
     
     db.commit()
     db.refresh(snapshot)
