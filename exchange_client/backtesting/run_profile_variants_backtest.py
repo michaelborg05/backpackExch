@@ -27,7 +27,7 @@ parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
 parser.add_argument("--profile", default=None,
                     help="Run only this variant, e.g. p3_v4_ema50drop")
-parser.add_argument("--tick-source", default="webhook", choices=["webhook", "path1m"],
+parser.add_argument("--tick-source", default="path1m", choices=["webhook", "path1m"],
                     help="Where intra-candle price path comes from in tick mode. "
                          "'webhook' = webhook_price_ticks (~2min sample, ~60d history). "
                          "'path1m' = price_path_shadow 1m OHLC expanded to O/H/L/C "
@@ -49,15 +49,16 @@ print_period(start, end, period_label)
 print(f"fill model: {args.price_source}   |   price mode: {args.price_mode}")
 
 VARIANT_SETS = {
+    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    "dip_buy":     (DIP_BUY_VARIANTS,          ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
-    "trend": (TREND_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","BNB_USDC","XRP_USDC","ZEC_USDC"]),
     "4hr_swing": (SWING_VARIANTS, ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","BNB_USDC","ZEC_USDC"]),
     "mr_short":    (MEAN_REV_SHORT_VARIANTS,    ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
     "mrs_exp":     (MEAN_REV_SHORT_EXPERIMENTS,["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
     "trend_short": (TREND_SHORT_VARIANTS,      ["ETH_USDC", "XRP_USDC", "ZEC_USDC"]),
     "fade_short":  (FADE_SHORT_VARIANTS,      ["SOL_USDC", "ETH_USDC", "BTC_USDC","XRP_USDC","ZEC_USDC"]),
-    "dip_buy":     (DIP_BUY_VARIANTS,          ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC"]),
 
 }
 sets_to_run = list(VARIANT_SETS.items()) if args.set == "all" else [(args.set, VARIANT_SETS[args.set])]

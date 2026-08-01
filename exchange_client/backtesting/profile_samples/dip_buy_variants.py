@@ -332,4 +332,80 @@ DIP_BUY_VARIANTS = {
         "arm_trailing_stop_pct": 2.0,
         "trailing_stop_pct": 0.6,
     },
+
+    # -------------------------------------------------------------------------
+    # SHORT-LOOKBACK deep-dip winners (2026-07 2yr tick-mode sweep, 8 ex-BNB
+    # symbols, price_path_shadow/path1m). The sweep varied distance_from_high
+    # lookback_bars {18=3d, 24=4d, 42=7d} x min_pct_below {6,9,12,15}. Finding:
+    # dip DEPTH (min_pct) is the dominant lever, not the lookback window —
+    # min6 LOSES money on every lookback, min15 is the highest-quality band.
+    # And a SHORTER lookback strictly beats the 7d baseline at a given depth:
+    # a 3-day high enters on genuinely deeper drops, lifting PF/WR without the
+    # ZEC concentration that sank the old 30d/20% config (topShare ~34%, and
+    # 8/8 symbols positive). These two are drop-in replacements for
+    # dip_v7_deep_dip_satellite (same daily gate, logical exit, TSL 4/2):
+    #
+    #   variant           lookback  min%   T   WR  avgPnL  totPnL    PF  +syms
+    #   3d_min12 (below)     3d       12  178  83%  1.83%   325%   2.53x   8/8   <- best total return
+    #   3d_min15 (below)     3d       15   99  89%  2.26%   223%   3.31x   8/8   <- best PF / diversification
+    #   7d_min12 (baseline) 7d       12  238  78%  0.98%   233%   1.58x   6/8
+    #
+    # BTC stays ~0/slightly negative in every config (unsolved weak leg).
+    # WARNING: 3d_min12 shares most of its entries with the 7d_min12 baseline
+    # (the 3d window is a strict subset gate) — do NOT run both in parallel
+    # unless they share a risk_group with max_positions_per_symbol=1.
+    "dip_v8_3d_deep_dip_min12": {
+        **_DIP_BUY_BASE,
+        "display_name": "dip_v8_3d_deep_dip_min12",
+        "entry_indicators": [
+            {"type": "distance_from_high", "params": {"lookback_bars": 18, "min_pct_below": 12.0, "max_pct_below": 30.0, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"side": "long", "min_value": 45, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 2,
+        "use_trailing_stop": True,
+        "arm_trailing_stop_pct": 4.0,
+        "trailing_stop_pct": 2.0,
+    },
+    "dip_v8_3d_deep_dip_min15": {
+        **_DIP_BUY_BASE,
+        "display_name": "dip_v8_3d_deep_dip_min15",
+        "entry_indicators": [
+            {"type": "distance_from_high", "params": {"lookback_bars": 18, "min_pct_below": 15.0, "max_pct_below": 30.0, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"side": "long", "min_value": 45, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 2,
+        "use_trailing_stop": True,
+        "arm_trailing_stop_pct": 4.0,
+        "trailing_stop_pct": 2.0,
+    },
+
+    # -------------------------------------------------------------------------
+    # MAJORS dip-buyer (2026-07 2yr tick-mode grid on BTC/ETH/SOL/BNB, lookback
+    # {18=3d, 30=5d, 42=7d} x min_pct {5,7,9,12}). The hypothesis was that the
+    # big caps dip less over a short window so a SHALLOWER threshold would find
+    # more trades — the data rejected it: PF falls monotonically as min_pct
+    # loosens (5.6x @ min12 -> ~1.05x @ min5), and min5's avg PnL (0.06-0.16%)
+    # won't clear fees. Depth still wins even on majors; there just aren't many
+    # setups (26 trades/2yr across all four at 3d/min12). Per-symbol:
+    #   BTC — no edge (2-3 trades, ~flat/negative everywhere); EXCLUDED here.
+    #   ETH — workhorse, positive in all 12 variants.
+    #   SOL — strong at min9-12, fades at min5.
+    #   BNB — good at min9-12 (+20..+28%) but BLEEDS at min5-7 (down to -26%).
+    # Chosen config = 5d / min12 (best total return of the fully-positive band,
+    # PF 3.34, 42T, ETH/SOL/BNB all green), BTC dropped. Same daily gate /
+    # logical exit / TSL 4/2 as the satellite family. Runs a separate, deeper
+    # profile from the alt-heavy dip_v8 (majors need min12, not min15).
+    "dip_v9_majors": {
+        **_DIP_BUY_BASE,
+        "display_name": "dip_v9_majors",
+        "symbols": ["ETH_USDC", "SOL_USDC", "BNB_USDC"],
+        "entry_indicators": [
+            {"type": "distance_from_high", "params": {"lookback_bars": 30, "min_pct_below": 12.0, "max_pct_below": 30.0, "hard_stop": True}},
+            {"type": "rsi_overbought", "params": {"side": "long", "min_value": 45, "hard_stop": True}},
+        ],
+        "min_entry_indicators_required": 2,
+        "use_trailing_stop": True,
+        "arm_trailing_stop_pct": 4.0,
+        "trailing_stop_pct": 2.0,
+    },
 }
