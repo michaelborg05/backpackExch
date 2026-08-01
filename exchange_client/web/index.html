@@ -3016,6 +3016,7 @@ const IND_SCHEMAS = {
   bollinger_bands:             [{k:'band',t:'select',o:['lower','upper','middle'],d:'lower'},{k:'mode',t:'select',o:['pct_b','breach'],d:'pct_b'},{k:'min_pct_b',t:'number',d:null},{k:'max_pct_b',t:'number',d:null},{k:'lookback_candles',t:'number',d:null}],
   adx_regime:                  [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
   atr_regime:                  [{k:'max_pct',t:'number',d:0.70},{k:'min_pct',t:'number',d:null},{k:'period',t:'number',d:14}],
+  distance_from_high:          [{k:'lookback_bars',t:'number',d:42},{k:'min_pct_below',t:'number',d:5},{k:'max_pct_below',t:'number',d:20}],
   rsi_momentum:                [{k:'min_momentum',t:'number',d:null},{k:'max_momentum',t:'number',d:null},{k:'lookback_candles',t:'number',d:1}],
   rsi_threshold:               [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
   rsi_range:                   [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],
@@ -3283,7 +3284,11 @@ function openEditIndP(id) {
   document.getElementById('imodp-group').value = ind.indicator_group || '';
   document.getElementById('imodp-group-row').style.display = _advancedMode ? 'flex' : 'none';
   const sel = document.getElementById('imodp-type');
-  sel.innerHTML = IND_TYPES.map(t => `<option value="${t}"${t === ind.indicator_type ? ' selected' : ''}>${t}</option>`).join('');
+  // Include the stored type even if it's missing from IND_SCHEMAS — otherwise
+  // the select silently falls back to the first option and a save would
+  // rewrite the indicator to a different type.
+  const typeList = IND_TYPES.includes(ind.indicator_type) ? IND_TYPES : [ind.indicator_type, ...IND_TYPES];
+  sel.innerHTML = typeList.map(t => `<option value="${t}"${t === ind.indicator_type ? ' selected' : ''}>${t}</option>`).join('');
   const cleanParams = Object.fromEntries(Object.entries(ind.params ?? {}).filter(([k]) => k !== 'hard_stop'));
   document.getElementById('imodp-json').value = JSON.stringify(cleanParams, null, 2);
   document.getElementById('imodp-err').textContent = '';
