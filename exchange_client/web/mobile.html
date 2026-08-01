@@ -1050,8 +1050,8 @@ async function loadDashboard() {
     // Timestamp
     document.getElementById('dash-ts').textContent = fmtNow();
 
-    // Profile breakdown
-    renderProfileGrid(profArr, pnlByProf, posArr);
+    // Profile breakdown — active profiles only
+    renderProfileGrid(active, pnlByProf, posArr);
 
     // Regime from /monitoring/status
     renderRegime(mon);
@@ -1090,7 +1090,7 @@ function renderProfileGrid(profiles, pnlByProf, positions) {
   positions.forEach(p => { posMap[p.profile_name] = (posMap[p.profile_name] || 0) + 1; });
   const container = document.getElementById('profgrid');
   if (!profiles.length) {
-    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:14px">No profiles</div>';
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:14px">No active profiles</div>';
     return;
   }
   container.innerHTML = profiles.map(p => {
