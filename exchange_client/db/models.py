@@ -194,6 +194,7 @@ class Position(Base):
         CheckConstraint("direction IN ('LONG', 'SHORT') OR direction IS NULL", name="valid_position_direction"),
         Index('ix_positions_profile_symbol_status', 'profile_name', 'symbol', 'status'),
         Index('ix_positions_opened_at', 'created_at'),
+        Index('ix_positions_status_closed_at', 'status', 'closed_at'),
     )
 
 
