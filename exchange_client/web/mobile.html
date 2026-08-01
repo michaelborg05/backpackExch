@@ -525,23 +525,21 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         </div>
       </div>
 
-      <!-- Position Sizing accordion -->
+      <!-- Position Limits accordion -->
       <div class="acc">
         <div class="acc-hdr" onclick="toggleAcc('sizing')">
-          <span class="acc-hdr-title">Position Sizing</span>
+          <span class="acc-hdr-title">Position Limits &amp; Risk</span>
           <span class="acc-arrow" id="arr-sizing">&#8964;</span>
         </div>
         <div class="acc-body" id="body-sizing">
-          <div class="frow">
-            <div class="field"><label>Default Order (USDC)</label><input id="f-ordsize" type="number" step="1" placeholder="100"></div>
-            <div class="field"><label>Max Position Size %</label><input id="f-maxpos-pct" type="number" step="1" placeholder="40"></div>
-          </div>
           <div class="frow">
             <div class="field"><label>Max Open (per Symbol)</label><input id="f-maxpos" type="number" step="1" placeholder="5"></div>
             <div class="field"><label>Max Open (per Profile)</label><input id="f-maxpos-profile" type="number" step="1" min="1" placeholder="No cap"></div>
           </div>
           <div class="frow">
-            <div class="field"><label>Max Portfolio Exposure %</label><input id="f-maxexposure" type="number" step="1" placeholder="80"></div>
+            <div class="field"><label>Risk Group</label><input id="f-riskgroup" type="text" placeholder="Shared limits — blank = independent"></div>
+          </div>
+          <div class="frow">
             <div class="field" id="f-leverage-field-m"><label>Leverage Multiplier</label><input id="f-leverage" type="number" step="0.5" min="1" max="10" placeholder="1.0"></div>
           </div>
         </div>
@@ -757,7 +755,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     </div>
     <div class="frow">
       <div class="field"><label>Order Size (USDC)</label><input id="sym-ordsize" type="number" step="1" placeholder="100"></div>
-      <div class="field"><label>Max Position %</label><input id="sym-maxpos" type="number" step="1" placeholder="Optional"></div>
+      <div class="field"><label>Max Position %</label><input id="sym-maxpos" type="number" step="1" placeholder="40"></div>
     </div>
     <div class="tgl-list">
       <div class="tgl-row"><div class="tgl-info"><div class="tgl-name">Enabled</div></div><label class="tgl-sw"><input type="checkbox" id="sym-enabled" checked><span class="tgl-track"></span></label></div>
@@ -1272,10 +1270,9 @@ function updateProfileUI(p) {
   setFld('f-ts', p.trailing_stop_pct); setFld('f-arm', p.arm_trailing_stop_pct);
   setChk('f-use-ts', p.use_trailing_stop);
 
-  // Position sizing
-  setFld('f-ordsize', p.default_order_size_usdc); setFld('f-maxpos-pct', p.max_position_size_pct);
+  // Position limits & risk
   setFld('f-maxpos', p.max_open_positions); setFld('f-maxpos-profile', p.max_open_positions_per_profile);
-  setFld('f-maxexposure', p.max_portfolio_exposure_pct); setFld('f-leverage', p.leverage_multiplier);
+  setFld('f-riskgroup', p.risk_group); setFld('f-leverage', p.leverage_multiplier);
 
   // Signal generation
   setFld('f-trend-tf', p.trend_timeframe); setFld('f-entry-tf', p.entry_timeframe);
@@ -1328,11 +1325,9 @@ async function saveProfileSettings() {
         trailing_stop_pct:       numOrNull('f-ts'),
         arm_trailing_stop_pct:   numOrNull('f-arm'),
         use_trailing_stop:       chkVal('f-use-ts'),
-        default_order_size_usdc: numOrNull('f-ordsize'),
-        max_position_size_pct:   numOrNull('f-maxpos-pct'),
         max_open_positions:      numOrNull('f-maxpos'),
         max_open_positions_per_profile: numOrNull('f-maxpos-profile'),
-        max_portfolio_exposure_pct: numOrNull('f-maxexposure'),
+        risk_group:              strOrNull('f-riskgroup'),
         leverage_multiplier:     numOrNull('f-leverage'),
         trend_timeframe:         strOrNull('f-trend-tf'),
         entry_timeframe:         strOrNull('f-entry-tf'),
@@ -1523,12 +1518,14 @@ async function saveSymbolMobile() {
   if (!symbol) { errEl.textContent = 'Symbol required'; errEl.style.display = 'block'; return; }
   const size = document.getElementById('sym-ordsize').value.trim();
   if (!size) { errEl.textContent = 'Order size required'; errEl.style.display = 'block'; return; }
+  const maxpos = document.getElementById('sym-maxpos').value.trim();
+  if (!maxpos) { errEl.textContent = 'Max position % required'; errEl.style.display = 'block'; return; }
   try {
     await api('/config/symbol/' + _currentProfile.name + '/' + symbol, {
       method: 'POST',
       body: JSON.stringify({
         order_size_usdc: parseFloat(size),
-        max_position_size_pct: numOrNull('sym-maxpos'),
+        max_position_size_pct: parseFloat(maxpos),
         enabled: chkVal('sym-enabled'),
       })
     });

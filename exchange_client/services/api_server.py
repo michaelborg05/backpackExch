@@ -484,10 +484,12 @@ async def test_entry_signal(profile_name: str, symbol: str, side: str = "buy"):
     by _monitor_orders on the next cycle). Use it to test maker execution live on
     a small size.
 
-    Size comes from the profile (default_order_size_usdc) — point this at a
-    profile configured with a small order size and entry_order_mode set as you
-    want to test. This BYPASSES caps/cooldowns/circuit-breaker (it calls the
-    executor directly), so it fires regardless — do not leave it exposed in prod.
+    Size comes from the per-symbol config on the Symbols page (order_size_usdc) —
+    the symbol must have a config row for the profile or the order is refused.
+    Point this at a symbol configured with a small order size and set the
+    profile's entry_order_mode as you want to test. This BYPASSES
+    caps/cooldowns/circuit-breaker (it calls the executor directly), so it fires
+    regardless — do not leave it exposed in prod.
 
     The monitoring service MUST be running for a maker order to fill (the
     reconcile happens in its loop). Watch the orders/positions tables + Telegram.
@@ -542,7 +544,7 @@ async def test_entry_signal(profile_name: str, symbol: str, side: str = "buy"):
         "action": action.value,
         "entry_order_mode": mode,
         "actual_outcome": diag or "no diagnostic recorded",
-        "note": "Size came from default_order_size_usdc.",
+        "note": "Size came from the per-symbol config (order_size_usdc).",
     }
     if actual_path == "maker_resting":
         result["result"] = ("✅ Maker limit is RESTING — check the orders table "

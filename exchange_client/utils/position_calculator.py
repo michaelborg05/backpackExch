@@ -122,15 +122,18 @@ class PositionCalculator:
         with get_db_session() as db:
             symbol_config = get_symbol_config(db, profile.name, symbol)
             
-            # Calculate target order size in USDC (always fixed amount)
-            if symbol_config and symbol_config.order_size_usdc:
-                # Use symbol-specific dollar amount
-                order_size_usdc = Decimal(str(symbol_config.order_size_usdc))
-                reason = f"Symbol override: ${order_size_usdc}"
-            else:
-                # Use profile default dollar amount
-                order_size_usdc = Decimal(str(profile.default_order_size_usdc))
-                reason = f"Profile default: ${order_size_usdc}"
+            # Order size comes from the per-symbol config (the Symbols page is the
+            # single source of truth). Signal generation only scans symbols that have
+            # a config row, so this should always be present for live signals; manual
+            # or test order paths that bypass that gate are refused here rather than
+            # falling back to a profile-level default.
+            if not (symbol_config and symbol_config.order_size_usdc):
+                return None, (
+                    f"No symbol config for {symbol} on profile {profile.name} "
+                    f"— set an order size on the Symbols page"
+                )
+            order_size_usdc = Decimal(str(symbol_config.order_size_usdc))
+            reason = f"Symbol config: ${order_size_usdc}"
             
             # Check against max position size (as % of portfolio, scaled by leverage for perps)
             leverage = Decimal(str(profile.leverage_multiplier)) if profile.leverage_multiplier and profile.leverage_multiplier > 1.0 else Decimal("1.0")
