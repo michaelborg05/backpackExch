@@ -1005,37 +1005,24 @@ async function checkHealth() {
 // ── Dashboard ─────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    // Fire all requests in parallel; use safeFetch so one failure doesn't block others
-    const [positions, dailyPnl, profiles, mon] = await Promise.all([
-      safeFetch('/positions'),
-      safeFetch('/profiles/daily-pnl'),
-      safeFetch('/profiles'),
-      safeFetch('/monitoring/status'),
-    ]);
+    // Single aggregate call — replaces /positions + /profiles/daily-pnl +
+    // /profiles + /monitoring/status + one portfolio call per account
+    const d = await safeFetch('/dashboard/summary');
+    if (!d) return;
 
-    // Portfolio: sum per-profile portfolio values (dedup by account_id)
-    const profArr = Array.isArray(profiles) ? profiles : [];
-    const seenAccounts = new Set();
-    const portPromises = profArr.map(p => {
-      const dedup = p.account_id ?? p.name;
-      if (seenAccounts.has(dedup)) return Promise.resolve(null);
-      seenAccounts.add(dedup);
-      return p.account_id ? safeFetch('/accounts/' + p.account_id + '/portfolio') : safeFetch('/portfolio/' + p.name);
-    });
-    const portResults = await Promise.all(portPromises);
-    const totalPort = portResults.reduce((s, r) => s + parseFloat(r?.total_value ?? 0), 0);
-    document.getElementById('k-port').textContent = fmtUsd(totalPort);
+    // Portfolio (server sums per-account values, deduped by account)
+    document.getElementById('k-port').textContent = fmtUsd(parseFloat(d.portfolio_total) || 0);
 
     // Unrealised PnL
-    const posArr = Array.isArray(positions) ? positions : [];
+    const posArr = Array.isArray(d.positions) ? d.positions : [];
     const upnl = posArr.reduce((s, p) => s + (parseFloat(p.unrealised_pnl) || 0), 0);
     const upnlEl = document.getElementById('k-upnl');
     upnlEl.textContent = fmt$(upnl);
     upnlEl.className = 'kpi-val ' + (upnl >= 0 ? 'g' : 'r');
     document.getElementById('k-upnl-sub').textContent = posArr.length + ' open position' + (posArr.length !== 1 ? 's' : '');
 
-    // Daily PnL — endpoint returns { profile_name: { total_pnl, realized_pnl, ... } }
-    const pnlByProf = (dailyPnl && typeof dailyPnl === 'object' && !Array.isArray(dailyPnl)) ? dailyPnl : {};
+    // Daily PnL — { profile_name: { total_pnl, realized_pnl, ... } }
+    const pnlByProf = (d.daily_pnl && typeof d.daily_pnl === 'object' && !Array.isArray(d.daily_pnl)) ? d.daily_pnl : {};
     const dpnl = Object.values(pnlByProf).reduce((s, p) => s + (parseFloat(p.total_pnl) || 0), 0);
     const dpnlEl = document.getElementById('k-dpnl');
     dpnlEl.textContent = fmt$(dpnl);
@@ -1043,18 +1030,19 @@ async function loadDashboard() {
     document.getElementById('k-dpnl-sub').textContent = fmtSign$(dpnl);
 
     // Active profiles
+    const profArr = Array.isArray(d.profiles) ? d.profiles : [];
     const active = profArr.filter(p => p.is_active);
-    document.getElementById('k-profs').textContent = active.length;
-    document.getElementById('k-profs-sub').textContent = profArr.length + ' total';
+    document.getElementById('k-profs').textContent = d.active_profiles ?? active.length;
+    document.getElementById('k-profs-sub').textContent = (d.total_profiles ?? profArr.length) + ' total';
 
     // Timestamp
     document.getElementById('dash-ts').textContent = fmtNow();
 
-    // Profile breakdown
-    renderProfileGrid(profArr, pnlByProf, posArr);
+    // Profile breakdown — active profiles only
+    renderProfileGrid(active, pnlByProf, posArr);
 
-    // Regime from /monitoring/status
-    renderRegime(mon);
+    // Regime from monitoring status
+    renderRegime(d.monitoring);
 
   } catch(e) { console.warn('loadDashboard', e); }
 }
@@ -1090,7 +1078,7 @@ function renderProfileGrid(profiles, pnlByProf, positions) {
   positions.forEach(p => { posMap[p.profile_name] = (posMap[p.profile_name] || 0) + 1; });
   const container = document.getElementById('profgrid');
   if (!profiles.length) {
-    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:14px">No profiles</div>';
+    container.innerHTML = '<div style="color:var(--txd);font-size:11px;text-align:center;padding:14px">No active profiles</div>';
     return;
   }
   container.innerHTML = profiles.map(p => {

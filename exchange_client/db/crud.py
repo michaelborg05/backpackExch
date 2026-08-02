@@ -205,6 +205,24 @@ def get_open_positions(db: Session, profile_name: str, symbol: Optional[str] = N
         query = query.filter(Position.symbol == symbol)
     return query.all()
 
+def get_open_positions_for_profiles(db: Session, profile_names: List[str]):
+    """Get all OPEN positions across a set of profiles in a single query.
+
+    Used by the dashboard endpoints so they don't fire one query per profile.
+    """
+    if not profile_names:
+        return []
+    return (
+        db.query(Position)
+        .filter(
+            Position.profile_name.in_(profile_names),
+            Position.status == "OPEN",
+        )
+        .order_by(Position.profile_name, Position.created_at)
+        .all()
+    )
+
+
 def count_open_positions_for_profiles(
     db: Session,
     profile_names: List[str],

@@ -962,6 +962,53 @@ def get_portfolio(profile_name: str, quote_asset: str = "USDC"):
     return portfolio.get_portfolio_summary(profile_name=profile_name, quote_asset=quote_asset)
 
 
+def _open_positions_payload(db, profile_names: list) -> list:
+    """
+    All OPEN positions for the given profiles as dashboard rows, fetched in a
+    single query and enriched with live mark price / unrealised PnL from the
+    price cache. Shared by /positions, /profiles/daily-pnl and /dashboard/summary.
+    """
+    from db.crud import get_open_positions_for_profiles
+    from cache.price_cache import get_price_cache
+
+    price_cache = get_price_cache()
+    result = []
+
+    for pos in get_open_positions_for_profiles(db, profile_names):
+        raw_mark = price_cache.get_price(pos.symbol)
+        direction = (pos.direction or "LONG").upper()
+        is_short = direction == "SHORT"
+        try:
+            mark = float(raw_mark) if raw_mark is not None else None
+            entry = float(pos.entry_price)
+            qty = float(pos.remaining_quantity or pos.quantity)
+            price_diff = (entry - mark) if is_short else (mark - entry)
+            unrealised_pnl = round(price_diff * qty, 4) if mark is not None else None
+            pnl_pct = round((price_diff / entry) * 100, 3) if mark and entry else None
+        except (TypeError, ValueError, ZeroDivisionError):
+            mark = None
+            unrealised_pnl = None
+            pnl_pct = None
+
+        result.append({
+            "profile_name":       pos.profile_name,
+            "symbol":             pos.symbol,
+            "side":               direction.lower(),
+            "quantity":           str(pos.remaining_quantity or pos.quantity),
+            "entry_price":        str(pos.entry_price),
+            "mark_price":         mark,
+            "unrealised_pnl":     unrealised_pnl,
+            "pnl_pct":            pnl_pct,
+            "tp_price":           str(pos.tp_price) if pos.tp_price else None,
+            "sl_price":           str(pos.sl_price) if pos.sl_price else None,
+            "trailing_sl_price":  str(pos.trailing_sl_price) if pos.trailing_sl_price else None,
+            "trailing_stop_armed": pos.trailing_stop_armed,
+            "created_at":         pos.created_at.isoformat() if pos.created_at else None,
+        })
+
+    return result
+
+
 @app.get("/positions", dependencies=[Depends(require_read_permission)])
 async def get_user_open_positions(
     current_user=Depends(get_dashboard_user),
@@ -970,49 +1017,10 @@ async def get_user_open_positions(
     Return all open DB positions across every profile the logged-in user can access.
     Enriches each row with live mark price and unrealised PnL from the price cache.
     """
-    from db.crud import get_open_positions
     from db.utils import get_db_session
-    from cache.price_cache import get_price_cache
-
-    price_cache = get_price_cache()
-    result = []
 
     with get_db_session() as db:
-        for profile_name in current_user.profiles:
-            positions = get_open_positions(db, profile_name)
-            for pos in positions:
-                raw_mark = price_cache.get_price(pos.symbol)
-                direction = (pos.direction or "LONG").upper()
-                is_short = direction == "SHORT"
-                try:
-                    mark = float(raw_mark) if raw_mark is not None else None
-                    entry = float(pos.entry_price)
-                    qty = float(pos.remaining_quantity or pos.quantity)
-                    price_diff = (entry - mark) if is_short else (mark - entry)
-                    unrealised_pnl = round(price_diff * qty, 4) if mark is not None else None
-                    pnl_pct = round((price_diff / entry) * 100, 3) if mark and entry else None
-                except (TypeError, ValueError, ZeroDivisionError):
-                    mark = None
-                    unrealised_pnl = None
-                    pnl_pct = None
-
-                result.append({
-                    "profile_name":       profile_name,
-                    "symbol":             pos.symbol,
-                    "side":               direction.lower(),
-                    "quantity":           str(pos.remaining_quantity or pos.quantity),
-                    "entry_price":        str(pos.entry_price),
-                    "mark_price":         mark,
-                    "unrealised_pnl":     unrealised_pnl,
-                    "pnl_pct":            pnl_pct,
-                    "tp_price":           str(pos.tp_price) if pos.tp_price else None,
-                    "sl_price":           str(pos.sl_price) if pos.sl_price else None,
-                    "trailing_sl_price":  str(pos.trailing_sl_price) if pos.trailing_sl_price else None,
-                    "trailing_stop_armed": pos.trailing_stop_armed,
-                    "created_at":         pos.created_at.isoformat() if pos.created_at else None,
-                })
-
-    return result
+        return _open_positions_payload(db, list(current_user.profiles))
 
 @app.get("/portfolio/{profile_name}/total", dependencies=[Depends(require_read_permission)])
 def get_total_portfolio_value(profile_name: str, quote_asset: str = "USDC"):
@@ -1295,22 +1303,17 @@ async def get_account_daily_summaries():
 
     return summaries
 
-@app.get("/profiles/daily-pnl", dependencies=[Depends(require_read_permission)])
-async def get_profiles_daily_pnl(current_user=Depends(get_dashboard_user)):
+def _daily_pnl_payload(db, profile_names: list, position_rows: list) -> dict:
     """
-    Per-profile P&L breakdown for today, sourced from the positions table.
-    Realized = SUM(profit) on CLOSED positions since each profile's day-start snapshot.
-    Unrealized = live mark vs entry for each OPEN position.
-    Returns a dict keyed by profile_name.
+    Per-profile P&L breakdown for today, keyed by profile_name.
+    Realized = SUM(profit) on CLOSED positions since each profile's day-start
+    snapshot (one grouped query). Unrealized = summed from the already-enriched
+    open-position rows produced by _open_positions_payload (no extra queries).
     """
     from datetime import datetime, timezone
-    from db.crud import get_open_positions, get_daily_realized_pnl_by_profile
-    from db.utils import get_db_session
-    from cache.price_cache import get_price_cache
+    from db.crud import get_daily_realized_pnl_by_profile
 
     circuit_breaker = get_circuit_breaker()
-    price_cache = get_price_cache()
-    profile_names = list(current_user.profiles)
 
     # Day-start per profile from snapshot cache; fall back to UTC midnight
     utc_midnight = datetime.combine(
@@ -1319,44 +1322,118 @@ async def get_profiles_daily_pnl(current_user=Depends(get_dashboard_user)):
     ).replace(tzinfo=timezone.utc)
 
     day_starts = {p: circuit_breaker.get_day_start(p) or utc_midnight for p in profile_names}
-    earliest = min(day_starts.values())
+    earliest = min(day_starts.values()) if day_starts else utc_midnight
+
+    realized_map = get_daily_realized_pnl_by_profile(db, profile_names, earliest)
+
+    unrealized = {p: 0.0 for p in profile_names}
+    open_counts = {p: 0 for p in profile_names}
+    for row in position_rows:
+        name = row["profile_name"]
+        if name not in open_counts:
+            continue
+        open_counts[name] += 1
+        if row["unrealised_pnl"] is not None:
+            unrealized[name] += row["unrealised_pnl"]
 
     result = {}
-    with get_db_session() as db:
-        realized_map = get_daily_realized_pnl_by_profile(db, profile_names, earliest)
-
-        for p in profile_names:
-            r = realized_map.get(p, {"realized_pnl": 0.0, "trade_count": 0})
-
-            unrealized_pnl = 0.0
-            open_count = 0
-            for pos in get_open_positions(db, p):
-                open_count += 1
-                mark = price_cache.get_price(pos.symbol)
-                if mark is not None:
-                    try:
-                        entry = float(pos.entry_price)
-                        qty = float(pos.remaining_quantity or pos.quantity)
-                        direction = (pos.direction or "LONG").upper()
-                        if direction == "SHORT":
-                            unrealized_pnl += (entry - float(mark)) * qty
-                        else:
-                            unrealized_pnl += (float(mark) - entry) * qty
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        pass
-
-            total_pnl = r["realized_pnl"] + unrealized_pnl
-
-            result[p] = {
-                "realized_pnl":   round(r["realized_pnl"], 4),
-                "unrealized_pnl": round(unrealized_pnl, 4),
-                "total_pnl":      round(total_pnl, 4),
-                "trade_count":    r["trade_count"],
-                "open_positions": open_count,
-                "day_start":      day_starts[p].isoformat(),
-            }
+    for p in profile_names:
+        r = realized_map.get(p, {"realized_pnl": 0.0, "trade_count": 0})
+        total_pnl = r["realized_pnl"] + unrealized[p]
+        result[p] = {
+            "realized_pnl":   round(r["realized_pnl"], 4),
+            "unrealized_pnl": round(unrealized[p], 4),
+            "total_pnl":      round(total_pnl, 4),
+            "trade_count":    r["trade_count"],
+            "open_positions": open_counts[p],
+            "day_start":      day_starts[p].isoformat(),
+        }
 
     return result
+
+
+@app.get("/profiles/daily-pnl", dependencies=[Depends(require_read_permission)])
+async def get_profiles_daily_pnl(current_user=Depends(get_dashboard_user)):
+    """
+    Per-profile P&L breakdown for today, sourced from the positions table.
+    Returns a dict keyed by profile_name.
+    """
+    from db.utils import get_db_session
+
+    profile_names = list(current_user.profiles)
+    with get_db_session() as db:
+        position_rows = _open_positions_payload(db, profile_names)
+        return _daily_pnl_payload(db, profile_names, position_rows)
+
+
+@app.get("/dashboard/summary", dependencies=[Depends(require_read_permission)])
+async def get_dashboard_summary(current_user=Depends(get_dashboard_user)):
+    """
+    Single-call payload for the dashboard: open positions, per-profile daily
+    P&L, portfolio total, profile list/counts, and monitoring status.
+    Replaces the ~16 requests (and ~30 DB queries) the mobile dashboard
+    previously fired per refresh with one request and three queries.
+    """
+    from db.utils import get_db_session
+    from db.models import TradingProfileDB
+
+    profile_names = list(current_user.profiles)
+
+    with get_db_session() as db:
+        profiles = (
+            db.query(
+                TradingProfileDB.name,
+                TradingProfileDB.display_name,
+                TradingProfileDB.is_active,
+                TradingProfileDB.account_id,
+            )
+            .order_by(TradingProfileDB.name)
+            .all()
+        )
+        position_rows = _open_positions_payload(db, profile_names)
+        daily_pnl = _daily_pnl_payload(db, profile_names, position_rows)
+
+    # Portfolio total — sum per-account values, deduped so profiles sharing an
+    # exchange account are only counted once (same logic the mobile JS used).
+    total = Decimal("0")
+    seen_accounts = set()
+    for p in profiles:
+        dedup_key = p.account_id if p.account_id is not None else p.name
+        if dedup_key in seen_accounts:
+            continue
+        seen_accounts.add(dedup_key)
+        try:
+            if p.account_id is not None:
+                acct = get_account_portfolio(p.account_id)
+                total += Decimal(str(acct.get("total_value", "0")))
+            else:
+                summary = get_portfolio_cache().get_portfolio_summary(profile_name=p.name)
+                total += Decimal(str(summary.get("total_value", 0) or 0))
+        except Exception as e:
+            apiserver_logger.warning(f"dashboard summary: portfolio value failed for {p.name}: {e}")
+
+    try:
+        service = get_monitoring_service()
+        monitoring = service.get_status() if service else None
+    except Exception:
+        monitoring = None
+
+    return {
+        "portfolio_total": str(round(total, 2)),
+        "positions":       position_rows,
+        "daily_pnl":       daily_pnl,
+        "profiles": [
+            {
+                "name":         p.name,
+                "display_name": p.display_name,
+                "is_active":    bool(p.is_active),
+            }
+            for p in profiles
+        ],
+        "active_profiles": sum(1 for p in profiles if p.is_active),
+        "total_profiles":  len(profiles),
+        "monitoring":      monitoring,
+    }
 
 
 @app.get("/signals/status/{profile_name}")
@@ -3010,18 +3087,24 @@ async def list_profiles():
     Return all trading profiles with their full DB config.
     API key/secret are returned as hints only (last 6 chars).
     """
+    from sqlalchemy.orm import joinedload
     from db.utils import get_db_session
     from db.models import TradingProfileDB, CircuitBreakerConfig
 
     with get_db_session() as db:
-        profiles = db.query(TradingProfileDB).order_by(TradingProfileDB.name).all()
-        result = []
-        for p in profiles:
-            cb = db.query(CircuitBreakerConfig).filter(
-                CircuitBreakerConfig.profile_name == p.name
-            ).first()
-            result.append(_serialize_profile(p, cb))
-        return result
+        # Eager-load the account relationship (used for the key hint) and fetch
+        # all circuit-breaker configs in one query instead of one per profile.
+        profiles = (
+            db.query(TradingProfileDB)
+            .options(joinedload(TradingProfileDB.account))
+            .order_by(TradingProfileDB.name)
+            .all()
+        )
+        cb_rows = db.query(CircuitBreakerConfig).filter(
+            CircuitBreakerConfig.profile_name.in_([p.name for p in profiles])
+        ).all()
+        cb_map = {cb.profile_name: cb for cb in cb_rows}
+        return [_serialize_profile(p, cb_map.get(p.name)) for p in profiles]
 
 
 # ---------------------------------------------------------------------------
