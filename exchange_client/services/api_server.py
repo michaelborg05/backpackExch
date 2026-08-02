@@ -1369,10 +1369,13 @@ async def get_profiles_daily_pnl(current_user=Depends(get_dashboard_user)):
 @app.get("/dashboard/summary", dependencies=[Depends(require_read_permission)])
 async def get_dashboard_summary(current_user=Depends(get_dashboard_user)):
     """
-    Single-call payload for the dashboard: open positions, per-profile daily
-    P&L, portfolio total, profile list/counts, and monitoring status.
-    Replaces the ~16 requests (and ~30 DB queries) the mobile dashboard
-    previously fired per refresh with one request and three queries.
+    Single-call payload for the dashboards: open positions, per-profile daily
+    P&L, portfolio total, per-account portfolio values, per-profile circuit
+    breaker daily summaries, account-level daily summaries, profile
+    list/counts, and monitoring status. Replaces the ~16 requests (and ~30 DB
+    queries) the mobile dashboard previously fired per refresh — and the
+    similar fan-out on the desktop overview — with one request and three
+    queries; everything else comes from in-memory caches.
     """
     from db.utils import get_db_session
     from db.models import TradingProfileDB
@@ -1393,9 +1396,11 @@ async def get_dashboard_summary(current_user=Depends(get_dashboard_user)):
         position_rows = _open_positions_payload(db, profile_names)
         daily_pnl = _daily_pnl_payload(db, profile_names, position_rows)
 
-    # Portfolio total — sum per-account values, deduped so profiles sharing an
-    # exchange account are only counted once (same logic the mobile JS used).
+    # Portfolio values — one per exchange account, deduped so profiles sharing
+    # an account are only counted once (same logic the dashboard JS used).
+    # Keys are str(account_id), or the profile name for account-less profiles.
     total = Decimal("0")
+    account_values = {}
     seen_accounts = set()
     for p in profiles:
         dedup_key = p.account_id if p.account_id is not None else p.name
@@ -1405,12 +1410,31 @@ async def get_dashboard_summary(current_user=Depends(get_dashboard_user)):
         try:
             if p.account_id is not None:
                 acct = get_account_portfolio(p.account_id)
-                total += Decimal(str(acct.get("total_value", "0")))
+                value = Decimal(str(acct.get("total_value", "0")))
             else:
                 summary = get_portfolio_cache().get_portfolio_summary(profile_name=p.name)
-                total += Decimal(str(summary.get("total_value", 0) or 0))
+                value = Decimal(str(summary.get("total_value", 0) or 0))
+            total += value
+            account_values[str(dedup_key)] = str(value)
         except Exception as e:
             apiserver_logger.warning(f"dashboard summary: portfolio value failed for {p.name}: {e}")
+
+    # Circuit-breaker daily summaries (cache-only reads, no DB I/O):
+    # per accessible profile for the desktop profile cards, plus the
+    # per-account list used for the Today's P&L KPI (no double-counting).
+    circuit_breaker = get_circuit_breaker()
+    circuit_breakers = {}
+    for name in profile_names:
+        try:
+            circuit_breakers[name] = circuit_breaker.get_daily_summary(name)
+        except Exception as e:
+            apiserver_logger.warning(f"dashboard summary: CB summary failed for {name}: {e}")
+
+    try:
+        account_summaries = await get_account_daily_summaries()
+    except Exception as e:
+        apiserver_logger.warning(f"dashboard summary: account summaries failed: {e}")
+        account_summaries = []
 
     try:
         service = get_monitoring_service()
@@ -1419,14 +1443,18 @@ async def get_dashboard_summary(current_user=Depends(get_dashboard_user)):
         monitoring = None
 
     return {
-        "portfolio_total": str(round(total, 2)),
-        "positions":       position_rows,
-        "daily_pnl":       daily_pnl,
+        "portfolio_total":   str(round(total, 2)),
+        "account_values":    account_values,
+        "positions":         position_rows,
+        "daily_pnl":         daily_pnl,
+        "circuit_breakers":  circuit_breakers,
+        "account_summaries": account_summaries,
         "profiles": [
             {
                 "name":         p.name,
                 "display_name": p.display_name,
                 "is_active":    bool(p.is_active),
+                "account_id":   p.account_id,
             }
             for p in profiles
         ],
