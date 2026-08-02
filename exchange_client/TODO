@@ -7,7 +7,6 @@ TO DO
   - Add "exchange accounts" tab similar to profiles
   - Abiliy to move profiles to different accounts
   - add way to see what exchange acct is used in the profile screen
-  - Remove reliance on profile name. Use profile id everywhere and then just display name
 
 No need
 # make dynamic stop losses as per chat gpt suggestions - Backtest didnt show benefit
@@ -129,3 +128,4 @@ Improvement: The "Mean Reversion" Check
 # add option to copy entire profile
 # New indicator for ema gap - min_prior_peak_gap_pct  - Lookback candles to look at previous peak
   - get rid of default order size/max position size from profile screen. Make them mandatory when adding new symbol
+  - Remove reliance on profile name. Use profile id everywhere and then just display name
