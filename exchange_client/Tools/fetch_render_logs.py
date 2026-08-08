@@ -29,6 +29,7 @@ the app was silent.
 import argparse
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -44,7 +45,25 @@ except ImportError:
     pass
 
 API = "https://api.render.com/v1/logs"
+SERVICES_API = "https://api.render.com/v1/services"
 DEFAULT_OWNER = "tea-d55jffe3jp1c739test0"
+
+
+def discover_resources(client: "httpx.Client", owner: str) -> list:
+    """List every service id in the workspace.
+
+    The logs endpoint rejects a query with no resource filter
+    ("must specify at least one resource in filters"), so when the caller
+    doesn't name a service we look them all up and pass them explicitly.
+    """
+    resp = client.get(SERVICES_API, params={"ownerId": owner, "limit": 100})
+    resp.raise_for_status()
+    ids = []
+    for item in resp.json():
+        svc = item.get("service", item)
+        if svc.get("id"):
+            ids.append(svc["id"])
+    return ids
 
 
 def _iso(value: str) -> str:
@@ -64,7 +83,9 @@ def main() -> int:
     p.add_argument("--owner", default=os.getenv("RENDER_OWNER_ID", DEFAULT_OWNER),
                    help="Workspace / owner id (tea-...)")
     p.add_argument("--resource", action="append", default=None,
-                   help="Service id (srv-...). Repeatable. Default: all in workspace.")
+                   help="Service id (srv-...). Repeatable. Default: every service in "
+                        "the workspace, looked up automatically — the logs endpoint "
+                        "rejects a query with no resource filter.")
     p.add_argument("--start", default=None, help="Window start, e.g. 2026-07-27T12:00Z")
     p.add_argument("--end", default=None, help="Window end. Default: now")
     p.add_argument("--hours", type=float, default=2.0,
@@ -92,28 +113,54 @@ def main() -> int:
     else:
         start = _iso((datetime.now(timezone.utc) - timedelta(hours=args.hours)).isoformat())
 
+    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
+    client = httpx.Client(timeout=30.0, headers=headers)
+
+    resources = args.resource
+    if not resources:
+        try:
+            resources = discover_resources(client, args.owner)
+        except httpx.HTTPStatusError as exc:
+            print(f"ERROR: could not list services for {args.owner}: {exc}", file=sys.stderr)
+            client.close()
+            return 2
+        if not resources:
+            print(f"ERROR: no services found in workspace {args.owner}.", file=sys.stderr)
+            client.close()
+            return 2
+
     params = {
         "ownerId": args.owner,
         "startTime": start,
         "endTime": end,
         "limit": min(max(args.limit, 1), 100),
         "direction": "forward",
+        "resource": resources,
     }
-    if args.resource:
-        params["resource"] = args.resource
     if args.text:
         params["text"] = args.text
     if args.level:
         params["level"] = args.level
 
-    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
     sink = open(args.out, "w") if args.out else None
     total = 0
 
-    client = httpx.Client(timeout=30.0, headers=headers)
     try:
         for page in range(args.max_pages):
-            resp = client.get(API, params=params)
+            # The logs endpoint rate-limits hard when paginating a wide window.
+            # Back off and retry rather than dropping the tail of the results.
+            for attempt in range(6):
+                resp = client.get(API, params=params)
+                if resp.status_code != 429:
+                    break
+                wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                print(f"[rate-limited, retrying in {wait:.0f}s]", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print("ERROR: still rate-limited after 6 attempts — narrow the window "
+                      "(--start/--end) or add a --text filter.", file=sys.stderr)
+                return 2
+
             if resp.status_code == 401:
                 print("ERROR: 401 — API key rejected.", file=sys.stderr)
                 return 2
