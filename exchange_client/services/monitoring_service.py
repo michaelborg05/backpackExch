@@ -1203,14 +1203,33 @@ class MonitoringService:
         #retrieve list of tickers for this profile
         profile_tickers = self._symbol_cache.get_symbols_for_profile(profile.name)
 
+        # One profile-wide capacity check instead of a per-symbol one. When the
+        # profile is already at its position cap nothing can trade, so bail here
+        # rather than sizing every symbol individually.
+        max_open_for_profile = getattr(profile, 'max_open_positions_per_profile', None)
+        if max_open_for_profile:
+            with get_db_session() as db:
+                profile_open = count_open_positions_for_profiles(db, [profile.name])
+            if profile_open >= max_open_for_profile:
+                self.logger.info(
+                    f"[{profile.name}] At profile position cap "
+                    f"({profile_open}/{max_open_for_profile}) — skipping signal scan"
+                )
+                return None
+
         symbols_to_scan: list[str] = []
-        #Filter symbols list down before moving to signal generator to reduce wasted effort of checking for signals on symbols that are blocked already
+        # Only the in-memory cooldown filter runs here. Position sizing used to
+        # run per symbol at this point, which cost a DB session and ~4 queries
+        # for every symbol on every cycle — the dominant cost of the loop, and
+        # almost entirely wasted since most cycles produce no signal at all.
+        # Sizing now happens in _execute_signal, i.e. only for symbols that
+        # actually signalled, so a quiet cycle touches the DB once (above).
         for ticker in profile_tickers:
             # Check cooldown (don't signal same symbol too frequently)
             cooldown_key = f"{profile.name}_{ticker}"
             last_signal_time = self._last_signals.get(cooldown_key, 0)
             cooldown_seconds = getattr(profile, 'signal_cooldown_minutes', 15) * 60
-            
+
             if time.time() - last_signal_time < cooldown_seconds:
                 remaining = cooldown_seconds - (time.time() - last_signal_time)
                 self.logger.info(
@@ -1219,21 +1238,11 @@ class MonitoringService:
                 )
                 continue
 
-            #check buy quantity. If none, dont bother scanning this symbol
-            quantity, size_reason = self.position_calculator.calculate_buy_quantity(
-                symbol=ticker,
-                profile=profile,
-                quote_asset="USDC"
-            )
-
-            if quantity is None:
-                self.logger.info(
-                    f"[{profile.name}] Skipping scan of {ticker}: {size_reason}"
-                )
-                continue
-
             symbols_to_scan.append(ticker)
-        
+
+        if not symbols_to_scan:
+            self.logger.debug(f"[{profile.name}] All symbols in cooldown — nothing to scan")
+            return None
 
         signal_gen = get_signal_generator(profile)
 
@@ -1282,11 +1291,16 @@ class MonitoringService:
                                 break
 
                 # Execute trade
-                self._execute_signal(signal, profile)
+                executed = self._execute_signal(signal, profile)
 
-                # Update last signal time
-                cooldown_key = f"{profile.name}_{signal.symbol}"
-                self._last_signals[cooldown_key] = time.time()
+                # Update last signal time. Only stamped when the signal was
+                # actually acted on — a signal rejected for capacity or sizing
+                # shouldn't blind us to the symbol for a whole cooldown, since
+                # the blocker often clears within it (mirrors how the risk-group
+                # rejections above skip without stamping).
+                if executed:
+                    cooldown_key = f"{profile.name}_{signal.symbol}"
+                    self._last_signals[cooldown_key] = time.time()
 
             except Exception as e:
                 self.logger.error(
@@ -1294,8 +1308,15 @@ class MonitoringService:
                     exc_info=True
                 )
     
-    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile, trading=None):
-        """Execute a trading signal"""
+    def _execute_signal(self, signal: TradingSignal, profile: TradingProfile, trading=None) -> bool:
+        """Execute a trading signal.
+
+        Returns True when the signal was acted on — an order filled, or a maker
+        limit is resting. False when it was rejected (bad action, no size, too
+        small, order failed, exception). The caller uses this to decide whether
+        to start the per-symbol signal cooldown; a rejected signal shouldn't
+        silence the symbol while the blocking condition may still clear.
+        """
         adapter = get_adapter(profile)
 
         is_long_signal = signal.action in ("BUY", "LONG")
@@ -1303,8 +1324,8 @@ class MonitoringService:
 
         if not is_long_signal and not is_short_signal:
             self.logger.debug(f"[{profile.name}] Ignoring unrecognised signal action: {signal.action}")
-            return
-        
+            return False
+
         self.logger.info(
             f"[{profile.name}] 🎯 EXECUTING SIGNAL: {signal.symbol} "
             f"({signal.strength.name}, {signal.confidence:.1f}%) {signal.action.value}"
@@ -1329,7 +1350,7 @@ class MonitoringService:
                     f"[{profile.name}] Cannot calculate position size: {size_reason}"
                 )
                 self._last_maker_diag.update(path="sizing_failed", reason=str(size_reason))
-                return
+                return False
 
             self.logger.info(
                 f"[{profile.name}] Calculated position size: {quantity:.6f} - {size_reason}"
@@ -1357,7 +1378,7 @@ class MonitoringService:
                     )
                     self._last_maker_diag.update(path="too_small_after_scalar",
                                                  reason=f"${float(quantity * price):.2f} < $5 min")
-                    return
+                    return False
 
             # Execute the entry order (direction-aware). Maker-first vs taker is
             # decided by profile.entry_order_mode; taker is the unchanged default.
@@ -1367,8 +1388,9 @@ class MonitoringService:
 
             # Maker entry is resting: no position yet. It opens (or falls back to
             # taker) later in _monitor_orders. Skip the immediate-fill handling.
+            # Counts as acted-on — the order is live, so the cooldown applies.
             if fill_type == "pending_maker":
-                return
+                return True
 
             if result:
 
@@ -1411,19 +1433,24 @@ class MonitoringService:
                     f"Reasons:\n" + "\n".join(f"  {r}" for r in signal.reasons),
                     MessagePriority.NORMAL
                 )
-            
+                return True
+
+            # Order placement returned nothing — treat as not executed.
+            return False
+
         except Exception as e:
             self.logger.error(
                 f"[{profile.name}] Failed to execute signal: {e}",
                 exc_info=True
             )
-            
+
             self._send_telegram(
                 f"❌ Signal execution failed [{profile.display_name if profile.display_name else profile.name}]\n"
                 f"Symbol: {signal.symbol}\n"
                 f"Error: {str(e)}",
                 MessagePriority.HIGH
             )
+            return False
 
 
     # ← NEW helper — called right after order_buy fills

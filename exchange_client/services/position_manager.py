@@ -94,7 +94,17 @@ class PositionManager:
             (should_exit, reason)
         """
         symbol = position.symbol
-        
+
+        # Bound up front: the branch chain below does not cover every
+        # combination (e.g. mode "trend" with use_trend_filter off), and an
+        # unset name here used to raise UnboundLocalError inside the monitoring
+        # loop rather than simply skipping the check.
+        indicators_config = None
+        min_required = None
+        indicator_timeframe = None
+        is_bullish = True
+        reason = "no invalidation indicator set resolved"
+
         # Don't check very new positions (let them develop)
         min_age = getattr(profile, 'min_position_age_for_trend_check', 120)  # minutes
         position_age_minutes = self._get_position_age_minutes(position)
@@ -151,11 +161,68 @@ class PositionManager:
                 use_hard_stops=False,    #For trend invalidation, want to check all indicators, not reject on 1 failure
                 price_mode="close",
             )
+        else:
+            self.logger.warning(
+                f"[TI] {symbol} {profile.name}: no indicator set resolved for mode "
+                f"{getattr(profile, 'trend_invalidation_indicators', 'entry')!r} "
+                f"(use_trend_filter={getattr(profile, 'use_trend_filter', None)}) "
+                f"— invalidation check skipped"
+            )
 
         if not is_bullish:
+            # WARNING so it survives LOG_LEVEL=ERROR..INFO in prod. This is the
+            # line to diff against a backtest when the two disagree on an exit:
+            # it pins the exact indicator set, threshold, timeframe and the
+            # candle the decision was made on.
+            self.logger.warning(
+                "[TI] EXIT %s %s: %s | mode=%s tf=%s min_required=%s age=%.1fm %s",
+                symbol,
+                profile.name,
+                reason,
+                getattr(profile, 'trend_invalidation_indicators', 'entry'),
+                indicator_timeframe,
+                min_required,
+                position_age_minutes,
+                self._trend_snapshot_str(symbol, indicator_timeframe),
+            )
             return True, f"TREND_INVALIDATION: {reason}"
         else:
+            self.logger.debug(
+                "[TI] hold %s %s: %s | tf=%s %s",
+                symbol, profile.name, reason, indicator_timeframe,
+                self._trend_snapshot_str(symbol, indicator_timeframe),
+            )
             return False, f"Trend intact: {reason}"
+
+    def _trend_snapshot_str(self, symbol: str, timeframe: Optional[str]) -> str:
+        """Compact dump of the cached bar an invalidation decision was made on.
+
+        `prev_close` vs `price` is the important comparison: invalidation runs
+        with price_mode="close", so it scores the last *closed* bar. If `price`
+        (the live tick) has moved well away from `prev_close`, the cache is
+        mid-bar and prod is judging a different bar than a backtest replaying
+        the same timestamp would.
+        """
+        if not timeframe:
+            return "cache=<no timeframe>"
+        try:
+            trend = self.trend_cache.get(symbol, timeframe)
+            if trend is None:
+                return f"cache={symbol}/{timeframe} MISS (stale or never populated)"
+            parts = [f"cache={symbol}/{timeframe}"]
+            for attr in ("timestamp", "price", "rsi", "ema20", "ema50",
+                         "adx", "volume_ratio"):
+                val = getattr(trend, attr, None)
+                if val is not None:
+                    parts.append(f"{attr}={val:.4f}" if isinstance(val, float) else f"{attr}={val}")
+            pc = getattr(trend, "prev_candle", None)
+            if pc is not None and pc.prev_close is not None:
+                parts.append(f"prev_close={float(pc.prev_close):.4f}")
+                if pc.prev_high is not None and pc.prev_low is not None:
+                    parts.append(f"prev_hl={float(pc.prev_high):.4f}/{float(pc.prev_low):.4f}")
+            return " ".join(parts)
+        except Exception as exc:                      # never break an exit on logging
+            return f"cache=<snapshot failed: {exc}>"
         
         # # Calculate position state
         # entry_price = float(position.entry_price)
