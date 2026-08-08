@@ -89,12 +89,14 @@ class MonitoringService:
 
         self._signal_check_counter = 0
 
-        # Thesis (signal reasons/strength) for resting maker ENTRY orders, keyed
-        # by exchange_order_id. Stashed when the maker order rests, popped when it
-        # fills or falls back to taker in _reconcile_maker_entry — so the fill
-        # notification carries the same trend/entry summary the taker path sends.
+        # Thesis (signal reasons/strength/snapshot) for resting maker ENTRY orders,
+        # keyed by exchange_order_id. Stashed when the maker order rests, popped when
+        # it fills or falls back to taker in _reconcile_maker_entry — so the fill
+        # notification carries the same trend/entry summary the taker path sends, and
+        # the booked trade carries the same signal_snapshot.
         # In-memory only: maker orders are short-lived, so a restart just loses
-        # the thesis of any then-in-flight order (message degrades to no reasons).
+        # the thesis of any then-in-flight order (message degrades to no reasons,
+        # trade row to no snapshot).
         self._pending_maker_theses: Dict[str, dict] = {}
 
         self._trend_invalidation_counter = 0
@@ -375,6 +377,14 @@ class MonitoringService:
                     order_response = adapter.process_limit_order(order=order, position_id=order.position_id)
 
                     if order_response and order_response.status == OrderStatus.FILLED:
+                        # The exit trade was booked inside process_limit_order via
+                        # save_limit_trade, which has no snapshot to write — stamp
+                        # close-time market state on now, so a TP/SL that filled as a
+                        # resting limit is as reviewable as one closed at market.
+                        self._stamp_signal_snapshot_on_trade(
+                            order.exchange_order_id, profile.name,
+                            self._build_close_snapshot(profile, order.symbol),
+                        )
                         entry_price = order_response.entry_price if order_response.entry_price  else "N/A"
                         exit_price = order_response.exit_price if order_response.exit_price  else  "N/A"
                         icon = "🟢" if order.purpose == "TAKE_PROFIT" else "🛑"
@@ -797,18 +807,7 @@ class MonitoringService:
             )
 
             # Capture market state at close time for post-trade analysis
-            from cache.trend_cache import get_trend_cache
-            _tc = get_trend_cache()
-            _entry_tf = getattr(profile, 'entry_timeframe', '15')
-            _trend_tf = getattr(profile, 'trend_timeframe', None)
-            _entry_t = _tc.get(symbol, _entry_tf)
-            close_snapshot = TradeSignalSnapshot.build(
-                trend_cache=_tc,
-                symbol=symbol,
-                entry_tf=_entry_tf,
-                trend_tf=_trend_tf,
-                pct_b=_entry_t.bb_pct_b if _entry_t else None,
-            )
+            close_snapshot = self._build_close_snapshot(profile, symbol)
 
             close_kwargs = dict(
                 symbol=symbol,
@@ -1581,10 +1580,14 @@ class MonitoringService:
         # same reasons the synchronous taker path sends. Keyed by exchange order
         # id = resting.id, which matches order.exchange_order_id at reconcile time.
         try:
+            # Dump the snapshot model to a plain dict here so the value stashed is
+            # exactly what save_trade would have written on the taker path.
+            snapshot = getattr(signal, "signal_snapshot", None)
             self._pending_maker_theses[str(resting.id)] = {
                 "reasons": list(getattr(signal, "reasons", []) or []),
                 "strength": signal.strength.name,
                 "confidence": float(signal.confidence),
+                "snapshot": snapshot.model_dump() if snapshot is not None else None,
             }
         except Exception:  # noqa: BLE001 — never let bookkeeping block the trade
             pass
@@ -1621,6 +1624,9 @@ class MonitoringService:
                 symbol=order.symbol, profile_name=profile.name, fill_type="maker"
             )
             thesis = self._pending_maker_theses.pop(str(order.exchange_order_id), None)
+            self._stamp_signal_snapshot_on_trade(
+                order.exchange_order_id, profile.name, (thesis or {}).get("snapshot")
+            )
             self._send_telegram(
                 f"🅼 Maker entry filled [{profile.display_name or profile.name}]\n"
                 f"Symbol: {order.symbol}\n"
@@ -1662,7 +1668,10 @@ class MonitoringService:
             recheck = adapter.reconcile_entry_order(order)
             if (recheck or {}).get("status") == "filled":
                 self._stamp_fill_type_on_position(order.symbol, profile.name, "maker")
-                self._pending_maker_theses.pop(str(order.exchange_order_id), None)
+                raced = self._pending_maker_theses.pop(str(order.exchange_order_id), None)
+                self._stamp_signal_snapshot_on_trade(
+                    order.exchange_order_id, profile.name, (raced or {}).get("snapshot")
+                )
                 return
         except Exception:  # noqa: BLE001
             pass
@@ -1674,13 +1683,21 @@ class MonitoringService:
         except Exception:  # noqa: BLE001
             pass
         is_long = str(order.side).upper() == "BID"
+        # Pop the thesis BEFORE ordering: the fallback trade is booked inside the
+        # order call, so the snapshot has to be passed down with it — the taker
+        # path here would otherwise write a null snapshot the entry can't be
+        # reviewed from later.
+        thesis = self._pending_maker_theses.pop(str(order.exchange_order_id), None)
+        snapshot = (thesis or {}).get("snapshot")
         try:
             if is_long:
                 res = adapter.order_buy(symbol=order.symbol, quantity=str(order.quantity),
-                                        source="MAKER_TIMEOUT_TAKER", profile_name=profile.name)
+                                        source="MAKER_TIMEOUT_TAKER", profile_name=profile.name,
+                                        signal_snapshot=snapshot)
             else:
                 res = adapter.order_sell(symbol=order.symbol, quantity=str(order.quantity),
-                                         source="MAKER_TIMEOUT_TAKER", profile_name=profile.name)
+                                         source="MAKER_TIMEOUT_TAKER", profile_name=profile.name,
+                                         signal_snapshot=snapshot)
             if res:
                 self._stamp_fill_type_on_position(order.symbol, profile.name, "taker")
                 self.logger.info(f"[{profile.name}] taker fallback filled for {order.symbol}")
@@ -1689,7 +1706,6 @@ class MonitoringService:
                     price_line = f"Price: ${executed_price:.4f}\n"
                 except Exception:  # noqa: BLE001
                     price_line = ""
-                thesis = self._pending_maker_theses.pop(str(order.exchange_order_id), None)
                 self._send_telegram(
                     f"🎯 Maker→Taker entry filled [{profile.display_name or profile.name}]\n"
                     f"Symbol: {order.symbol}\n"
@@ -1701,14 +1717,12 @@ class MonitoringService:
                     MessagePriority.NORMAL,
                 )
             else:
-                self._pending_maker_theses.pop(str(order.exchange_order_id), None)
                 self._send_telegram(
                     f"⚠️ Maker→Taker fallback returned no fill [{profile.display_name or profile.name}]\n"
                     f"Symbol: {order.symbol}\nEntry NOT opened — check the exchange.",
                     MessagePriority.HIGH,
                 )
         except Exception as e:  # noqa: BLE001
-            self._pending_maker_theses.pop(str(order.exchange_order_id), None)
             self.logger.error(f"[{profile.name}] taker fallback failed for {order.symbol}: {e}")
             self._send_telegram(
                 f"❌ Maker→Taker fallback FAILED [{profile.display_name or profile.name}]\n"
@@ -1767,6 +1781,73 @@ class MonitoringService:
             # Swallow: attribution is reporting-only. Column may not exist yet if
             # the maker migration has not been applied — that must not break trading.
             self.logger.debug(f"[{profile_name}] fill_type stamp skipped: {e}")
+
+    def _build_close_snapshot(self, profile, symbol: str) -> Optional[TradeSignalSnapshot]:
+        """Market state at close time, for post-trade analysis of an exit.
+
+        Shared by the two ways a position closes: the market close in
+        _execute_close (passed straight into the order call) and a resting TP/SL
+        limit that fills on the exchange, booked by the adapter with no snapshot
+        and stamped afterwards in _monitor_orders. Returns None if the build fails
+        — an exit must never fail over its own telemetry.
+        """
+        try:
+            from cache.trend_cache import get_trend_cache
+            tc = get_trend_cache()
+            entry_tf = getattr(profile, 'entry_timeframe', '15')
+            trend_tf = getattr(profile, 'trend_timeframe', None)
+            entry_t = tc.get(symbol, entry_tf)
+            return TradeSignalSnapshot.build(
+                trend_cache=tc,
+                symbol=symbol,
+                entry_tf=entry_tf,
+                trend_tf=trend_tf,
+                pct_b=entry_t.bb_pct_b if entry_t else None,
+            )
+        except Exception as e:  # noqa: BLE001
+            self.logger.warning(f"[{profile.name}] close snapshot build failed for {symbol}: {e}")
+            return None
+
+    def _stamp_signal_snapshot_on_trade(self, exchange_order_id, profile_name: str,
+                                        snapshot) -> None:
+        """Write a signal snapshot onto a trade booked from a resting order.
+
+        Used for both sides of the resting-order paths, which are booked inside the
+        adapter (reconcile_entry_order for a maker ENTRY fill, process_limit_order
+        for a TP/SL fill) from the exchange order alone, with no snapshot to pass
+        down. Matched on order_id, which both save_trade and save_limit_trade set to
+        the exchange order id. Accepts a dict or a snapshot model. Best-effort:
+        reporting-only, never block a trade.
+        """
+        if not snapshot:
+            return
+        if hasattr(snapshot, "model_dump"):
+            snapshot = snapshot.model_dump()
+        try:
+            from db.models import Trade
+            with get_db_session() as db:
+                trade = (
+                    db.query(Trade)
+                    .filter(
+                        Trade.profile_name == profile_name,
+                        Trade.order_id == str(exchange_order_id),
+                    )
+                    .order_by(Trade.created_at.desc())
+                    .first()
+                )
+                if trade is None:
+                    self.logger.warning(
+                        f"[{profile_name}] no trade found for order {exchange_order_id} "
+                        f"to stamp signal_snapshot onto"
+                    )
+                    return
+                trade.signal_snapshot = snapshot
+                db.commit()
+        except Exception as e:  # noqa: BLE001
+            self.logger.error(
+                f"[{profile_name}] signal_snapshot stamp failed for order "
+                f"{exchange_order_id}: {e}"
+            )
 
 def set_monitoring_service(service: MonitoringService):
     """Set the monitoring service instance (called from main.py)"""
