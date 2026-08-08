@@ -56,6 +56,40 @@ from sqlalchemy import func
 # ---------------------------------------------------------------------------
 
 
+# Bars of history to replay into the cache *before* the requested window so
+# that history-dependent indicators are live on the very first evaluated bar.
+# 100 matches ReplayTrendCache's candle-history cap — feeding more is wasted.
+WARMUP_BARS = 100
+
+
+def _as_utc(ts: datetime) -> datetime:
+    """Treat naive DB timestamps as UTC so they compare against the window."""
+    return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+
+
+def _tf_to_minutes(tf) -> int:
+    """Minutes per bar for a timeframe label ('15', '240', '1D', 'D', '1W')."""
+    s = str(tf).strip().upper()
+    if s in ("1D", "D", "1440"):
+        return 1440
+    if s in ("1W", "W"):
+        return 10080
+    try:
+        return int(s)
+    except ValueError:
+        raise ValueError(f"Unrecognised timeframe {tf!r}")
+
+
+class TickDataUnavailable(RuntimeError):
+    """Raised when tick mode was requested but the tick data can't support it.
+
+    Silently degrading to candle fills answers a different question than the
+    caller asked — candle mode fills stops at the exact stop price with no
+    intra-bar path, which flatters stop-heavy strategies. Callers that genuinely
+    don't care can pass on_missing_ticks="fallback".
+    """
+
+
 # ===========================================================================
 # ReplayTrendCache
 # ===========================================================================
@@ -2335,11 +2369,19 @@ class BacktestEngine:
                                        #             (60 points per 15m bar, full history)
         profile_cap: Optional["ProfileOpenPositionCap"] = None,
         sl_breaker: Optional["ConsecutiveSLBreaker"] = None,
+        on_missing_ticks: str = "error",  # "error" | "fallback" — what to do when
+                                          # price_source="ticks" but the ticks can't
+                                          # cover the window. Default raises so a run
+                                          # never silently changes its fill model.
     ) -> BacktestResult:
         from db.models import TrendAnalysisLog
 
         if data_source not in ("log", "shadow"):
             raise ValueError(f"data_source must be 'log' or 'shadow', got {data_source!r}")
+        if on_missing_ticks not in ("error", "fallback"):
+            raise ValueError(
+                f"on_missing_ticks must be 'error' or 'fallback', got {on_missing_ticks!r}"
+            )
         CandleModel = TrendAnalysisLog
 
         is_short = "short" in getattr(self.profile, "strategy_type", "")
@@ -2392,16 +2434,30 @@ class BacktestEngine:
             # backtest can therefore be "tick mode" while ticks cover only the
             # tail of the window, silently mixing fill models across the run.
             # Require the ticks to actually span the window before trusting them.
+            shortfall = None
             if ticks_available and tick_times:
                 covered = (tick_times[-1] - tick_times[0])
                 wanted = (end - start).total_seconds()
                 if wanted > 0 and covered / wanted < 0.9:
-                    print(f"[Backtest] {symbol}: price ticks cover only "
-                          f"{covered / wanted:.0%} of the window — falling back to "
-                          f"candle mode so the fill model is consistent throughout")
+                    shortfall = (f"price ticks cover only {covered / wanted:.0%} of the "
+                                 f"window — mixing fill models across the run")
                     ticks_available = False
+            elif not ticks_available:
+                shortfall = "no price ticks found for this symbol/window"
+
             if not ticks_available:
-                print(f"[Backtest] No price ticks for {symbol} {start.date()}→{end.date()} — falling back to candle prices")
+                table = ("price_path_shadow" if tick_source == "path1m"
+                         else "webhook_price_ticks")
+                detail = (f"{symbol} {start.date()}→{end.date()}: {shortfall} "
+                          f"(tick_source={tick_source!r}, table={table})")
+                if on_missing_ticks == "error":
+                    raise TickDataUnavailable(
+                        f"Tick mode requested but unusable — {detail}. "
+                        f"Backfill {table}, pick another --tick-source, or re-run with "
+                        f"price_source='candle' / --allow-candle-fallback to accept "
+                        f"candle fills."
+                    )
+                print(f"[Backtest] WARNING: falling back to CANDLE fills — {detail}")
                 price_source = "candle"
             else:
                 print(f"[Backtest] Loaded {len(tick_times):,} price ticks for {symbol} ({price_source} mode)")
@@ -2423,15 +2479,6 @@ class BacktestEngine:
             needed_timeframes.add(regime_primary_tf)
             needed_timeframes.add(regime_confirm_tf)
 
-        _q = (
-            self.db.query(CandleModel)
-            .filter(
-                CandleModel.symbol    == symbol,
-                CandleModel.timeframe.in_(needed_timeframes),
-                CandleModel.timestamp >= start,
-                CandleModel.timestamp <= end,
-            )
-        )
         # trend_analysis_log carries a provenance `source` column (e.g.
         # "binance:USDT" vs "binance:USDC") — disambiguate so a mixed table
         # never silently interleaves two different quotes into one series.
@@ -2448,13 +2495,47 @@ class BacktestEngine:
                 .first()
             )
             src = src_row[0] if src_row else None
-        if src:
-            _q = _q.filter(CandleModel.source == src)
-        all_rows = _q.order_by(CandleModel.timestamp).all()
+
+        # Pull WARMUP_BARS of extra history per timeframe so history-dependent
+        # indicators (distance_from_high, atr_regime, rsi_reversal_momentum...)
+        # are fully primed on the first bar we actually evaluate. Without this
+        # the opening days of every window run with those indicators reporting
+        # "n/a" — and several of them PASS when short of history, so a hard-stop
+        # entry gate silently disappears at the start of the run.
+        # Queried per timeframe so a 1D trend filter doesn't drag 100 days of
+        # 15m candles along with it.
+        all_rows = []
+        warmup_from: Dict[str, datetime] = {}
+        for tf in needed_timeframes:
+            tf_start = start - timedelta(minutes=_tf_to_minutes(tf) * WARMUP_BARS)
+            warmup_from[tf] = tf_start
+            _q = (
+                self.db.query(CandleModel)
+                .filter(
+                    CandleModel.symbol    == symbol,
+                    CandleModel.timeframe == tf,
+                    CandleModel.timestamp >= tf_start,
+                    CandleModel.timestamp <= end,
+                )
+            )
+            if src:
+                _q = _q.filter(CandleModel.source == src)
+            all_rows.extend(_q.all())
+        all_rows.sort(key=lambda r: (r.timestamp, r.timeframe))
 
         if not all_rows:
             print(f"[Backtest] No data for {symbol} in range {start} → {end}")
             return result
+
+        # Warn when the warmup itself is short — results near the window start
+        # are then still running on partial history.
+        for tf in sorted(needed_timeframes):
+            got = sum(1 for r in all_rows
+                      if r.timeframe == tf and _as_utc(r.timestamp) < start)
+            if got < WARMUP_BARS:
+                print(f"[Backtest] {symbol} {tf}: only {got}/{WARMUP_BARS} warmup bars "
+                      f"available before {start:%Y-%m-%d} — history-dependent "
+                      f"indicators may report n/a early in the run")
 
         # volume_ratio is stored directly in TrendAnalysisLog — no computation needed
 
@@ -2539,6 +2620,8 @@ class BacktestEngine:
 
             # Update rolling ATR14 (entry-TF) BEFORE any entry this candle, so the
             # ATR used to size a stop never includes the candle we enter on.
+            # Runs during warmup too, so ATR is already valid on the first
+            # tradeable bar rather than 14 bars into the window.
             if row.high is not None and row.low is not None and row.close is not None:
                 _h, _l, _c = float(row.high), float(row.low), float(row.close)
                 tr = (_h - _l) if atr_prev_close is None else max(
@@ -2549,7 +2632,11 @@ class BacktestEngine:
                 if len(atr_trs) >= 14 and _c:
                     atr_pct = (sum(atr_trs[-14:]) / 14) / _c * 100
 
-            row_time = row.timestamp.replace(tzinfo=timezone.utc) if row.timestamp.tzinfo is None else row.timestamp
+            row_time = _as_utc(row.timestamp)
+
+            # Warmup bars prime the cache and ATR only — no signals, no fills.
+            if row_time < start:
+                continue
 
             # ---- Manage open position ----
             if open_pos is not None:
@@ -2607,20 +2694,54 @@ class BacktestEngine:
                         min_age_mins = getattr(self.profile, "min_position_age_for_trend_check", 0)
                         position_age_mins = (row_time - open_pos["entry_time"]).total_seconds() / 60
                         if position_age_mins >= min_age_mins:
+                            # Mirrors PositionManager._check_trend_invalidation. Keep the
+                            # two in step — they are separate implementations of the same
+                            # rule, and drift here shows up as prod/backtest exit mismatch.
                             ti_mode = getattr(self.profile, "trend_invalidation_indicators", "trend")
                             if ti_mode == "exit":
                                 exit_inds = getattr(self.profile, "exit_indicators", None)
-                                ti_inds = exit_inds or getattr(self.profile, "entry_indicators", None)
-                                ti_min  = getattr(self.profile, "min_exit_indicators_required", 1)
-                                ti_tf   = getattr(self.profile, "exit_timeframe", None) or self.profile.entry_timeframe
+                                if exit_inds:
+                                    ti_inds = exit_inds
+                                    ti_min  = getattr(self.profile, "min_exit_indicators_required", 2)
+                                    ti_tf   = getattr(self.profile, "exit_timeframe", None) or self.profile.entry_timeframe
+                                else:
+                                    # No exit set configured — prod falls back to the entry
+                                    # set at one below the entry threshold.
+                                    ti_inds = getattr(self.profile, "entry_indicators", None)
+                                    ti_min  = max(1, self.profile.min_entry_indicators_required - 1)
+                                    ti_tf   = self.profile.entry_timeframe
                             elif ti_mode == "entry":
                                 ti_inds = getattr(self.profile, "entry_indicators", None)
                                 ti_min  = max(1, self.profile.min_entry_indicators_required - 1)
                                 ti_tf   = self.profile.entry_timeframe
-                            else:  # "trend" (default)
+                            elif ti_mode == "mean_reversion":
+                                # Prod builds a synthetic rsi_reversal_momentum check from
+                                # the global mean_rever_* settings. Defaults match the DB.
+                                ti_inds = [{
+                                    "type": "rsi_reversal_momentum",
+                                    "params": {
+                                        "lookback_candles": int(getattr(
+                                            self.profile, "mean_rever_rsi_lookback_candles", 4)),
+                                        "oversold_threshold": 60,
+                                        "current_min": float(getattr(
+                                            self.profile, "mean_rever_rsi_inval_threshold", 34)),
+                                        "min_jump": 1,
+                                        "require_sustained": False,
+                                        "jump_required": False,
+                                    },
+                                }]
+                                ti_min = 1
+                                ti_tf  = self.profile.entry_timeframe
+                            elif getattr(self.profile, "use_trend_filter", True):  # "trend"
                                 ti_inds = self.profile.trend_indicators
-                                ti_min  = self.profile.min_indicators_required
+                                # Prod drops the bar by one for invalidation: a position is
+                                # only closed once the trend is *materially* worse than the
+                                # bar that opened it, not merely one indicator short.
+                                ti_min  = max(1, self.profile.min_indicators_required - 1)
                                 ti_tf   = self.profile.trend_timeframe
+                            else:
+                                # trend mode with the trend filter off — nothing to check.
+                                ti_inds, ti_min, ti_tf = None, 1, self.profile.trend_timeframe
 
                             if ti_inds:
                                 trend_still_ok, ti_reason = cache.is_bullish(
@@ -2628,6 +2749,10 @@ class BacktestEngine:
                                     ti_tf,
                                     indicators_config=ti_inds,
                                     min_indicators_required=ti_min,
+                                    # Invalidation scores every indicator instead of
+                                    # bailing on the first hard-stop failure — one
+                                    # hard-stop miss is not enough to close a position.
+                                    use_hard_stops=False,
                                     groups_config=getattr(self.profile, "trend_indicator_groups", None),
                                     price_mode="close",
                                 )

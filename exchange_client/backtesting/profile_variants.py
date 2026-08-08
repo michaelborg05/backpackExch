@@ -63,6 +63,7 @@ def run_all_variants(
                                 # for back-compat with pre-cutover callers)
     shadow_source: str = None,  # e.g. "binance:USDT"; None = whichever source has most rows
     tick_source: str = "webhook",  # "webhook" | "path1m" (1m OHLC expanded to a path)
+    on_missing_ticks: str = "error",  # "error" | "fallback" — see BacktestEngine.run()
 ) -> list:
     """
     Run all variants and return sorted results.
@@ -95,7 +96,7 @@ def run_all_variants(
                              price_mode=price_mode,
                              profile_cap=cap, sl_breaker=breaker,
                              data_source=data_source, shadow_source=shadow_source,
-                             tick_source=tick_source)
+                             tick_source=tick_source, on_missing_ticks=on_missing_ticks)
         results.append(result)
 
     results.sort(key=lambda r: (r.win_rate, r.total_pnl_pct), reverse=True)

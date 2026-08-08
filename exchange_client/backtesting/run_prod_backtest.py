@@ -57,6 +57,11 @@ parser.add_argument("--tick-source", default="path1m", choices=["webhook", "path
                          "'webhook' = webhook_price_ticks (~2min sample, ~60d history, missing "
                          "new symbols). 'path1m' = price_path_shadow 1m OHLC expanded to O/H/L/C "
                          "(full history, consistent across all symbols). Default: path1m")
+parser.add_argument("--allow-candle-fallback", action="store_true",
+                    help="Accept candle fills when the requested tick source can't cover the "
+                         "window. Off by default: a silent fallback changes the fill model "
+                         "(stops fill at the exact stop price with no intra-bar path) and makes "
+                         "the run answer a different question than the one asked.")
 args = parser.parse_args()
 
 start, end, period_label = parse_period(args.days)
@@ -140,6 +145,7 @@ with get_db_session() as db:
                 data_source=args.data_source,
                 shadow_source=args.shadow_source,
                 tick_source=args.tick_source,
+                on_missing_ticks="fallback" if args.allow_candle_fallback else "error",
             )
 
             for r in symbol_results:
