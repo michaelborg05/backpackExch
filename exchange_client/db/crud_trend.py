@@ -14,7 +14,15 @@ from utils.logging import log_manager
 
 logger = log_manager.get_logger("TrendCRUD")
 
-WARMUP_ENTRIES = 15  # rows per symbol/timeframe to replay on startup
+# Rows per symbol/timeframe to replay on startup. Must cover the longest
+# history any indicator reads, not just the longest EMA/RSI seed: TrendCache
+# keeps 100 closed candles and distance_from_high reads up to lookback_bars of
+# them. At the old value of 15 that gate had less history than its
+# min(20, lookback_bars) threshold after every restart, and the indicator
+# *passes* when short of history — so a hard-stop dip filter silently waved
+# entries through for hours after each deploy (this app redeploys on every
+# merge to main). 100 matches the cache cap, so a restart now starts primed.
+WARMUP_ENTRIES = 100  # rows per symbol/timeframe to replay on startup
 
 
 def get_trend_history(

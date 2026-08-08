@@ -7,6 +7,7 @@ TO DO
   - Add "exchange accounts" tab similar to profiles
   - Abiliy to move profiles to different accounts
   - add way to see what exchange acct is used in the profile screen
+# try and reduce DB usage if possible
 
 No need
 # make dynamic stop losses as per chat gpt suggestions - Backtest didnt show benefit

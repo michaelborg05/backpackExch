@@ -1167,18 +1167,43 @@ class SignalGenerator:
             List of signals sorted by confidence (highest first)
         """
         signals = []
-        
-        for symbol in symbols:
-            try:
-                signal = self.generate_signal(symbol)
-                if signal:
-                    signals.append(signal)
-            except Exception as e:
-                self.logger.error(
-                    f"❌ Error generating signal for {symbol}: {e}", 
-                    exc_info=True
-                )
-        
+
+        # Load every symbol's recent exit up front. Without this each
+        # generate_signal() opens its own DB session for the re-entry check —
+        # one remote round trip per symbol, which dominated the scan.
+        from services.reentry_manager import get_reentry_manager
+        reentry_mgr = get_reentry_manager()
+        try:
+            reentry_mgr.prime_recent_exits(
+                profile_name=self.profile.name,
+                symbols=symbols,
+                lookback_hours=reentry_mgr.reentry_lookback_hours(
+                    self.profile.sl_cooldown_minutes,
+                    self.profile.tp_cooldown_minutes,
+                ),
+            )
+        except Exception as e:
+            # Priming is an optimisation; on failure fall through to the
+            # per-symbol path rather than skipping the scan.
+            self.logger.warning(f"Re-entry prefetch failed, using per-symbol lookups: {e}")
+            reentry_mgr.clear_recent_exits(self.profile.name)
+
+        try:
+            for symbol in symbols:
+                try:
+                    signal = self.generate_signal(symbol)
+                    if signal:
+                        signals.append(signal)
+                except Exception as e:
+                    self.logger.error(
+                        f"❌ Error generating signal for {symbol}: {e}",
+                        exc_info=True
+                    )
+        finally:
+            # Never let a primed batch outlive the scan — a later caller must
+            # see live data, not a snapshot from minutes ago.
+            reentry_mgr.clear_recent_exits(self.profile.name)
+
         # Sort by confidence (highest first)
         signals.sort(key=lambda s: s.confidence, reverse=True)
         
