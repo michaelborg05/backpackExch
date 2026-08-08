@@ -32,7 +32,7 @@ PROD_PROFILES = {c["display_name"]: c for c in _PROD_PROFILES_LIST}
 from db.utils import get_db_session
 
 parser = argparse.ArgumentParser(description="Run prod profile backtests")
-parser.add_argument("--days",    default="30",
+parser.add_argument("--days",    default="14",
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")
