@@ -85,6 +85,10 @@ class CandleFetcherService:
         self._last_symbols: List[str] = []
         self._consecutive_failures: int = 0
         self._warned_unmapped: set = set()
+        # (symbol, timeframe) -> newest bar this process has written AND replayed
+        # into TrendCache. Seeded from the DB the first time a series is fetched,
+        # maintained in memory afterwards, so the steady state costs no query.
+        self._last_ts: dict = {}
 
     # -- configuration -----------------------------------------------------
 
@@ -242,34 +246,59 @@ class CandleFetcherService:
                     if self._stop_event.is_set():
                         return
                     try:
-                        # Capture the newest bar already on record BEFORE this
-                        # cycle's fetch, so afterwards we know exactly which
-                        # rows are new and must be replayed into TrendCache —
-                        # replaying already-seen bars would double-count them
-                        # in the RSI/EMA/BB history TrendCache keeps for slope
-                        # and momentum calculations.
-                        since = get_latest_trend_timestamp(db, symbol, tf)
+                        # The newest bar on record BEFORE this cycle's fetch.
+                        # It does double duty: it tells fetch_and_store how much
+                        # of the window is already stored and can be skipped,
+                        # and it marks where the TrendCache replay must start —
+                        # replaying already-seen bars would double-count them in
+                        # the RSI/EMA/BB history TrendCache keeps for slope and
+                        # momentum calculations. Read from the DB once per
+                        # series per process, then tracked in memory: this value
+                        # is exactly what we last wrote, so re-reading it every
+                        # cycle only re-derives what we already know.
+                        key = (symbol, tf)
+                        since = self._last_ts.get(key)
+                        if since is None:
+                            since = get_latest_trend_timestamp(db, symbol, tf)
+                            if since is not None:
+                                self._last_ts[key] = since
                         tf_start = min(start, end - timedelta(
                             minutes=TF_MINUTES[tf] * MIN_CATCHUP_BARS
                         ))
-                        report = fetch_and_store(db, symbol, tf, tf_start, end)
+                        report = fetch_and_store(db, symbol, tf, tf_start, end, since=since)
                         total += report.written
                         if not report.contiguous:
                             gapped.append(report.describe())
-                        if report.written:
+                        # `written` counts the repair rewrite too, so it is truthy
+                        # on quiet cycles. Only a bar strictly newer than `since`
+                        # is something TrendCache has not seen.
+                        has_new_bar = report.newest is not None and (
+                            since is None or report.newest > since
+                        )
+                        if has_new_bar:
                             new_rows = get_trend_rows_after(db, symbol, tf, since)
                             for row in new_rows:
                                 trend_cache.update(
                                     load_trend_data_from_history(row), persist_to_db=False
                                 )
                                 cache_updates += 1
+                            # Advance to the last bar actually replayed, not to
+                            # report.newest: get_trend_rows_after is capped, so
+                            # a long outage leaves a remainder that the next
+                            # cycle must pick up. An exception above leaves
+                            # `since` untouched and those bars get retried.
+                            # (Both read paths return rows oldest-first.)
+                            self._last_ts[key] = (
+                                new_rows[-1].timestamp if new_rows else report.newest
+                            )
                     except Exception as e:  # noqa: BLE001 — one symbol must not stop the rest
                         failed.append(f"{symbol}/{tf}: {e}")
 
         self._last_run_ts = time.time()
         self._last_rows = total
         self.logger.info(
-            f"Candle fetch cycle complete — {total} rows written, "
+            f"Candle fetch cycle complete — {total} rows upserted "
+            f"(includes one repair rewrite per series), "
             f"{cache_updates} TrendCache update(s) replayed"
         )
         if gapped:

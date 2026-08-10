@@ -154,6 +154,14 @@ SYMBOL_MAP: Dict[str, str] = _SymbolMap()
 # Wilder smoothing needs a few hundred to fully converge) plus margin.
 WARMUP_BARS = 300
 
+# How many already-stored bars an incremental fetch rewrites (see the `since`
+# argument of fetch_and_store). The window computed each cycle spans hours, but
+# only the last bar or two can still change — an upstream revision, or a bar
+# fetched right on its close boundary. Rewriting just those keeps the table
+# self-healing while turning a full-window upsert into a handful of rows.
+# 1 => the newest stored bar is rewritten, everything older is left alone.
+REPAIR_BARS = 1
+
 
 @dataclass
 class Candle:
@@ -172,6 +180,7 @@ class FetchReport:
     requested: int = 0
     returned: int = 0          # rows computed for the window
     written: int = 0           # rows actually INSERTed (idempotent skips excluded)
+    newest: Optional[datetime] = None   # newest bar submitted to the DB, if any
     gaps: List[Tuple[datetime, datetime, int]] = field(default_factory=list)
 
     @property
@@ -355,11 +364,22 @@ def write_trend_rows(db, rows: Sequence[dict]) -> int:
 
 
 def fetch_and_store(db, symbol: str, timeframe: str, start: datetime, end: datetime,
-                    source: Optional[str] = None, is_backfill: bool = False) -> FetchReport:
+                    source: Optional[str] = None, is_backfill: bool = False,
+                    since: Optional[datetime] = None,
+                    repair_bars: int = REPAIR_BARS) -> FetchReport:
     """Fetch, compute and persist one symbol/timeframe. Returns the fetch report.
 
     `start` is extended backwards by the warmup so the first persisted row
     already has converged recursions.
+
+    `since` = the newest bar already stored for this series. Pass it on a repeat
+    (live) fetch and only bars newer than `since - repair_bars` are written; the
+    rest of the window is computed as usual — the recursions need it — but not
+    sent to the database. Without it the caller re-upserts the whole window on
+    every cycle: on the live loop that was ~1,500 rows to persist ~2 new ones,
+    all of it dead tuples, WAL and autovacuum work for no change in content.
+    Leave it None to write the full window (backfills, and the first fetch of a
+    series, which has nothing to be incremental against).
     """
     tf_min = TF_MINUTES[timeframe]
     warm_start = start - timedelta(minutes=tf_min * WARMUP_BARS)
@@ -369,6 +389,14 @@ def fetch_and_store(db, symbol: str, timeframe: str, start: datetime, end: datet
     rows = compute_rows(symbol, timeframe, candles, source=source, is_backfill=is_backfill)
     rows = [r for r in rows if r["timestamp"] >= start]
     report.returned = len(rows)
+    if since is not None:
+        # Naive `since` would raise on comparison; the column is timestamptz, so
+        # anything naive reaching here is UTC that lost its tzinfo in transit.
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        cutoff = since - timedelta(minutes=tf_min * repair_bars)
+        rows = [r for r in rows if r["timestamp"] > cutoff]
+    report.newest = max((r["timestamp"] for r in rows), default=None)
     report.written = write_trend_rows(db, rows)
     return report
 
