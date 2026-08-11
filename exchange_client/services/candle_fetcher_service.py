@@ -25,7 +25,8 @@ from cache.trend_cache import get_trend_cache
 from db.crud_monitored_symbols import get_enabled_symbols_set
 from db.crud_trend import get_latest_trend_timestamp, get_trend_rows_after, load_trend_data_from_history
 from db.utils import get_db_session
-from services.candle_fetcher import SYMBOL_MAP, TF_MINUTES, fetch_and_store, get_quote
+from services.candle_fetcher import (REPAIR_BARS, SYMBOL_MAP, TF_MINUTES,
+                                     fetch_and_store, get_quote)
 from utils.logging import log_manager
 from utils.symbols import normalize_symbol
 
@@ -38,6 +39,12 @@ from utils.symbols import normalize_symbol
 # a floor of MIN_CATCHUP_BARS bars of *this* timeframe regardless of the
 # global setting, so every timeframe reliably clears the +5 margin.
 MIN_CATCHUP_BARS = 10
+
+# Ceiling on how far back one cycle will reach when a series has fallen behind
+# (long outage, symbol re-enabled after a pause). 1000 bars is one Binance page,
+# so the catch-up stays a single request. Anything older is a backfill job, not
+# something the live loop should quietly try to swallow — it warns instead.
+MAX_CATCHUP_BARS = 1000
 
 
 class CandleFetcherService:
@@ -53,7 +60,9 @@ class CandleFetcherService:
         candle_fetcher_quote            default "USDT"
         candle_fetcher_timeframes       default "15,60"
         candle_fetcher_interval         default 900   (seconds)
-        candle_fetcher_lookback_hours   default 6
+        candle_fetcher_lookback_hours   default 6   (bootstrap only — once a
+                                        series has rows, the window is sized to
+                                        the gap by _fetch_start, not to this)
         candle_fetcher_symbols          default ""    (blank = use monitored_symbols)
 
     Symbols resolve as: candle_fetcher_symbols if set, else the enabled rows of
@@ -209,6 +218,41 @@ class CandleFetcherService:
             "consecutive_failures": self._consecutive_failures,
         }
 
+    # -- fetch window ------------------------------------------------------
+
+    def _fetch_start(self, tf: str, since: Optional[datetime],
+                     start: datetime, end: datetime) -> datetime:
+        """Earliest bar to request for this series.
+
+        Every request also drags WARMUP_BARS(300) bars behind it so the Wilder
+        recursions have converged, so the window on top is the only part worth
+        economising — but it is the part that was set to `lookback_hours` (30h,
+        i.e. 120 extra 15m bars) on every cycle whether or not anything had
+        changed. Once `since` is known the window only has to span the gap.
+
+        Bounded on both sides: floored at MIN_CATCHUP_BARS so compute_rows
+        still clears its warmup+5 threshold (below it, nothing is ever emitted
+        and the series silently stalls), capped at MAX_CATCHUP_BARS so a very
+        stale series cannot turn one cycle into a multi-page pull.
+        """
+        tf_min = TF_MINUTES[tf]
+        floor = end - timedelta(minutes=tf_min * MIN_CATCHUP_BARS)
+        if since is None:
+            # Nothing stored yet — this is the bootstrap, take the full window.
+            return min(start, floor)
+
+        wanted = min(since - timedelta(minutes=tf_min * REPAIR_BARS), floor)
+        oldest = end - timedelta(minutes=tf_min * MAX_CATCHUP_BARS)
+        if wanted < oldest:
+            self.logger.warning(
+                f"{tf} series is more than {MAX_CATCHUP_BARS} bars behind "
+                f"(last bar {since:%Y-%m-%d %H:%M}Z) — catching up to the cap "
+                f"only. Run Tools/run_candle_fetcher.py backfill to close the "
+                f"rest, or the gap stays and poisons the recursions."
+            )
+            return oldest
+        return wanted
+
     # -- loop --------------------------------------------------------------
 
     def _run_loop(self) -> None:
@@ -239,6 +283,7 @@ class CandleFetcherService:
         total, gapped, failed = 0, [], []
         trend_cache = get_trend_cache()
         cache_updates = 0
+        skipped = 0
 
         with get_db_session() as db:
             for symbol in symbols:
@@ -262,9 +307,19 @@ class CandleFetcherService:
                             since = get_latest_trend_timestamp(db, symbol, tf)
                             if since is not None:
                                 self._last_ts[key] = since
-                        tf_start = min(start, end - timedelta(
-                            minutes=TF_MINUTES[tf] * MIN_CATCHUP_BARS
-                        ))
+                        # Rows are timestamped at their bar's CLOSE, so the next
+                        # bar of this series closes at since + one interval.
+                        # Before that instant there is provably nothing new
+                        # upstream — a 15m series has nothing to say for 7 of
+                        # every 8 cycles, a 1D series for 719 of 720. Skipping
+                        # here costs no request, no DB write and no read-back.
+                        next_close = since + timedelta(minutes=TF_MINUTES[tf]) \
+                            if since is not None else None
+                        if next_close is not None and end < next_close:
+                            skipped += 1
+                            continue
+
+                        tf_start = self._fetch_start(tf, since, start, end)
                         report = fetch_and_store(db, symbol, tf, tf_start, end, since=since)
                         total += report.written
                         if not report.contiguous:
@@ -297,8 +352,8 @@ class CandleFetcherService:
         self._last_run_ts = time.time()
         self._last_rows = total
         self.logger.info(
-            f"Candle fetch cycle complete — {total} rows upserted "
-            f"(includes one repair rewrite per series), "
+            f"Candle fetch cycle complete — {skipped} series had no closed bar "
+            f"(not fetched), {total} rows upserted, "
             f"{cache_updates} TrendCache update(s) replayed"
         )
         if gapped:

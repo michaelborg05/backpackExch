@@ -121,13 +121,19 @@ def _row(ts):
     return SimpleNamespace(timestamp=ts, symbol="BTC_USDC", timeframe=TF)
 
 
-def _cycle(svc, newest, rows_after=()):
+# Well past every bar the service tests use, so the "has a bar closed yet?"
+# gate is open and each test exercises the behaviour it is actually about.
+CYCLE_NOW = datetime(2026, 8, 11, 23, 0, tzinfo=timezone.utc)
+
+
+def _cycle(svc, newest, rows_after=(), now=CYCLE_NOW):
     """Run one _fetch_once with every collaborator stubbed.
 
-    Returns (latest_ts_mock, rows_after_mock, trend_cache_mock).
+    Returns (latest_ts_mock, rows_after_mock, trend_cache_mock, fetch_mock).
     """
     report = cf.FetchReport(symbol="BTC_USDC", timeframe=TF, written=1, newest=newest)
-    with mock.patch("services.candle_fetcher_service.get_db_session"), \
+    with mock.patch("services.candle_fetcher_service.datetime") as dt, \
+            mock.patch("services.candle_fetcher_service.get_db_session"), \
             mock.patch("services.candle_fetcher_service.fetch_and_store",
                        return_value=report) as fas, \
             mock.patch("services.candle_fetcher_service.get_latest_trend_timestamp",
@@ -136,6 +142,7 @@ def _cycle(svc, newest, rows_after=()):
                        return_value=list(rows_after)) as after, \
             mock.patch("services.candle_fetcher_service.get_trend_cache") as cache, \
             mock.patch("services.candle_fetcher_service.load_trend_data_from_history"):
+        dt.now.return_value = now
         svc._fetch_once()
     return latest, after, cache, fas
 
@@ -212,6 +219,119 @@ def test_failed_series_does_not_advance_since():
     assert svc._last_ts[("BTC_USDC", TF)] == bar
 
 
+# --------------------------------------------------------------------------
+# Bandwidth: what gets requested from Binance at all
+# --------------------------------------------------------------------------
+
+def test_no_request_at_all_until_a_bar_closes():
+    """The dominant cost was fetching ~1,400 candles per symbol per cycle for
+    series where nothing could possibly have changed."""
+    svc = _service()
+    bar = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    svc._last_ts[("BTC_USDC", TF)] = bar
+
+    now = bar + timedelta(minutes=14)  # 15m bar has not closed yet
+    with mock.patch("services.candle_fetcher_service.datetime") as dt, \
+            mock.patch("services.candle_fetcher_service.get_db_session"), \
+            mock.patch("services.candle_fetcher_service.fetch_and_store") as fas, \
+            mock.patch("services.candle_fetcher_service.get_trend_cache"):
+        dt.now.return_value = now
+        svc._fetch_once()
+
+    assert fas.call_count == 0, "must not hit Binance before the bar closes"
+
+
+def test_request_resumes_the_moment_the_bar_closes():
+    svc = _service()
+    bar = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    svc._last_ts[("BTC_USDC", TF)] = bar
+
+    now = bar + TF_DELTA  # exactly on the close
+    report = cf.FetchReport(symbol="BTC_USDC", timeframe=TF, written=1, newest=now)
+    with mock.patch("services.candle_fetcher_service.datetime") as dt, \
+            mock.patch("services.candle_fetcher_service.get_db_session"), \
+            mock.patch("services.candle_fetcher_service.fetch_and_store",
+                       return_value=report) as fas, \
+            mock.patch("services.candle_fetcher_service.get_trend_rows_after",
+                       return_value=[_row(now)]), \
+            mock.patch("services.candle_fetcher_service.get_trend_cache"), \
+            mock.patch("services.candle_fetcher_service.load_trend_data_from_history"):
+        dt.now.return_value = now
+        svc._fetch_once()
+
+    assert fas.call_count == 1
+
+
+def test_window_is_sized_to_the_gap_not_to_lookback_hours():
+    """Up to date -> the floor (10 bars), not 30h worth of bars."""
+    svc = _service()
+    end = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    start = end - timedelta(hours=30)
+    since = end - TF_DELTA
+
+    tf_start = svc._fetch_start(TF, since, start, end)
+    bars = (end - tf_start) / TF_DELTA
+    assert bars == 10, f"expected the {10}-bar floor, got {bars}"
+
+
+def test_window_stretches_to_cover_a_real_gap():
+    svc = _service()
+    end = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    start = end - timedelta(hours=30)
+    since = end - TF_DELTA * 200
+
+    tf_start = svc._fetch_start(TF, since, start, end)
+    # 200 bars behind, plus the repair bar.
+    assert (end - tf_start) / TF_DELTA == 200 + 1
+
+
+def test_window_is_capped_for_a_very_stale_series():
+    svc = _service()
+    end = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    start = end - timedelta(hours=30)
+    since = end - TF_DELTA * 50_000
+
+    tf_start = svc._fetch_start(TF, since, start, end)
+    assert (end - tf_start) / TF_DELTA == 1000
+    assert svc.logger.warning.called, "a capped catch-up leaves a gap — must warn"
+
+
+def test_bootstrap_still_takes_the_full_lookback_window():
+    svc = _service()
+    end = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    start = end - timedelta(hours=30)
+
+    assert svc._fetch_start(TF, None, start, end) == start
+
+
+def test_klines_request_negotiates_gzip():
+    """Measured 3.2x on the wire; urllib does not ask for it by default."""
+    captured = {}
+
+    class _Resp:
+        headers = {"Content-Encoding": "gzip"}
+
+        def read(self):
+            import gzip as _gz
+            return _gz.compress(b"[]")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _urlopen(req, timeout=None):
+        captured["headers"] = req.headers
+        return _Resp()
+
+    with mock.patch.object(cf.urllib.request, "urlopen", _urlopen):
+        assert cf._http_get("https://x/api", {"symbol": "BTCUSDT"}) == []
+
+    # urllib title-cases header keys.
+    assert captured["headers"].get("Accept-encoding") == "gzip"
+
+
 if __name__ == "__main__":
     for fn in [test_full_window_written_when_no_since,
                test_quiet_cycle_writes_only_the_repair_bar,
@@ -221,7 +341,14 @@ if __name__ == "__main__":
                test_quiet_cycle_does_not_read_back_or_replay,
                test_new_bar_is_replayed_into_the_cache,
                test_capped_read_back_leaves_the_remainder_for_next_cycle,
-               test_failed_series_does_not_advance_since]:
+               test_failed_series_does_not_advance_since,
+               test_no_request_at_all_until_a_bar_closes,
+               test_request_resumes_the_moment_the_bar_closes,
+               test_window_is_sized_to_the_gap_not_to_lookback_hours,
+               test_window_stretches_to_cover_a_real_gap,
+               test_window_is_capped_for_a_very_stale_series,
+               test_bootstrap_still_takes_the_full_lookback_window,
+               test_klines_request_negotiates_gzip]:
         fn()
         print(f"  ok {fn.__name__}")
     print("\nALL CANDLE FETCHER INCREMENTAL TESTS PASSED")
