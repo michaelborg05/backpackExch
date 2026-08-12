@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from cache.settings_cache import get_settings_cache
+from cache.symbol_cache import get_symbol_cache
 from cache.trend_cache import get_trend_cache
 from db.crud_monitored_symbols import get_enabled_symbols_set
 from db.crud_trend import get_latest_trend_timestamp, get_trend_rows_after, load_trend_data_from_history
@@ -141,12 +142,19 @@ class CandleFetcherService:
             if str(raw).strip():
                 candidates = [s.strip().upper() for s in str(raw).split(",") if s.strip()]
             else:
-                try:
-                    with get_db_session() as db:
-                        candidates = sorted(get_enabled_symbols_set(db))
-                except Exception as e:  # noqa: BLE001
-                    self.logger.error(f"Could not read monitored_symbols: {e}")
-                    return []
+                # SymbolCache already holds the enabled monitored_symbols list,
+                # from the same query, and is refreshed whenever a symbol is
+                # added or toggled — so the per-cycle DB read here was pure
+                # duplication. Fall back to the DB while the cache is still
+                # empty: this service can start before anything populates it.
+                candidates = sorted(get_symbol_cache().get_all_symbols())
+                if not candidates:
+                    try:
+                        with get_db_session() as db:
+                            candidates = sorted(get_enabled_symbols_set(db))
+                    except Exception as e:  # noqa: BLE001
+                        self.logger.error(f"Could not read monitored_symbols: {e}")
+                        return []
 
         usable, unmapped = [], []
         for sym in candidates:

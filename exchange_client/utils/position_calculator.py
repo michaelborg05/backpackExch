@@ -1,7 +1,8 @@
 from cache.balance_cache import get_balance_cache
 from cache.price_cache import get_price_cache
+from cache.symbol_config_cache import get_symbol_config_cache
 from db.utils import get_db_session
-from db.crud import get_symbol_config, get_open_positions
+from db.crud import get_open_positions
 from decimal import Decimal
 from typing import Optional, Tuple
 from models.trading_profile import TradingProfile
@@ -118,20 +119,23 @@ class PositionCalculator:
         portfolio_cache = get_portfolio_cache()
         total_portfolio_value = portfolio_cache.get_total_value(quote_asset=quote_asset, profile_name=profile.name)
         
-        # Check for symbol-specific override
+        # Check for symbol-specific override. Read from cache and BEFORE opening
+        # a session: the refusal below is the common case on manual/test paths,
+        # and it no longer costs a connection and a transaction to reach it.
+        symbol_config = get_symbol_config_cache().get(profile.name, symbol)
+
+        # Order size comes from the per-symbol config (the Symbols page is the
+        # single source of truth). Signal generation only scans symbols that have
+        # a config row, so this should always be present for live signals; manual
+        # or test order paths that bypass that gate are refused here rather than
+        # falling back to a profile-level default.
+        if not (symbol_config and symbol_config.order_size_usdc):
+            return None, (
+                f"No symbol config for {symbol} on profile {profile.name} "
+                f"— set an order size on the Symbols page"
+            )
+
         with get_db_session() as db:
-            symbol_config = get_symbol_config(db, profile.name, symbol)
-            
-            # Order size comes from the per-symbol config (the Symbols page is the
-            # single source of truth). Signal generation only scans symbols that have
-            # a config row, so this should always be present for live signals; manual
-            # or test order paths that bypass that gate are refused here rather than
-            # falling back to a profile-level default.
-            if not (symbol_config and symbol_config.order_size_usdc):
-                return None, (
-                    f"No symbol config for {symbol} on profile {profile.name} "
-                    f"— set an order size on the Symbols page"
-                )
             order_size_usdc = Decimal(str(symbol_config.order_size_usdc))
             reason = f"Symbol config: ${order_size_usdc}"
             

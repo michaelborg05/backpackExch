@@ -3488,6 +3488,10 @@ async def clone_profile_endpoint(
         db.commit()
         db.refresh(new_prof)
         refresh_profiles_from_db()
+        # This path adds SymbolConfig rows directly rather than via
+        # upsert_symbol_config, so it has to invalidate the cache itself.
+        from cache.symbol_config_cache import get_symbol_config_cache
+        get_symbol_config_cache().invalidate()
 
         apiserver_logger.info(
             f"Cloned profile '{src.name}' -> '{new_name}' "

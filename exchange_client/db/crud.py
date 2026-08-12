@@ -931,16 +931,27 @@ def update_daily_snapshot(
     
     if not snapshot:
         raise ValueError(f"Snapshot {snapshot_id} not found")
-    
-    # Update high/low
+
+    # Update high/low. This runs on every balance-monitor cycle but the extremes
+    # only actually move occasionally, so commit nothing when neither changed —
+    # an empty transaction per cycle per account otherwise.
+    changed = False
+
     if current_balance > (snapshot.highest_balance or 0):
         snapshot.highest_balance = current_balance
-    
-    if current_balance < (snapshot.lowest_balance or float('inf')):
+        changed = True
+
+    if current_balance < (snapshot.lowest_balance or Decimal("Infinity")):
         snapshot.lowest_balance = current_balance
-    
-    db.commit()
-    db.refresh(snapshot)
+        changed = True
+
+    if changed:
+        db.commit()
+
+    # No db.refresh(): it re-SELECTed the row that was just written, which is
+    # why this showed up twice in pg_stat_statements (once with LIMIT for the
+    # lookup above, once without for the refresh). The caller keeps its own
+    # cached copy and ignores the return value.
     return snapshot
 
 
@@ -1128,6 +1139,11 @@ def upsert_symbol_config(
 
     db.commit()
     db.refresh(config)
+    # Invalidate here rather than at the call sites — every writer goes through
+    # this function, so a new one cannot forget to do it and leave the running
+    # service sizing trades off a stale order size.
+    from cache.symbol_config_cache import get_symbol_config_cache
+    get_symbol_config_cache().invalidate()
     return config
 
 
