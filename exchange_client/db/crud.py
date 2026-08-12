@@ -554,19 +554,41 @@ def get_open_positions_for_profile(
         .all()
     )
 
+ACTIVE_ORDER_STATUSES = ["New", "PartiallyFilled", "TriggerPending"]
+
+
 def get_active_orders(db: Session, profile_name: str, symbol: str = None) -> List[Order]:
     """Get all open positions for a profile"""
-    active_statuses = ["New", "PartiallyFilled", "TriggerPending"]
-
     query = db.query(Order).filter(
         Order.profile_name == profile_name,
-        Order.status.in_(active_statuses)
+        Order.status.in_(ACTIVE_ORDER_STATUSES)
     )
 
     if symbol:
         query = query.filter(Order.symbol == symbol)
 
     return query.all()
+
+
+def get_active_orders_for_profiles(db: Session, profile_names: List[str]) -> List[Order]:
+    """Get all active orders across a set of profiles in a single query.
+
+    The monitoring loop checks every profile on every iteration, which is one
+    query per profile — the single most-called statement in the database after
+    the open-positions equivalent. Order is stable so the caller can group by
+    profile without re-sorting.
+    """
+    if not profile_names:
+        return []
+    return (
+        db.query(Order)
+        .filter(
+            Order.profile_name.in_(profile_names),
+            Order.status.in_(ACTIVE_ORDER_STATUSES),
+        )
+        .order_by(Order.profile_name, Order.created_at)
+        .all()
+    )
 
 def update_order(db: Session, profile_name: str, exch_order_id: str, status: str) -> List[Order]:
     """Update an existing order"""

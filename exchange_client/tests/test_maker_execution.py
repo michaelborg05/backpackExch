@@ -170,7 +170,8 @@ def test_limit_exit_fill_stamps_close_snapshot():
     profile = SimpleNamespace(name="profile3", display_name="P3",
                               entry_timeframe="15", trend_timeframe="60")
     order = SimpleNamespace(exchange_order_id="53113310569", symbol="ZEC_USDC",
-                            purpose="TAKE_PROFIT", position_id=42, status="New")
+                            purpose="TAKE_PROFIT", position_id=42, status="New",
+                            profile_name="profile3")
     filled = SimpleNamespace(status=OrderStatus.FILLED, symbol="ZEC_USDC",
                              entry_price=100.0, exit_price=101.0,
                              executedQuantity=1.0, profit=1.0)
@@ -192,7 +193,7 @@ def test_limit_exit_fill_stamps_close_snapshot():
     patched = {
         "get_profile_manager": lambda: SimpleNamespace(_profiles={"profile3": profile}),
         "get_db_session": lambda: contextlib.nullcontext(None),
-        "get_active_orders": lambda db, name: [order],
+        "get_active_orders_for_profiles": lambda db, names: [order],
         "get_adapter": lambda p: SimpleNamespace(
             process_limit_order=lambda order, position_id: filled),
         "get_position": lambda db, pid: SimpleNamespace(ai_log_id=None),

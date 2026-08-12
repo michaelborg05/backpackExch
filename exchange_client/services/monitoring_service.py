@@ -1,6 +1,7 @@
 import json
 import time
 import threading
+from collections import defaultdict
 from typing import List,  Dict,Optional
 from services.position_manager import get_position_manager
 from utils.logging import log_manager
@@ -31,16 +32,29 @@ import os
 from utils.settings_helper import get_settings_helper
 from db.utils import get_db_session
 from db.crud import (
-    get_open_positions,
+    get_open_positions_for_profiles,
     count_open_positions_for_profiles,
     get_risk_group,
     update_position_trailing_stop,
     close_invalid_position,
     update_high_low,
-    get_active_orders,
+    get_active_orders_for_profiles,
     get_position,
 )
 from cache.symbol_cache import get_symbol_cache
+
+def _group_by_profile(rows) -> Dict[str, list]:
+    """Group rows fetched for many profiles back into per-profile lists.
+
+    The batched queries return everything in one shot; each caller still wants
+    to walk profile by profile, and needs an empty list (not a KeyError) for a
+    profile with nothing open.
+    """
+    grouped: Dict[str, list] = defaultdict(list)
+    for row in rows:
+        grouped[row.profile_name].append(row)
+    return grouped
+
 
 class MonitoringService:
     """Service for monitoring market prices and account balances"""
@@ -350,19 +364,25 @@ class MonitoringService:
             self.logger.error(f"Error initializing market info: {e}")
 
     def _monitor_orders(self):
-        # Check active orders 
+        # Check active orders
         profile_manager = get_profile_manager()
 
         if profile_manager is None:
             self.logger.error("Profile manager not initialized. Skipping open position monitoring.")
-            return 
-        
+            return
+
         # Use the context manager - session is automatically closed
-        profiles = profile_manager._profiles.values()
-        for profile in profiles:
-            with get_db_session() as db:
-                #get open orders from DB
-                open_orders = get_active_orders(db, profile.name)
+        profiles = list(profile_manager._profiles.values())
+        # One query and one session for every profile, not one of each per
+        # profile. Safe to share the session: the only writes on this path
+        # (resolve_ai_signal_outcome, and the snapshot stamp, which opens its
+        # own session) commit themselves, so nothing uncommitted spans profiles.
+        with get_db_session() as db:
+            orders_by_profile = _group_by_profile(
+                get_active_orders_for_profiles(db, [p.name for p in profiles])
+            )
+            for profile in profiles:
+                open_orders = orders_by_profile.get(profile.name, [])
 
                 adapter = get_adapter(profile)
 
@@ -445,9 +465,12 @@ class MonitoringService:
             self._trend_invalidation_counter = 0
 
         with get_db_session() as db:
-            profiles = profile_manager._profiles.values()
+            profiles = list(profile_manager._profiles.values())
+            positions_by_profile = _group_by_profile(
+                get_open_positions_for_profiles(db, [p.name for p in profiles])
+            )
             for profile in profiles:
-                open_positions = get_open_positions(db, profile.name)
+                open_positions = positions_by_profile.get(profile.name, [])
 
                 for position in open_positions:
                     symbol = position.symbol
@@ -630,11 +653,14 @@ class MonitoringService:
         balance_cache = get_balance_cache()
 
         with get_db_session() as db:
-            profiles = profile_manager._profiles.values()
+            profiles = list(profile_manager._profiles.values())
+            positions_by_profile = _group_by_profile(
+                get_open_positions_for_profiles(db, [p.name for p in profiles])
+            )
 
             for profile in profiles:
-                open_positions = get_open_positions(db, profile.name)
-                if open_positions is None or len(open_positions) == 0:
+                open_positions = positions_by_profile.get(profile.name, [])
+                if not open_positions:
                     continue
 
                 is_perp = getattr(profile, "market_type", "SPOT") == "PERP"
