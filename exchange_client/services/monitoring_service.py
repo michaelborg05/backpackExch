@@ -1205,12 +1205,34 @@ class MonitoringService:
 
         return group, member_names, max_open, max_per_symbol
 
+    def _record_profile_block(self, profile: TradingProfile, stage: str, reason: str):
+        """Record a profile-wide skip against every symbol it covers.
+
+        Symbols filtered out before generate_signal() would otherwise keep the
+        reason from an earlier cycle, so the Telegram diagnostic would show a
+        stale cause. Purely observational — never let it break the loop.
+        """
+        try:
+            from services.signal_diagnostics import get_signal_diagnostics
+            diagnostics = get_signal_diagnostics()
+            for symbol in self._symbol_cache.get_symbols_for_profile(profile.name):
+                diagnostics.record(
+                    profile_name=profile.name,
+                    display_name=profile.display_name,
+                    symbol=symbol,
+                    stage=stage,
+                    reason=reason,
+                )
+        except Exception as e:
+            self.logger.debug(f"[{profile.name}] Diagnostics record failed: {e}")
+
     def _process_signals_for_profile(self, profile: TradingProfile):
         """Process trading signals for a specific profile"""
 
         # Check trading hours
         if not self._is_within_trading_hours(profile):
             self.logger.info(f"[{profile.name}] Outside trading hours — skipping signal check")
+            self._record_profile_block(profile, "hours", "Outside configured trading hours")
             return None
 
         # Check circuit breakers
@@ -1224,6 +1246,7 @@ class MonitoringService:
             self.logger.warning(
                 f"[{profile.name}] 🚨 Circuit breaker blocked signal: {breaker_reason}"
             )
+            self._record_profile_block(profile, "breaker", breaker_reason or "Circuit breaker open")
             return None
 
         #retrieve list of tickers for this profile
@@ -1240,6 +1263,10 @@ class MonitoringService:
                 self.logger.info(
                     f"[{profile.name}] At profile position cap "
                     f"({profile_open}/{max_open_for_profile}) — skipping signal scan"
+                )
+                self._record_profile_block(
+                    profile, "capacity",
+                    f"At position cap ({profile_open}/{max_open_for_profile})"
                 )
                 return None
 
@@ -1262,6 +1289,17 @@ class MonitoringService:
                     f"[{profile.name}]  - skipping scan of {ticker} - still in cooldown "
                     f"({remaining:.0f}s remaining)"
                 )
+                try:
+                    from services.signal_diagnostics import get_signal_diagnostics
+                    get_signal_diagnostics().record(
+                        profile_name=profile.name,
+                        display_name=profile.display_name,
+                        symbol=ticker,
+                        stage="cooldown",
+                        reason=f"Signal cooldown ({remaining / 60:.0f}m remaining)",
+                    )
+                except Exception:
+                    pass
                 continue
 
             symbols_to_scan.append(ticker)

@@ -13,6 +13,7 @@ from models.signal_snapshot import TradeSignalSnapshot
 from api_builders.factory import get_adapter
 from cache.regime_filter import get_regime_filter
 from services.ai_signal_handler import AISignalHandler, get_ai_signal_handler
+from services.signal_diagnostics import get_signal_diagnostics
 
 
 def _tf_label(tf) -> str:
@@ -122,6 +123,31 @@ class SignalGenerator:
         
         self.logger.info(log_msg)
     
+    def _record(
+        self,
+        symbol: str,
+        stage: str,
+        reason: str,
+        timeframe: str = "",
+        confidence: Optional[float] = None,
+    ) -> None:
+        """Remember why this symbol did/didn't signal, for the Telegram lookup.
+
+        Purely observational — a failure here must never affect trading.
+        """
+        try:
+            get_signal_diagnostics().record(
+                profile_name=self.profile.name,
+                display_name=self.profile.display_name,
+                symbol=symbol,
+                stage=stage,
+                reason=reason,
+                timeframe=timeframe,
+                confidence=confidence,
+            )
+        except Exception as e:
+            self.logger.debug(f"Diagnostics record failed for {symbol}: {e}")
+
     def generate_signal(self, symbol: str) -> Optional[TradingSignal]:
         """
         Generate trading signal for a symbol
@@ -144,6 +170,7 @@ class SignalGenerator:
         current_price = self.price_cache.get_price(symbol)
         if current_price is None or current_price <= 0:
             self.logger.warning(f"{symbol}: No valid price data")
+            self._record(symbol, "price", "No valid price data")
             return None
 
         # 1. BALANCE CHECK
@@ -160,6 +187,7 @@ class SignalGenerator:
             self.logger.warning(
                 f"[{self.profile.name}] Skipping {symbol}: {balance_error}"
             )
+            self._record(symbol, "balance", balance_error or "Balance unusable")
             return None
 
         # 2. REGIME FILTER (NEW: Pass correct timeframes for strategy)
@@ -175,6 +203,10 @@ class SignalGenerator:
             if not can_trade:
                 self.logger.info(
                     f"{symbol}: Market regime blocked - {regime_reason}"
+                )
+                self._record(
+                    symbol, "regime", regime_reason,
+                    timeframe=_tf_label(self.regime_primary_tf)
                 )
                 return None
         else:
@@ -204,6 +236,7 @@ class SignalGenerator:
                 self.logger.info(
                     f"{symbol}: Re-entry blocked - {reentry_reason}"
                 )
+                self._record(symbol, "reentry", reentry_reason)
                 return None
             else:
                 self.logger.info(
@@ -226,6 +259,10 @@ class SignalGenerator:
             if not trend_check:
                 self.logger.info(
                     f"{symbol}: ❌ Trend filter failed ({_tf_label(self.trend_timeframe)}) - {trend_reason}"
+                )
+                self._record(
+                    symbol, "trend", trend_reason,
+                    timeframe=_tf_label(self.trend_timeframe)
                 )
                 return None
             else:
@@ -259,6 +296,10 @@ class SignalGenerator:
             if not entry_check:
                 self.logger.info(
                     f"{symbol}: ❌ Entry filter failed ({_tf_label(self.entry_timeframe)}) - {entry_reason}"
+                )
+                self._record(
+                    symbol, "entry", entry_reason,
+                    timeframe=_tf_label(self.entry_timeframe)
                 )
                 return None
             else:
@@ -352,6 +393,12 @@ class SignalGenerator:
             self.logger.info(
                 f"{symbol}: ❌ Confidence too low: {confidence_pct:.1f}% < {self.min_confidence}%"
             )
+            self._record(
+                symbol, "confidence",
+                f"Score {confidence_pct:.0f}% < {self.min_confidence:.0f}% required",
+                timeframe=_tf_label(self.entry_timeframe),
+                confidence=confidence_pct,
+            )
             return None
 
         # Determine signal strength
@@ -407,7 +454,14 @@ class SignalGenerator:
             f"Confidence: {confidence_pct:.1f}% | "
             f"Size scalar: {position_size_scalar:.2f}x"
         )
-        
+
+        self._record(
+            symbol, "signal",
+            f"{strength.value} {signal_direction.value} @ {confidence_pct:.0f}%",
+            timeframe=_tf_label(self.entry_timeframe),
+            confidence=confidence_pct,
+        )
+
         return signal
     
     # ── AI_AGENT strategy helpers ─────────────────────────────────────────────
@@ -487,6 +541,10 @@ class SignalGenerator:
         entry_trend = self.trend_cache.get(symbol, self.entry_timeframe)
         if entry_trend and entry_trend.rsi > 70:
             self.logger.warning(f"{symbol}: RSI above 70. Skipping AI evaluation - RSI {entry_trend.rsi}")
+            self._record(
+                symbol, "entry", f"RSI {entry_trend.rsi:.0f} > 70 — AI evaluation skipped",
+                timeframe=_tf_label(self.entry_timeframe)
+            )
             return None
 
         # Call the AI agent
@@ -504,6 +562,7 @@ class SignalGenerator:
 
         if ai_result is None:
             self.logger.warning(f"{symbol}: AI agent returned no result, skipping signal")
+            self._record(symbol, "error", "AI agent returned no result")
             return None
 
         from services.ai_signal_handler import EntryDecision
@@ -579,12 +638,23 @@ class SignalGenerator:
         )
 
         if not live_decision:
+            self._record(
+                symbol, "entry",
+                f"AI={ai_result.decision.value}, rules={'ENTER' if rules_would_enter else 'SKIP'} — no entry",
+                timeframe=_tf_label(self.entry_timeframe)
+            )
             return None
 
         # Check minimum confidence threshold
         if confidence_pct < self.min_confidence:
             self.logger.debug(
                 f"{symbol}: ❌ Confidence too low: {confidence_pct:.1f}% < {self.min_confidence}%"
+            )
+            self._record(
+                symbol, "confidence",
+                f"Score {confidence_pct:.0f}% < {self.min_confidence:.0f}% required",
+                timeframe=_tf_label(self.entry_timeframe),
+                confidence=confidence_pct,
             )
             return None
 
@@ -641,6 +711,13 @@ class SignalGenerator:
         signal.ai_tp_price = tp_price
         signal.ai_sl_price = sl_price
         signal.ai_log_id   = log_id
+
+        self._record(
+            symbol, "signal",
+            f"{strength.value} {signal_direction.value} @ {confidence_pct:.0f}% (AI)",
+            timeframe=_tf_label(self.entry_timeframe),
+            confidence=confidence_pct,
+        )
 
         return signal
 
@@ -1199,6 +1276,7 @@ class SignalGenerator:
                         f"❌ Error generating signal for {symbol}: {e}",
                         exc_info=True
                     )
+                    self._record(symbol, "error", str(e))
         finally:
             # Never let a primed batch outlive the scan — a later caller must
             # see live data, not a snapshot from minutes ago.
@@ -1235,6 +1313,8 @@ def invalidate_signal_generator(profile_name: str) -> None:
     """Remove a cached SignalGenerator so it is recreated with the latest profile on next call"""
     global _signal_generators
     _signal_generators.pop(profile_name, None)
+    # Recorded reasons refer to the old config — drop them rather than report stale causes.
+    get_signal_diagnostics().clear_profile(profile_name)
 
 
 def invalidate_all_signal_generators() -> None:

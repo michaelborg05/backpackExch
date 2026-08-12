@@ -6,6 +6,7 @@ Hybrid Telegram bot that automatically switches between:
 """
 import logging
 import asyncio
+import time
 from typing import Optional
 from telegram import Bot, Update
 from telegram.ext import (
@@ -226,7 +227,12 @@ class TelegramService:
     async def _handle_command(self, chat_id: int, text: str, bot: Bot):
         """Handle incoming text commands (works for both modes)"""
         try:
-            match text.lower():
+            # Commands are a single word, optionally followed by an argument
+            # ("why btc"), so match on the verb and keep the rest as the arg.
+            command, _, arg = text.strip().lower().partition(" ")
+            arg = arg.strip()
+
+            match command:
                 case "ping":
                     await bot.send_message(
                         chat_id=chat_id,
@@ -276,14 +282,13 @@ class TelegramService:
                     # Send "processing" message first
                     processing_msg = await bot.send_message(
                         chat_id=chat_id,
-                        text="💰 Fetching summary..."
+                        text="📊 Building snapshot..."
                     )
-                    msg = self.get_summary_data()
-                    safe_msg = msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    msg = self.get_snapshot_data()
                     await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=safe_msg,
+                        text=msg,
                         parse_mode="HTML"
                     )
 
@@ -293,7 +298,45 @@ class TelegramService:
                         text=msg,
                         parse_mode="HTML"
                     )
-                
+
+                case "why" | "w" | "blockers":
+                    processing_msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text="🧭 Checking blockers..."
+                    )
+                    msg = self.get_blocker_data(symbol_filter=arg or None)
+                    safe_msg = msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                    for chunk in self._chunk_message(safe_msg):
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode="HTML"
+                        )
+
+                case "trends" | "t":
+                    # Full per-indicator dump (the old 'summary' output)
+                    processing_msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text="📈 Fetching trends..."
+                    )
+                    msg = self.get_summary_data()
+                    safe_msg = msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    await bot.delete_message(chat_id=chat_id, message_id=processing_msg.message_id)
+                    for chunk in self._chunk_message(safe_msg):
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode="HTML"
+                        )
+
+                case "help" | "h" | "commands":
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=self.get_help_text(),
+                        parse_mode="HTML"
+                    )
+
                 case "exits" | "e" :
                     from services.reentry_manager import get_reentry_manager
 
@@ -367,7 +410,8 @@ class TelegramService:
                 case _:
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"Echo: {text}"
+                        text=f"Unknown command: {text}\n\n{self.get_help_text()}",
+                        parse_mode="HTML"
                     )
         
         except Exception as e:
@@ -591,6 +635,197 @@ class TelegramService:
             # Delete processing message and show error
             return f"❌ Error fetching regime data: {str(e)}"
             
+
+    @staticmethod
+    def _chunk_message(text: str, limit: int = 3500):
+        """Split a long message on line boundaries (Telegram caps at 4096 chars)."""
+        chunks, current = [], ""
+        for line in text.split("\n"):
+            if len(current) + len(line) + 1 > limit and current:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current.strip():
+            chunks.append(current)
+        return chunks or [text]
+
+    @staticmethod
+    def _age_text(timestamp) -> str:
+        """'2m ago' style age for a unix timestamp."""
+        if not timestamp:
+            return "never"
+        age = max(0, time.time() - timestamp)
+        if age < 90:
+            return f"{age:.0f}s ago"
+        if age < 5400:
+            return f"{age / 60:.0f}m ago"
+        return f"{age / 3600:.1f}h ago"
+
+    def get_help_text(self) -> str:
+        return (
+            "<b>Commands</b>\n"
+            "• <b>s</b> / summary — market snapshot (price vs EMA50, RSI, ADX) + regime\n"
+            "• <b>w</b> / why [symbol] — what blocked each profile on the last scan\n"
+            "• <b>t</b> / trends — full per-indicator dump\n"
+            "• <b>p</b> / positions — open positions\n"
+            "• <b>b</b> / balance — balances per account\n"
+            "• <b>e</b> / exits — exits in the last 24h\n"
+            "• ping, mode, help"
+        )
+
+    def get_blocker_data(self, symbol_filter: Optional[str] = None) -> str:
+        """Summarise why each profile isn't trading, from the last scan.
+
+        Reads only what the scan already recorded in memory — no re-evaluation,
+        no exchange or DB calls — so it reflects the most recent real cycle.
+        """
+        from services.signal_diagnostics import (
+            get_signal_diagnostics, strip_trailing_details, STAGE_EMOJI,
+        )
+
+        try:
+            diagnostics = get_signal_diagnostics()
+            last_update = diagnostics.last_update()
+
+            if last_update is None:
+                return (
+                    "🧭 No scan results recorded yet.\n"
+                    "The monitoring loop populates this on its next signal check."
+                )
+
+            # ── Single-symbol drill-down: full reason per profile ──────────────
+            if symbol_filter:
+                symbol = symbol_filter.upper()
+                if "_" not in symbol:
+                    symbol = f"{symbol}_USDC"
+
+                outcomes = diagnostics.for_symbol(symbol)
+                if not outcomes:
+                    return f"🧭 No scan record for {symbol} (not monitored, or not scanned yet)"
+
+                msg = f"🧭 {symbol} — last scan {self._age_text(last_update)}\n"
+                for outcome in outcomes:
+                    emoji = STAGE_EMOJI.get(outcome.stage, "•")
+                    tf = f" [{outcome.timeframe}]" if outcome.timeframe else ""
+                    reason = outcome.reason
+                    # Drop the trailing full-indicator dump — the failing ones
+                    # are already named up front in a hard stop.
+                    if "HARD STOP:" in reason:
+                        reason = strip_trailing_details(
+                            reason.split("HARD STOP:", 1)[1]
+                        ).strip()
+                    msg += f"\n<b>{outcome.display_name}</b>{tf}\n  {emoji} {reason[:300]}\n"
+                return msg
+
+            # ── Rollup: group each profile's symbols by what blocked them ─────
+            msg = f"🧭 <b>Signal blockers</b> — last scan {self._age_text(last_update)}\n"
+
+            grouped = diagnostics.by_profile()
+            for display_name in sorted(grouped):
+                outcomes = grouped[display_name]
+                ready = [o for o in outcomes if o.passed]
+
+                causes: dict = {}
+                for outcome in outcomes:
+                    if outcome.passed:
+                        continue
+                    causes.setdefault(outcome.cause(), []).append(
+                        outcome.symbol.replace("_USDC", "")
+                    )
+
+                msg += (
+                    f"\n<b>{display_name}</b> — "
+                    f"{len(ready)}/{len(outcomes)} ready\n"
+                )
+                if ready:
+                    msg += "  🎯 " + ", ".join(
+                        o.symbol.replace("_USDC", "") for o in ready
+                    ) + "\n"
+
+                # Biggest blockers first — that's the one worth acting on
+                for cause, symbols in sorted(
+                    causes.items(), key=lambda kv: len(kv[1]), reverse=True
+                ):
+                    stage_emoji = "✗"
+                    for outcome in outcomes:
+                        if not outcome.passed and outcome.cause() == cause:
+                            stage_emoji = STAGE_EMOJI.get(outcome.stage, "✗")
+                            break
+                    msg += (
+                        f"  {stage_emoji} {cause} ×{len(symbols)}: "
+                        f"{', '.join(sorted(symbols))}\n"
+                    )
+
+            msg += "\n<i>'why BTC' for the full reason per profile</i>"
+            return msg
+
+        except Exception as e:
+            self.logger.error(f"Error in get_blocker_data: {e}", exc_info=True)
+            return f"❌ Error building blocker summary: {str(e)}"
+
+    def get_snapshot_data(self) -> str:
+        """One line per symbol: where price sits vs EMA50, RSI and ADX per timeframe."""
+        from cache.trend_cache import get_trend_cache
+
+        try:
+            trend_cache = get_trend_cache()
+
+            with get_db_session() as db:
+                symbols = sorted(get_active_symbols(db))
+
+            if not symbols:
+                return "❌ Unable to retrieve tickers from db"
+
+            price_cache = get_price_cache()
+
+            def pct_vs_ema50(trend, price) -> str:
+                """Signed % of price above/below that timeframe's EMA50, width 5."""
+                if trend is None or price is None or not trend.ema50:
+                    return "    —"
+                pct = (price - float(trend.ema50)) / float(trend.ema50) * 100
+                return f"{pct:+5.1f}"
+
+            def value(raw) -> str:
+                """Integer indicator reading, width 3."""
+                return f"{float(raw):3.0f}" if raw is not None else "  —"
+
+            rows = ["SYM     1D%   1h% RSI ADX  15m"]
+            for symbol in symbols:
+                d1 = trend_cache.get(symbol, "1D")
+                h1 = trend_cache.get(symbol, "60")
+                m15 = trend_cache.get(symbol, "15")
+
+                # Live price where available; a cached entry's own price is the
+                # fallback (better than printing nothing for a quiet symbol).
+                live = price_cache.get_price(symbol)
+                price = float(live) if live else None
+
+                def tf_price(trend):
+                    if price is not None:
+                        return price
+                    return float(trend.price) if trend else None
+
+                base = symbol.replace("_USDC", "")[:5]
+                rows.append(
+                    f"{base:<5} "
+                    f"{pct_vs_ema50(d1, tf_price(d1))} "
+                    f"{pct_vs_ema50(h1, tf_price(h1))} "
+                    f"{value(h1.rsi if h1 else None)} "
+                    f"{value(h1.adx if h1 is not None else None)}  "
+                    f"{value(m15.rsi if m15 else None)}"
+                )
+
+            table = "\n".join(rows).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            return (
+                "📊 <b>Market Snapshot</b>\n"
+                f"<pre>{table}</pre>\n"
+                "<i>1D%/1h% = price vs EMA50 on that timeframe. "
+                "RSI/ADX = 60m, 15m = 15m RSI. — = no cached data.</i>"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Error in get_snapshot_data: {e}", exc_info=True)
+            return f"❌ Error building snapshot: {str(e)}"
 
     def get_summary_data(self):
         from cache.trend_cache import get_trend_cache
