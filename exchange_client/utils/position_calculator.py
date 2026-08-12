@@ -136,6 +136,21 @@ class PositionCalculator:
             )
 
         with get_db_session() as db:
+            # ONE read of this profile's open positions serves all three checks
+            # below: existing exposure in this symbol, the per-symbol cap, and
+            # the per-profile cap. These used to be three queries — and two of
+            # them were byte-identical, same session and same arguments, which
+            # is how they became the 4th and 7th most-called statements in the
+            # database. The per-symbol list is just a filter of this one: both
+            # queries carried the same predicates (OPEN, remaining > 0) and the
+            # same created_at ordering, so slicing in Python is equivalent.
+            from db.crud import get_open_positions_for_profile
+
+            profile_open_positions = get_open_positions_for_profile(db, profile.name)
+            symbol_open_positions = [
+                p for p in profile_open_positions if p.symbol == symbol
+            ]
+
             order_size_usdc = Decimal(str(symbol_config.order_size_usdc))
             reason = f"Symbol config: ${order_size_usdc}"
             
@@ -145,7 +160,7 @@ class PositionCalculator:
             max_position_pct = self._get_max_position_pct(symbol, profile, symbol_config)
             max_position_value = (leveraged_portfolio_value * max_position_pct) / Decimal("100")
             
-            existing_position_value = self._get_existing_position_value(db, profile.name, symbol, price)
+            existing_position_value = self._existing_position_value(symbol_open_positions, price)
             
             remaining_capacity = max_position_value - existing_position_value
             if remaining_capacity <= 0:
@@ -174,16 +189,12 @@ class PositionCalculator:
                     else:
                         reason += f" (limited by available balance ${available:.2f})"
             
-            from db.crud import get_open_positions_for_symbol, get_open_positions_for_profile
-
             # Check max open positions per symbol
-            open_positions = get_open_positions_for_symbol(db, profile.name, symbol)
-            if open_positions and len(open_positions) >= profile.max_open_positions:
-                return None, f"Max open positions reached for symbol {symbol} ({len(open_positions)}/{profile.max_open_positions})"
+            if symbol_open_positions and len(symbol_open_positions) >= profile.max_open_positions:
+                return None, f"Max open positions reached for symbol {symbol} ({len(symbol_open_positions)}/{profile.max_open_positions})"
 
             # Check max open positions per profile (across all symbols)
             if profile.max_open_positions_per_profile:
-                profile_open_positions = get_open_positions_for_profile(db, profile.name)
                 if profile_open_positions and len(profile_open_positions) >= profile.max_open_positions_per_profile:
                     return None, (
                         f"Max open positions reached for profile {profile.name} "
@@ -214,17 +225,18 @@ class PositionCalculator:
             return Decimal(str(symbol_config.max_position_size_pct))
         return Decimal(str(profile.max_position_size_pct))
     
-    def _get_existing_position_value(
+    def _existing_position_value(
         self,
-        db,
-        profile_name: str,
-        symbol: str,
+        positions,
         current_price: Decimal
     ) -> Decimal:
-        """Calculate current value of existing positions for this symbol"""
-        from db.crud import get_open_positions_for_symbol
+        """Current value of already-open positions in one symbol.
 
-        positions = get_open_positions_for_symbol(db, profile_name, symbol)
+        Takes the rows rather than fetching them: the caller has already read
+        this profile's open positions, and the old `_get_existing_position_value`
+        re-queried for them — the duplicate half of the two identical queries
+        this path used to issue.
+        """
         if not positions:
             return Decimal("0")
 

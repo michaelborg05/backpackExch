@@ -245,6 +245,123 @@ def test_resolve_symbols_falls_back_to_db_when_cache_is_empty():
     assert db_read.call_count == 1
 
 
+# --------------------------------------------------------------------------
+# position sizing: three position queries collapsed into one
+# --------------------------------------------------------------------------
+
+def _sizing_calc(**over):
+    """A PositionCalculator wired for calculate_buy_quantity, no DB."""
+    from utils.position_calculator import PositionCalculator
+
+    calc = object.__new__(PositionCalculator)
+    calc.logger = mock.MagicMock()
+    calc.price_cache = mock.MagicMock()
+    calc.price_cache.get_price.return_value = Decimal("10")
+    calc.balance_cache = mock.MagicMock()
+    calc.balance_cache.get_available_balance.return_value = Decimal("100000")
+    for k, v in over.items():
+        setattr(calc, k, v)
+    return calc
+
+
+def _sizing_profile(**over):
+    base = dict(name="p1", leverage_multiplier=1.0, max_open_positions=5,
+                max_open_positions_per_profile=None)
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def _open_position(symbol, qty="1"):
+    return SimpleNamespace(symbol=symbol, remaining_quantity=Decimal(str(qty)))
+
+
+def _run_sizing(calc, profile, symbol, positions, portfolio=Decimal("100000")):
+    """Run calculate_buy_quantity; returns (result, query_mock)."""
+    cfg = CachedSymbolConfig("p1", symbol, Decimal("100"), Decimal("50"))
+    portfolio_cache = mock.MagicMock()
+    portfolio_cache.get_total_value.return_value = portfolio
+
+    with mock.patch("utils.position_calculator.get_symbol_config_cache") as cache, \
+            mock.patch("utils.position_calculator.get_db_session"), \
+            mock.patch("cache.portfolio_cache.get_portfolio_cache",
+                       return_value=portfolio_cache), \
+            mock.patch("db.crud.get_open_positions_for_profile",
+                       return_value=positions) as q:
+        cache.return_value.get.return_value = cfg
+        result = calc.calculate_buy_quantity(symbol, profile)
+    return result, q
+
+
+def test_sizing_issues_exactly_one_position_query():
+    calc, profile = _sizing_calc(), _sizing_profile()
+    (qty, reason), q = _run_sizing(calc, profile, "BTC_USDC", [])
+
+    assert q.call_count == 1, f"expected 1 position query, got {q.call_count}"
+    assert qty is not None, reason
+
+
+def test_per_symbol_cap_still_counts_only_that_symbol():
+    """The collapsed read spans every symbol — the cap must not count them all."""
+    calc = _sizing_calc()
+    profile = _sizing_profile(max_open_positions=2)
+    positions = [_open_position("BTC_USDC"), _open_position("ETH_USDC"),
+                 _open_position("SOL_USDC")]
+
+    (qty, reason), q = _run_sizing(calc, profile, "BTC_USDC", positions)
+
+    assert q.call_count == 1
+    assert qty is not None, f"1 BTC position is under the cap of 2, got: {reason}"
+
+
+def test_per_symbol_cap_still_blocks_at_the_limit():
+    calc = _sizing_calc()
+    profile = _sizing_profile(max_open_positions=2)
+    positions = [_open_position("BTC_USDC"), _open_position("BTC_USDC"),
+                 _open_position("ETH_USDC")]
+
+    (qty, reason), _ = _run_sizing(calc, profile, "BTC_USDC", positions)
+
+    assert qty is None
+    assert "Max open positions reached for symbol" in reason
+    assert "2/2" in reason
+
+
+def test_per_profile_cap_still_counts_every_symbol():
+    calc = _sizing_calc()
+    profile = _sizing_profile(max_open_positions=99,
+                              max_open_positions_per_profile=3)
+    positions = [_open_position("BTC_USDC"), _open_position("ETH_USDC"),
+                 _open_position("SOL_USDC")]
+
+    (qty, reason), q = _run_sizing(calc, profile, "BTC_USDC", positions)
+
+    assert qty is None
+    assert "Max open positions reached for profile" in reason
+    assert "3/3" in reason
+    assert q.call_count == 1
+
+
+def test_existing_exposure_sums_only_the_requested_symbol():
+    """Capacity maths must not charge other symbols' positions against it."""
+    calc = _sizing_calc()
+    profile = _sizing_profile()
+    # max_position_size_pct 50% of 100k = 50k cap. 3 BTC @ 10 = 30 used.
+    positions = [_open_position("BTC_USDC", 1), _open_position("BTC_USDC", 2),
+                 _open_position("ETH_USDC", 9999)]
+
+    assert calc._existing_position_value(
+        [p for p in positions if p.symbol == "BTC_USDC"], Decimal("10")
+    ) == Decimal("30")
+
+    (qty, reason), _ = _run_sizing(calc, profile, "BTC_USDC", positions)
+    assert qty is not None, f"ETH exposure must not block BTC: {reason}"
+
+
+def test_existing_exposure_is_zero_with_no_positions():
+    calc = _sizing_calc()
+    assert calc._existing_position_value([], Decimal("10")) == Decimal("0")
+
+
 if __name__ == "__main__":
     for fn in [test_whole_table_loads_in_one_query_and_serves_every_lookup,
                test_absent_symbol_is_an_answer_not_a_cache_miss,
@@ -257,7 +374,13 @@ if __name__ == "__main__":
                test_snapshot_update_commits_once_when_the_high_moves,
                test_snapshot_update_still_seeds_null_extremes,
                test_resolve_symbols_reads_the_cache_not_the_db,
-               test_resolve_symbols_falls_back_to_db_when_cache_is_empty]:
+               test_resolve_symbols_falls_back_to_db_when_cache_is_empty,
+               test_sizing_issues_exactly_one_position_query,
+               test_per_symbol_cap_still_counts_only_that_symbol,
+               test_per_symbol_cap_still_blocks_at_the_limit,
+               test_per_profile_cap_still_counts_every_symbol,
+               test_existing_exposure_sums_only_the_requested_symbol,
+               test_existing_exposure_is_zero_with_no_positions]:
         fn()
         print(f"  ok {fn.__name__}")
     print("\nALL CONFIG-CACHE DB COST TESTS PASSED")
