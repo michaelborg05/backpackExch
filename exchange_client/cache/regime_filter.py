@@ -30,6 +30,28 @@ def _tf_label(tf) -> str:
     return f"{s}m" if s.isdigit() else s
 
 
+def _short_label(reason: str) -> str:
+    """The headline clause of a reason string, for compact summaries.
+
+    'Panic zone - RSI 28 indicates distribution' -> 'Panic zone'
+    """
+    for separator in (" - ", " — "):
+        if separator in reason:
+            return reason.split(separator, 1)[0].strip()
+    return reason.strip()
+
+
+# Compact codes for the choppy issues, so a summary can list what's wrong
+# without reprinting the full sentence per symbol.
+CHOP_CODE_LEGEND = {
+    "EMA":  "EMAs compressed",
+    "2TF":  "both TFs compressed",
+    "RSI":  "RSI stuck neutral",
+    "VOL":  "dead volume",
+    "FLAT": "price stagnant",
+}
+
+
 class RegimeFilter:
     """
     Risk-based regime filter focused on WHAT YOUR TREND LOGIC DOESN'T SEE
@@ -69,14 +91,14 @@ class RegimeFilter:
         # into a rally (short strategies) / dip-buying a downtrend (mean reversion)
         self.sustained_trend_spread_pct = 2.0
             
-        # Cache results
-        self._regime_cache: Dict[str, Tuple[MarketRegime, str, float]] = {}
+        # Cache results: key -> (regime, reason, codes, timestamp)
+        self._regime_cache: Dict[str, Tuple[MarketRegime, str, list, float]] = {}
         self._cache_ttl = 240
         
         self.logger.info("RegimeFilter initialized - RISK-FOCUSED MODE")
     
     def get_regime(
-        self, 
+        self,
         symbol: str,
         primary_timeframe: str = "60",
         confirm_timeframe: str = "15",
@@ -89,21 +111,43 @@ class RegimeFilter:
         Returns:
             (regime, reason) where regime is SAFE, CHOPPY, or HIGH_RISK
         """
+        regime, reason, _codes = self.get_regime_detail(
+            symbol, primary_timeframe, confirm_timeframe, strategy_type
+        )
+        return regime, reason
+
+    def get_regime_detail(
+        self,
+        symbol: str,
+        primary_timeframe: str = "60",
+        confirm_timeframe: str = "15",
+        strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
+    ) -> Tuple[MarketRegime, str, list]:
+        """Same as get_regime, plus short codes naming what's wrong.
+
+        Codes are for compact reporting (Telegram, dashboards): choppy symbols
+        get one CHOP_CODE_LEGEND key per issue that fired (so len(codes) is the
+        issue count, and a code can repeat), high-risk symbols get the headline
+        clause of their reason. The long `reason` is unchanged so logs and
+        signal diagnostics keep the full detail.
+        """
 
         cache_key = f"{symbol}_{primary_timeframe}_{confirm_timeframe}_{strategy_type.value}"
         if cache_key in self._regime_cache:
-            regime, reason, timestamp = self._regime_cache[cache_key]
+            regime, reason, codes, timestamp = self._regime_cache[cache_key]
             if time.time() - timestamp < self._cache_ttl:
-                
-                
-                return regime, reason
-        
+                return regime, reason, codes
+
         primary_trend = self.trend_cache.get(symbol, primary_timeframe)
         confirm_trend = self.trend_cache.get(symbol, confirm_timeframe)
-        
+
         if primary_trend is None:
-            return MarketRegime.UNKNOWN, f"No {_tf_label(primary_timeframe)} data - cannot assess risk"
-        
+            return (
+                MarketRegime.UNKNOWN,
+                f"No {_tf_label(primary_timeframe)} data - cannot assess risk",
+                [],
+            )
+
 
         from cache.price_cache import get_price_cache
         price_cache = get_price_cache()
@@ -117,27 +161,28 @@ class RegimeFilter:
         if high_risk:
             regime = MarketRegime.HIGH_RISK
             reason = f"🚫 {risk_reason}"
-            self._regime_cache[cache_key] = (regime, reason, time.time())
+            codes = [_short_label(risk_reason)]
+            self._regime_cache[cache_key] = (regime, reason, codes, time.time())
             self.logger.warning(f"{symbol}: {reason}")
-            return regime, reason
-        
+            return regime, reason, codes
+
         # PRIORITY 2: Check for CHOPPY conditions (wait for better setup)
-        is_choppy, chop_reason = self._check_choppy(
+        is_choppy, chop_reason, chop_codes = self._check_choppy(
             symbol, primary_trend, confirm_trend, primary_timeframe, confirm_timeframe, price=current_price
         )
         if is_choppy:
             regime = MarketRegime.CHOPPY
             reason = f"{" Good for Range Trading profile - " if strategy_type == StrategyType.RANGE_TRADING else "⚠️"} {chop_reason}"
-            self._regime_cache[cache_key] = (regime, reason, time.time())
+            self._regime_cache[cache_key] = (regime, reason, chop_codes, time.time())
             self.logger.info(f"{symbol}: {reason}")
-            return regime, reason
-        
+            return regime, reason, chop_codes
+
         # DEFAULT: SAFE - trust your trend signals
         regime = MarketRegime.SAFE
         reason = "Market conditions safe - trust trend signals"
-        self._regime_cache[cache_key] = (regime, reason, time.time())
-        return regime, reason
-    
+        self._regime_cache[cache_key] = (regime, reason, [], time.time())
+        return regime, reason, []
+
     def _check_high_risk(
         self,
         symbol: str,
@@ -268,14 +313,20 @@ class RegimeFilter:
         primary_timeframe: str,
         confirm_timeframe: str,
         price: Decimal = None
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, str, list]:
         """
         Detect CHOPPY conditions where trends are unreliable
-        
+
         This is NOT about "is there a trend?" (trend_cache handles that)
         This is about "is the market structure clean enough to trade?"
+
+        Returns (is_choppy, reason, codes). Each issue carries a CHOP_CODE_LEGEND
+        code so callers can summarise without reprinting the whole sentence.
         """
-        issues = []
+        # (code, text) per issue — the count of these drives the choppy verdict
+        issues: list = []
+        primary_label = _tf_label(primary_timeframe)
+        confirm_label = _tf_label(confirm_timeframe)
 
         if price is None:
             price = primary_trend.price
@@ -310,9 +361,11 @@ class RegimeFilter:
                 # ADX confirms a real trend is in play — tight gap is structural, not chop
                 pass
             else:
-                issues.append(
-                    f"60m EMAs compressed ({ema_diff_pct:.2f}% - no clear direction)"
-                )
+                issues.append((
+                    "EMA",
+                    f"{primary_label} EMAs compressed "
+                    f"({ema_diff_pct:.2f}% - no clear direction)",
+                ))
 
         # Check 15m compression too, but only flag "both TFs compressed" when
         # ADX is also low (confirming genuine range/chop, not a trending structure)
@@ -329,10 +382,11 @@ class RegimeFilter:
                     # Rising 60m EMA20 slope: trend recovering, gap closing naturally
                     pass
                 else:
-                    issues.append(
-                        f"Both TFs compressed (60m: {ema_diff_pct:.2f}%, "
-                        f"15m: {confirm_ema_diff:.2f}%)"
-                    )
+                    issues.append((
+                        "2TF",
+                        f"Both TFs compressed ({primary_label}: {ema_diff_pct:.2f}%, "
+                        f"{confirm_label}: {confirm_ema_diff:.2f}%)",
+                    ))
         # 2. RSI STUCK IN NEUTRAL - No momentum
         rsi_low, rsi_high = self.chop_rsi_neutral
         if rsi_low < primary_trend.rsi < rsi_high:
@@ -342,7 +396,11 @@ class RegimeFilter:
             )
             # Only flag if RSI is truly flat/weak
             if rsi_momentum is not None and abs(rsi_momentum) < 1.0:
-                issues.append(f"60m RSI stuck neutral ({primary_trend.rsi:.0f}, momentum {rsi_momentum:+.1f})")
+                issues.append((
+                    "RSI",
+                    f"{primary_label} RSI stuck neutral "
+                    f"({primary_trend.rsi:.0f}, momentum {rsi_momentum:+.1f})",
+                ))
         
         # 3. DEAD VOLUME - No conviction
         if primary_trend.volume_ratio is not None:
@@ -356,10 +414,11 @@ class RegimeFilter:
             if confirm_trend is not None and confirm_trend.volume_ratio is not None:
                 if (primary_trend.volume_ratio < self.min_volume_ratio and 
                     confirm_trend.volume_ratio < self.min_volume_ratio_confirm):
-                    issues.append(
-                        f"Both TFs dead volume (60m: {primary_trend.volume_ratio:.2f}x, "
-                        f"15m: {confirm_trend.volume_ratio:.2f}x)"
-                    )
+                    issues.append((
+                        "VOL",
+                        f"Both TFs dead volume ({primary_label}: {primary_trend.volume_ratio:.2f}x, "
+                        f"{confirm_label}: {confirm_trend.volume_ratio:.2f}x)",
+                    ))
 
         # 4. PRICE STAGNATION (NEW - use price vs EMA as proxy)
         # If price is very close to BOTH EMA20 and EMA50, it's oscillating (dead)
@@ -369,19 +428,25 @@ class RegimeFilter:
                               primary_trend.ema50) * 100
         
         if price_ema20_gap < 0.3 and price_ema50_gap < 0.5:
-            issues.append(
+            issues.append((
+                "FLAT",
                 f"Price stagnant (EMA20: {price_ema20_gap:.2f}%, "
-                f"EMA50: {price_ema50_gap:.2f}%)"
-            )
-            # If we found price stagnation, it's definitely choppy
-            issues.append("Price stagnation detected")
+                f"EMA50: {price_ema50_gap:.2f}%)",
+            ))
+            # Counts as a second issue on its own: stagnation alone is enough
+            # to call the market choppy.
+            issues.append(("FLAT", "Price stagnation detected"))
 
         # Evaluate: flag as choppy if we found 2+ issues
         if len(issues) >= 2:
-            return True, f"Choppy conditions ({len(issues)} issues): {'; '.join(issues)}"
-        
-        return False, ""
-        
+            reason = (
+                f"Choppy conditions ({len(issues)} issues): "
+                f"{'; '.join(text for _, text in issues)}"
+            )
+            return True, reason, [code for code, _ in issues]
+
+        return False, "", []
+
     def can_trade(
         self,
         symbol: str,
@@ -458,18 +523,28 @@ class RegimeFilter:
 
     
     def get_regime_summary(self, symbols: list) -> dict:
-        """Get regime classification for multiple symbols"""
+        """Get regime classification for multiple symbols.
+
+        Each detail entry carries the full `reason` plus `codes` (short tags)
+        and `issues` (how many chop issues fired), so a caller can render either
+        the long form or a compact one.
+        """
         regimes = {
             MarketRegime.SAFE: [],
             MarketRegime.CHOPPY: [],
             MarketRegime.HIGH_RISK: [],
             MarketRegime.UNKNOWN: []
         }
-        
+
         for symbol in symbols:
-            regime, reason = self.get_regime(symbol)
-            regimes[regime].append({"symbol": symbol, "reason": reason})
-        
+            regime, reason, codes = self.get_regime_detail(symbol)
+            regimes[regime].append({
+                "symbol": symbol,
+                "reason": reason,
+                "codes": codes,
+                "issues": len(codes),
+            })
+
         return {
             "safe": len(regimes[MarketRegime.SAFE]),
             "choppy": len(regimes[MarketRegime.CHOPPY]),
@@ -478,7 +553,8 @@ class RegimeFilter:
             "details": {
                 "safe": regimes[MarketRegime.SAFE],
                 "choppy": regimes[MarketRegime.CHOPPY],
-                "high_risk": regimes[MarketRegime.HIGH_RISK]
+                "high_risk": regimes[MarketRegime.HIGH_RISK],
+                "unknown": regimes[MarketRegime.UNKNOWN],
             }
         }
 

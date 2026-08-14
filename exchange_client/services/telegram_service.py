@@ -594,47 +594,81 @@ class TelegramService:
             return False
 
     def get_regime_data(self):
-        from cache.regime_filter import get_regime_filter
+        """Compact regime report: one short line per symbol, codes not sentences.
+
+        The per-symbol chop reasons run to ~200 chars each, which is a wall of
+        text on a phone. Here each symbol gets its issue count plus the short
+        codes that fired; 'why SYMBOL' still has the full sentences.
+        """
+        from cache.regime_filter import get_regime_filter, CHOP_CODE_LEGEND
+
         try:
             regime_filter = get_regime_filter()
             with get_db_session() as db:
                 db_tickers = get_active_symbols(db)
-            if db_tickers:
-                regime_summary = regime_filter.get_regime_summary(db_tickers)
-                msg = f"📊 Regime Summary\n"
-                msg = f"🌐 *Market Regime Report*\n"
-                msg += f"✅ Safe: {regime_summary['safe']} | "
-                msg += f"⚠️ choppy: {regime_summary['choppy']} | "
-                msg += f"🚫 High Risk: {regime_summary['high_risk']}\n"
-                msg += "─" * 15 + "\n"
-                
-                details = regime_summary.get('details', {})
-                if details.get('safe'):
-                    msg += "\n🟢 *TRADE READY (safe)*\n"
-                    for item in details['safe']:
-                        msg += f"• {item['symbol']}\n"
 
-                # Show High Risk (Protection)
-                if details.get('high_risk'):
-                    msg += "\n🚫 *HALTED (High Risk)*\n"
-                    for item in details['high_risk']:
-                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
-                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
+            if not db_tickers:
+                return "❌ Unable to retrieve tickers from db"
 
-                # Optional: Only show Uncertain if there are few items, to avoid a massive wall of text
-                if details.get('choppy'):
-                    msg += "\n🟡 choppy\n"
-                    for item in details['choppy']:
-                        # Your 'reason' string explains the filter (e.g., 'Low Volume' or 'High Volatility')
-                        msg += f"• {item['symbol']}: _{item['reason']}_\n"
-            else:
-                msg += "❌Unable to retrieve tickers from db"
+            summary = regime_filter.get_regime_summary(db_tickers)
+            details = summary.get("details", {})
+
+            def bases(items):
+                return [i["symbol"].replace("_USDC", "") for i in items]
+
+            msg = (
+                "🌐 <b>Market Regime</b>\n"
+                f"🟢 {summary['safe']} safe · "
+                f"🟡 {summary['choppy']} choppy · "
+                f"🔴 {summary['high_risk']} high risk\n"
+            )
+
+            if details.get("safe"):
+                msg += f"\n🟢 <b>TRADE READY</b>\n{', '.join(sorted(bases(details['safe'])))}\n"
+
+            if details.get("high_risk"):
+                msg += "\n🔴 <b>HALTED</b>\n"
+                for item in sorted(details["high_risk"], key=lambda i: i["symbol"]):
+                    base = item["symbol"].replace("_USDC", "")
+                    # 'codes' holds the headline clause for high risk
+                    label = item["codes"][0] if item.get("codes") else item["reason"]
+                    label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    msg += f"• {base}: {label}\n"
+
+            if details.get("choppy"):
+                # Fewest issues first — those are the ones closest to clearing
+                choppy = sorted(details["choppy"], key=lambda i: (i["issues"], i["symbol"]))
+                width = max(len(b) for b in bases(choppy))
+
+                seen_codes, rows = [], [f"{'SYM':<{width}}  # ISSUES"]
+                for item in choppy:
+                    base = item["symbol"].replace("_USDC", "")
+                    # A code can repeat (it counts twice toward the verdict) —
+                    # list it once, the count column already carries the weight.
+                    codes = list(dict.fromkeys(item.get("codes") or []))
+                    for code in codes:
+                        if code not in seen_codes:
+                            seen_codes.append(code)
+                    rows.append(f"{base:<{width}}  {item['issues']} {' '.join(codes)}")
+
+                table = "\n".join(rows).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                msg += f"\n🟡 <b>CHOPPY</b> ({summary['choppy']})\n<pre>{table}</pre>\n"
+
+                legend = " · ".join(
+                    f"{code}={CHOP_CODE_LEGEND[code]}"
+                    for code in seen_codes if code in CHOP_CODE_LEGEND
+                )
+                if legend:
+                    msg += f"<i># = issues found. {legend}</i>\n"
+
+            if details.get("unknown"):
+                msg += f"\n⚪ <b>NO DATA</b>\n{', '.join(sorted(bases(details['unknown'])))}\n"
+
             return msg
-        
+
         except Exception as e:
-            # Delete processing message and show error
+            self.logger.error(f"Error in get_regime_data: {e}", exc_info=True)
             return f"❌ Error fetching regime data: {str(e)}"
-            
 
     @staticmethod
     def _chunk_message(text: str, limit: int = 3500):
@@ -664,7 +698,7 @@ class TelegramService:
     def get_help_text(self) -> str:
         return (
             "<b>Commands</b>\n"
-            "• <b>s</b> / summary — market snapshot (price vs EMA50, RSI, ADX) + regime\n"
+            "• <b>s</b> / summary — snapshot (price vs EMA50, RSI 4h/1h/15m, ADX) + regime\n"
             "• <b>w</b> / why [symbol] — what blocked each profile on the last scan\n"
             "• <b>t</b> / trends — full per-indicator dump\n"
             "• <b>p</b> / positions — open positions\n"
@@ -789,9 +823,18 @@ class TelegramService:
                 """Integer indicator reading, width 3."""
                 return f"{float(raw):3.0f}" if raw is not None else "  —"
 
-            rows = ["SYM     1D%   1h% RSI ADX  15m"]
+            # Symbol column only as wide as it needs to be — every extra char
+            # pushes the table toward wrapping on a phone.
+            width = max(3, min(5, max(len(s.replace("_USDC", "")) for s in symbols)))
+
+            # R4h/R1h/R15 are RSI per timeframe; ADX is the 60m reading.
+            rows = [
+                f"{'SYM':<{width}} {'1D%':>5} {'1h%':>5} "
+                f"{'R4h':>3} {'R1h':>3} {'R15':>3} {'ADX':>3}"
+            ]
             for symbol in symbols:
                 d1 = trend_cache.get(symbol, "1D")
+                h4 = trend_cache.get(symbol, "240")
                 h1 = trend_cache.get(symbol, "60")
                 m15 = trend_cache.get(symbol, "15")
 
@@ -805,14 +848,15 @@ class TelegramService:
                         return price
                     return float(trend.price) if trend else None
 
-                base = symbol.replace("_USDC", "")[:5]
+                base = symbol.replace("_USDC", "")[:width]
                 rows.append(
-                    f"{base:<5} "
+                    f"{base:<{width}} "
                     f"{pct_vs_ema50(d1, tf_price(d1))} "
                     f"{pct_vs_ema50(h1, tf_price(h1))} "
+                    f"{value(h4.rsi if h4 else None)} "
                     f"{value(h1.rsi if h1 else None)} "
-                    f"{value(h1.adx if h1 is not None else None)}  "
-                    f"{value(m15.rsi if m15 else None)}"
+                    f"{value(m15.rsi if m15 else None)} "
+                    f"{value(h1.adx if h1 else None)}"
                 )
 
             table = "\n".join(rows).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -820,7 +864,7 @@ class TelegramService:
                 "📊 <b>Market Snapshot</b>\n"
                 f"<pre>{table}</pre>\n"
                 "<i>1D%/1h% = price vs EMA50 on that timeframe. "
-                "RSI/ADX = 60m, 15m = 15m RSI. — = no cached data.</i>"
+                "R4h/R1h/R15 = RSI, ADX = 60m. — = no cached data.</i>"
             )
 
         except Exception as e:
