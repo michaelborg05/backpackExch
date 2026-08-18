@@ -2364,9 +2364,6 @@ class BacktestEngine:
                                        # scripts/CLI flags from before the 2026-07 cutover,
                                        # when they were two different tables.
         shadow_source: Optional[str] = None,  # e.g. "binance:USDT"; None = most rows
-        tick_source: str = "webhook",  # "webhook" = webhook_price_ticks (~2min sample, ~60d)
-                                       # "path1m"  = price_path_shadow expanded to O/H/L/C
-                                       #             (60 points per 15m bar, full history)
         profile_cap: Optional["ProfileOpenPositionCap"] = None,
         sl_breaker: Optional["ConsecutiveSLBreaker"] = None,
         on_missing_ticks: str = "error",  # "error" | "fallback" — what to do when
@@ -2425,14 +2422,11 @@ class BacktestEngine:
         tick_times: List[float] = []    # epoch seconds, sorted
         tick_prices: List[float] = []
         if price_source == "ticks":
-            if tick_source == "path1m":
-                tick_times, tick_prices, ticks_available = self._load_price_path(symbol, start, end,
-                                                                                 shadow_source)
-            else:
-                tick_times, tick_prices, ticks_available = self._load_price_ticks(symbol, start, end)
-            # Ticks only exist from when webhook collection started. A long
-            # backtest can therefore be "tick mode" while ticks cover only the
-            # tail of the window, silently mixing fill models across the run.
+            tick_times, tick_prices, ticks_available = self._load_price_path(symbol, start, end,
+                                                                             shadow_source)
+            # A symbol can be backfilled for only part of the requested window, so
+            # a long backtest can be "tick mode" while ticks cover only the tail of
+            # the window, silently mixing fill models across the run.
             # Require the ticks to actually span the window before trusting them.
             shortfall = None
             if ticks_available and tick_times:
@@ -2446,16 +2440,14 @@ class BacktestEngine:
                 shortfall = "no price ticks found for this symbol/window"
 
             if not ticks_available:
-                table = ("price_path_shadow" if tick_source == "path1m"
-                         else "webhook_price_ticks")
                 detail = (f"{symbol} {start.date()}→{end.date()}: {shortfall} "
-                          f"(tick_source={tick_source!r}, table={table})")
+                          f"(table=price_path_shadow)")
                 if on_missing_ticks == "error":
                     raise TickDataUnavailable(
                         f"Tick mode requested but unusable — {detail}. "
-                        f"Backfill {table}, pick another --tick-source, or re-run with "
-                        f"price_source='candle' / --allow-candle-fallback to accept "
-                        f"candle fills."
+                        f"Backfill price_path_shadow (Tools/run_candle_fetcher.py), or "
+                        f"re-run with price_source='candle' / --allow-candle-fallback "
+                        f"to accept candle fills."
                     )
                 print(f"[Backtest] WARNING: falling back to CANDLE fills — {detail}")
                 price_source = "candle"
@@ -3185,9 +3177,8 @@ class BacktestEngine:
         """Build an intra-candle price path from stored 1m OHLC.
 
         Each 1m bar becomes four points (O/H/L/C, adverse extreme first), giving
-        60 points per 15m candle versus ~7.5 from the webhook tick sample — and
-        unlike the webhook ticks this backfills for years, which is what makes a
-        realistic fill model possible on long backtests.
+        60 points per 15m candle, and it backfills for years — which is what
+        makes a realistic fill model possible on long backtests.
         """
         from db.models import PricePathShadow
         from services.candle_fetcher import expand_bar_to_path
@@ -3227,35 +3218,6 @@ class BacktestEngine:
             BacktestEngine._PATH_CACHE.pop(next(iter(BacktestEngine._PATH_CACHE)))
         BacktestEngine._PATH_CACHE[key] = (times, prices, True)
         return times, prices, True
-
-    def _load_price_ticks(
-        self, symbol: str, start: datetime, end: datetime
-    ) -> Tuple[List[float], List[float], bool]:
-        """
-        Load webhook_price_ticks for symbol in [start, end], sorted by timestamp.
-        Returns (tick_times_epoch, tick_prices, available).
-        """
-        from db.models import WebhookPriceTick
-        rows = (
-            self.db.query(WebhookPriceTick.timestamp, WebhookPriceTick.price)
-            .filter(
-                WebhookPriceTick.symbol    == symbol,
-                WebhookPriceTick.timestamp >= start,
-                WebhookPriceTick.timestamp <= end,
-            )
-            .order_by(WebhookPriceTick.timestamp)
-            .all()
-        )
-        if not rows:
-            return [], [], False
-        tick_times, tick_prices = [], []
-        for r in rows:
-            ts = r.timestamp
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            tick_times.append(ts.timestamp())
-            tick_prices.append(float(r.price))
-        return tick_times, tick_prices, True
 
     @staticmethod
     def _get_candle_ticks(

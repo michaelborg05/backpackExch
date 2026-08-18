@@ -931,15 +931,6 @@ class ExchangeAccount(Base):
     profiles = relationship("TradingProfileDB", back_populates="account")
 
 
-class WebhookPriceTick(Base):
-    __tablename__ = "webhook_price_ticks"
-
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String, nullable=False, index=True)
-    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
-    price = Column(Numeric, nullable=False)
-
-
 class TdmWebhookEvent(Base):
     """Raw NCR Voyix TDM webhook deliveries, captured for tracking/inspection.
 
@@ -963,9 +954,9 @@ class PricePathShadow(Base):
     """1-minute OHLC used to reconstruct the intra-candle price path.
 
     Purpose: the backtester's tick mode needs to know how price MOVED inside an
-    entry candle, so stops and targets fire at the right moment. That came from
-    webhook_price_ticks, which is a ~2-minute sample (7.5 points per 15m bar)
-    and only exists from when webhook collection started.
+    entry candle, so stops and targets fire at the right moment. This is the
+    only source for that path (it replaced a ~2-minute webhook tick sample,
+    dropped 2026-08, which covered only ~60 days and a partial symbol set).
 
     1m klines give 15 points per 15m bar from close alone, or 60 once each bar
     is expanded to an O/H/L/C path — and they backfill for years. Denser and

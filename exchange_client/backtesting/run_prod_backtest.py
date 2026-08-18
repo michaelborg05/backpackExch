@@ -52,11 +52,11 @@ parser.add_argument("--data-source", default="shadow", choices=["log", "shadow"]
 parser.add_argument("--shadow-source", default=None,
                     help="Which provenance source to read, e.g. binance:USDT. Default: "
                          "whichever source has the most rows for the symbol.")
-parser.add_argument("--tick-source", default="path1m", choices=["webhook", "path1m"],
-                    help="Where intra-candle price path comes from in tick mode. "
-                         "'webhook' = webhook_price_ticks (~2min sample, ~60d history, missing "
-                         "new symbols). 'path1m' = price_path_shadow 1m OHLC expanded to O/H/L/C "
-                         "(full history, consistent across all symbols). Default: path1m")
+parser.add_argument("--tick-source", default="path1m", choices=["path1m"],
+                    help="Accepted for back-compat with existing scripts; price_path_shadow "
+                         "(1m OHLC expanded to O/H/L/C, full history, consistent across all "
+                         "symbols) is now the only intra-candle path source. The old "
+                         "'webhook' sample was dropped 2026-08.")
 parser.add_argument("--allow-candle-fallback", action="store_true",
                     help="Accept candle fills when the requested tick source can't cover the "
                          "window. Off by default: a silent fallback changes the fill model "
@@ -144,7 +144,6 @@ with get_db_session() as db:
                 sl_breakers=sl_breakers,
                 data_source=args.data_source,
                 shadow_source=args.shadow_source,
-                tick_source=args.tick_source,
                 on_missing_ticks="fallback" if args.allow_candle_fallback else "error",
             )
 

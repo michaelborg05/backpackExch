@@ -27,13 +27,13 @@ parser.add_argument("--verbose", action="store_true",
                     help="Per-candle debug output from the engine")
 parser.add_argument("--profile", default=None,
                     help="Run only this variant, e.g. p3_v4_ema50drop")
-parser.add_argument("--tick-source", default="path1m", choices=["webhook", "path1m"],
-                    help="Where intra-candle price path comes from in tick mode. "
-                         "'webhook' = webhook_price_ticks (~2min sample, ~60d history). "
-                         "'path1m' = price_path_shadow 1m OHLC expanded to O/H/L/C "
-                         "(60 points per 15m bar, full history).")
+parser.add_argument("--tick-source", default="path1m", choices=["path1m"],
+                    help="Accepted for back-compat with existing scripts; price_path_shadow "
+                         "(1m OHLC expanded to O/H/L/C, 60 points per 15m bar) is now the "
+                         "only intra-candle path source. The old 'webhook' sample was "
+                         "dropped 2026-08.")
 parser.add_argument("--price-source", default="ticks", choices=["ticks", "candle"],
-                    help="Fill model. 'ticks' needs webhook_price_ticks coverage and falls "
+                    help="Fill model. 'ticks' needs price_path_shadow coverage and falls "
                          "back to candle automatically when the window is not covered "
                          "(which is normal for long shadow backtests).")
 parser.add_argument("--price-mode", default="close", choices=["auto", "close", "low", "high"],
@@ -173,7 +173,6 @@ with get_db_session() as db:
                 price_mode=args.price_mode,
                 profile_caps=profile_caps,
                 sl_breakers=sl_breakers,
-                tick_source=args.tick_source,
             )
 
             for r in symbol_results:
