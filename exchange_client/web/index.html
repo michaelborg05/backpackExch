@@ -2982,6 +2982,7 @@ const IND_SCHEMAS = {
   adx_regime:                  [{k:'min_adx',t:'number',d:20},{k:'max_adx',t:'number',d:60}],
   atr_regime:                  [{k:'max_pct',t:'number',d:0.70},{k:'min_pct',t:'number',d:null},{k:'period',t:'number',d:14}],
   distance_from_high:          [{k:'lookback_bars',t:'number',d:42},{k:'min_pct_below',t:'number',d:5},{k:'max_pct_below',t:'number',d:20}],
+  distance_from_low:           [{k:'lookback_bars',t:'number',d:42},{k:'max_pct_above',t:'number',d:2},{k:'min_pct_above',t:'number',d:0},{k:'min_low_age_bars',t:'number',d:0}],
   rsi_momentum:                [{k:'min_momentum',t:'number',d:null},{k:'max_momentum',t:'number',d:null},{k:'lookback_candles',t:'number',d:1}],
   rsi_threshold:               [{k:'period',t:'number',d:14},{k:'min_value',t:'number',d:40},{k:'use_momentum',t:'bool',d:false},{k:'early_threshold',t:'number',d:null}],
   rsi_range:                   [{k:'min',t:'number',d:40},{k:'max',t:'number',d:65},{k:'invert',t:'bool',d:false}],

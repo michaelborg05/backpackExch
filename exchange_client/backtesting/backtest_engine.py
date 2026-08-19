@@ -1417,6 +1417,45 @@ class ReplayTrendCache:
                            f"({pct_below:.1f}% below {len(window)}-bar high {recent_high:.4f} "
                            f"— need {min_pct_below}-{max_pct_below}%{truncated})")
 
+            elif indicator_type == "distance_from_low":
+                # Mirrors TrendCache.distance_from_low — bullish when price sits
+                # CLOSE TO the rolling low over the lookback window ("selling
+                # exhausted / at the bottom of the range"), the complement of
+                # distance_from_high's "some distance off the top". pct_above
+                # goes NEGATIVE on a new low, so min_pct_above (default 0) is
+                # what stops this from catching knives. Fails CLOSED on short
+                # history — see the TrendCache copy for why.
+                # params: { lookback_bars: 42, max_pct_above: 2.0, min_pct_above: 0.0 }
+                lookback_bars = int(params.get("lookback_bars", 42))
+                max_pct_above = float(params.get("max_pct_above", 2.0))
+                min_pct_above = params.get("min_pct_above", 0.0)
+                min_pct_above = None if min_pct_above is None else float(min_pct_above)
+                # See the TrendCache copy: require the window low to be at
+                # least N bars old ("don't buy the first candle at the level").
+                min_low_age_bars = int(params.get("min_low_age_bars", 0) or 0)
+                key = f"{symbol}_{timeframe}"
+                candles = self._candle_history.get(key, [])
+                window = candles[-lookback_bars:]
+                min_needed = min(20, lookback_bars)
+                if len(window) < min_needed:
+                    is_bull = False
+                    msg = f"Distance from low: ✗ (no data — <{min_needed} candles)"
+                else:
+                    lows = [c['low'] for c in window]
+                    recent_low = min(lows)
+                    low_age = len(lows) - 1 - max(i for i, v in enumerate(lows) if v == recent_low)
+                    pct_above = (current_price - recent_low) / recent_low * 100
+                    is_bull = (
+                        pct_above <= max_pct_above
+                        and (min_pct_above is None or pct_above >= min_pct_above)
+                        and low_age >= min_low_age_bars
+                    )
+                    truncated = f", requested {lookback_bars} but cache only holds {len(window)}" if len(window) < lookback_bars else ""
+                    age_note = f", low age {low_age} bars (need >={min_low_age_bars})" if min_low_age_bars else ""
+                    msg = (f"Distance from low: {'✓' if is_bull else '✗'} "
+                           f"({pct_above:.1f}% above {len(window)}-bar low {recent_low:.4f} "
+                           f"— need {min_pct_above}-{max_pct_above}%{age_note}{truncated})")
+
             else:
                 is_bull = False
                 msg = f"Unknown indicator type: {indicator_type}"

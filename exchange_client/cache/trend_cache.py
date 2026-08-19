@@ -2110,6 +2110,66 @@ class TrendCache:
                            f"({pct_below:.1f}% below {len(window)}-bar high {recent_high:.4f} "
                            f"— need {min_pct_below}-{max_pct_below}%{truncated})")
 
+            elif indicator_type == "distance_from_low":
+                # Mirror image of distance_from_high: bullish when price sits
+                # CLOSE TO the rolling low over the lookback window — i.e.
+                # "selling looks exhausted, we're at the bottom of the recent
+                # range", rather than "we're some distance off the top".
+                #
+                # Derived from a review of Michael's manual dip buys (Apr-Aug
+                # 2026, see backtesting/profile_samples/manual_dip_variants.py):
+                # 11 of 14 discretionary entries landed within 1.3% of the
+                # 7-day low, which distance_from_high cannot express at all —
+                # a shallow 5% pullback off the high and a full capitulation
+                # into the low both satisfy it.
+                #
+                # pct_above is signed and MAY BE NEGATIVE when price prints a
+                # new low for the window, so max_pct_above alone still admits
+                # unlimited knife-catching; set min_pct_above (default 0, i.e.
+                # "must not be making a new low") to require the low to have
+                # actually held.
+                # params: { lookback_bars: 42, max_pct_above: 2.0, min_pct_above: 0.0 }
+                lookback_bars = int(params.get("lookback_bars", 42))
+                max_pct_above = float(params.get("max_pct_above", 2.0))
+                min_pct_above = params.get("min_pct_above", 0.0)
+                min_pct_above = None if min_pct_above is None else float(min_pct_above)
+                # min_low_age_bars: require the window low to have been printed
+                # at least N bars ago — i.e. no NEW low in the last N bars, so
+                # selling has demonstrably stopped. This is the "don't buy the
+                # first candle that touches the level" rule. Without it a
+                # rolling-low reference stays satisfied all the way down a
+                # decline and fires on the first bar of it (see
+                # backtesting/profile_samples/manual_dip_variants.py).
+                min_low_age_bars = int(params.get("min_low_age_bars", 0) or 0)
+                key = f"{symbol}_{timeframe}"
+                candles = self._candle_history.get(key, [])
+                window = candles[-lookback_bars:]
+                min_needed = min(20, lookback_bars)
+                if len(window) < min_needed:
+                    # Deliberately fails CLOSED, unlike distance_from_high above.
+                    # That one fails open, which silently disabled dip_v7's depth
+                    # gate for days after every restart (WARMUP_ENTRIES=15 < the
+                    # 18 bars it asks for). "Price is near the recent low" is not
+                    # a claim we can make without history, so don't enter.
+                    is_bullish = False
+                    msg = f"Distance from low: ✗ (no data — <{min_needed} candles)"
+                else:
+                    lows = [c['low'] for c in window]
+                    recent_low = min(lows)
+                    # bars since the low was printed (0 = printed on the last bar)
+                    low_age = len(lows) - 1 - max(i for i, v in enumerate(lows) if v == recent_low)
+                    pct_above = (current_price - recent_low) / recent_low * 100
+                    is_bullish = (
+                        pct_above <= max_pct_above
+                        and (min_pct_above is None or pct_above >= min_pct_above)
+                        and low_age >= min_low_age_bars
+                    )
+                    truncated = f", requested {lookback_bars} but cache only holds {len(window)}" if len(window) < lookback_bars else ""
+                    age_note = f", low age {low_age} bars (need >={min_low_age_bars})" if min_low_age_bars else ""
+                    msg = (f"Distance from low: {'✓' if is_bullish else '✗'} "
+                           f"({pct_above:.1f}% above {len(window)}-bar low {recent_low:.4f} "
+                           f"— need {min_pct_above}-{max_pct_above}%{age_note}{truncated})")
+
             results.append((is_bullish, msg))
             indicator_groups_list.append(indicator_group)
             # Only ungrouped hard stops trigger an immediate fail here;
