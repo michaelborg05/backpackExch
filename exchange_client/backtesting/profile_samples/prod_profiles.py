@@ -13,6 +13,7 @@ in all backtest output — no variable names or dict keys needed.
 """
 
 # Exported 4 active profile(s) with signal generation — 2026-08-05 22:59 UTC
+# Exported 4 active profile(s) with signal generation — 2026-08-18 13:08 UTC
 PROD_PROFILES = [
 # Exported from profile: profile1
 {
@@ -21,7 +22,6 @@ PROD_PROFILES = [
     "trading_type": "rules_live",
     "strategy_type": "trend_following",
     "market_type": "SPOT",
-    "taker_fee_pct": 0.02,
     "entry_timeframe": "15",
     "trend_timeframe": "60",
     "exit_timeframe": "60",
@@ -86,10 +86,9 @@ PROD_PROFILES = [
 # Exported from profile: profile10
 {
     "display_name": "4hr_dip_v7_deep_dip_satellite",
-    "symbols": ['BTC_USDC', 'ETH_USDC', 'SEI_USDC', 'SOL_USDC', 'SUI_USDC', 'XRP_USDC', 'ZEC_USDC'],
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SEI_USDC', 'SOL_USDC', 'SUI_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "mean_reversion",
-    "taker_fee_pct": 0.02,
     "market_type": "SPOT",
     "entry_timeframe": "240",
     "trend_timeframe": "1D",
@@ -100,7 +99,7 @@ PROD_PROFILES = [
     "arm_trailing_stop_pct": 3.5,
     "use_trailing_stop": True,
     "enable_signal_generation": True,
-    "signal_cooldown_minutes": 241,
+    "signal_cooldown_minutes": 1300,
     "sl_cooldown_minutes": 490,
     "tp_cooldown_minutes": 250,
     "min_signal_confidence": 60.0,
@@ -142,7 +141,6 @@ PROD_PROFILES = [
     "display_name": "15m_tf_v9_atrcap070",
     "symbols": ['BNB_USDC', 'BTC_USDC', 'ETH_USDC', 'SOL_USDC', 'SUI_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
-    "taker_fee_pct": 0.02,
     "strategy_type": "trend_following",
     "market_type": "SPOT",
     "entry_timeframe": "15",
@@ -199,10 +197,9 @@ PROD_PROFILES = [
 # Exported from profile: profile7
 {
     "display_name": "4hr_dip_v5_rsi_reversal_trail",
-    "symbols": ['BTC_USDC', 'DOGE_USDC', 'ETH_USDC', 'SEI_USDC', 'SOL_USDC', 'SUI_USDC', 'XRP_USDC', 'ZEC_USDC'],
+    "symbols": ['BNB_USDC', 'BTC_USDC', 'DOGE_USDC', 'ETH_USDC', 'SEI_USDC', 'SOL_USDC', 'SUI_USDC', 'XRP_USDC', 'ZEC_USDC'],
     "trading_type": "rules_live",
     "strategy_type": "mean_reversion",
-    "taker_fee_pct": 0.02,
     "market_type": "SPOT",
     "entry_timeframe": "240",
     "trend_timeframe": "1D",
@@ -213,7 +210,7 @@ PROD_PROFILES = [
     "arm_trailing_stop_pct": 3.5,
     "use_trailing_stop": True,
     "enable_signal_generation": True,
-    "signal_cooldown_minutes": 20,
+    "signal_cooldown_minutes": 1300,
     "sl_cooldown_minutes": 485,
     "tp_cooldown_minutes": 241,
     "min_signal_confidence": 60.0,

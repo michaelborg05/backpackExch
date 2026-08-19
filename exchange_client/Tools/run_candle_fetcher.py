@@ -30,7 +30,7 @@ from services.candle_fetcher import SYMBOL_MAP, fetch_and_store, fetch_and_store
 
 DEFAULT_SYMBOLS = ["SOL_USDC", "ETH_USDC", "BTC_USDC", 
                    "BNB_USDC", "XRP_USDC", "ZEC_USDC","DOGE_USDC","SEI_USDC","SUI_USDC"]
-DEFAULT_TFS = ["15", "60","240"]
+DEFAULT_TFS = ["15", "60", "240", "1D"]  # matches the candle_fetcher_timeframes setting prod runs on
 
 
 def main():

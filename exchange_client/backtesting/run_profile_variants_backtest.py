@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS,run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS, MANUAL_DIP_VARIANTS, DIP_V5_OPT_VARIANTS, run_all_variants
 from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBreaker
 from backtesting.period import DAYS_HELP, parse_period, print_period
 from db.utils import get_db_session
@@ -15,7 +15,7 @@ parser.add_argument("--days",    default="0-90",  #Can now give a range. 0-30, 6
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy"],
+parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy", "manual_dip", "dip_v5_opt"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
@@ -51,6 +51,11 @@ print(f"fill model: {args.price_source}   |   price mode: {args.price_mode}")
 VARIANT_SETS = {
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
     "dip_buy":     (DIP_BUY_VARIANTS,          ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    # manual_dip mirrors dip_buy's universe. Note price_path_shadow currently
+    # covers 7 of these 9 (SEI/SUI have no 1m paths yet), so --price-source
+    # ticks will fall back to candle fills on those two.
+    "manual_dip":  (MANUAL_DIP_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    "dip_v5_opt":  (DIP_V5_OPT_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
 
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
@@ -157,7 +162,7 @@ with get_db_session() as db:
                 continue
 
             print(f"\n{'='*60}")
-            print(f"  {label} -- {symbol}")
+            print(f"  {period_label} -- {symbol}")
             print(f"{'='*60}")
 
             symbol_results = run_all_variants(

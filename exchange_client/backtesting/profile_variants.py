@@ -35,10 +35,12 @@ from backtesting.profile_samples.mean_reversion_short_variants import MEAN_REV_S
 from backtesting.profile_samples.trend_short_variants import TREND_SHORT_VARIANTS
 from backtesting.profile_samples.fade_short_variants import FADE_SHORT_VARIANTS
 from backtesting.profile_samples.dip_buy_variants import DIP_BUY_VARIANTS
+from backtesting.profile_samples.manual_dip_variants import MANUAL_DIP_VARIANTS
+from backtesting.profile_samples.dip_v5_optimisation import DIP_V5_OPT_VARIANTS
 # =============================================================================
 # Convenience: all variants in one dict
 # =============================================================================
-ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS, **DIP_BUY_VARIANTS}
+ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS, **DIP_BUY_VARIANTS, **MANUAL_DIP_VARIANTS, **DIP_V5_OPT_VARIANTS}
 
 # =============================================================================
 # Quick sweep runner — use this to run all variants in one go
