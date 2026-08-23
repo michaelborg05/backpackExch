@@ -165,9 +165,10 @@ class CandleFetcherService:
             if sym not in self._warned_unmapped:
                 self._warned_unmapped.add(sym)
                 self.logger.warning(
-                    f"{sym} is monitored but not listed on the candle source "
-                    f"({get_quote()}) — skipping. Add it to "
-                    f"services/candle_fetcher.SYMBOL_BASES if that is wrong."
+                    f"{sym} is monitored but the candle source does not list it "
+                    f"against {get_quote()} — skipping. This is checked against "
+                    f"the venue's live exchangeInfo, so it means the pair really "
+                    f"is absent (e.g. HYPE), not that config is missing."
                 )
         return usable
 

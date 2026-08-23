@@ -34,8 +34,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import text
 
 from db.utils import get_db_session
-from services.candle_fetcher import (SYMBOL_BASES, TF_MINUTES, fetch_and_store,
-                                     fetch_klines, get_quote)
+from db.crud_monitored_symbols import get_enabled_symbols_set
+from services.candle_fetcher import (TF_MINUTES, fetch_and_store,
+                                     fetch_klines, get_quote, is_supported)
 
 # A bar is flagged when volume differs by more than this. Genuine float noise is
 # ~0; a partial bar is typically off by tens of percent.
@@ -63,7 +64,14 @@ def main():
     source = f"binance:{quote}"
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=args.days)
-    symbols = args.symbols or sorted(SYMBOL_BASES)
+    if args.symbols:
+        symbols = args.symbols
+    else:
+        # Defaults to what is actually monitored. There is no local symbol list
+        # to fall back on any more — the venue listing is the source of truth
+        # for what CAN be fetched, which is far wider than what we track.
+        with get_db_session() as db:
+            symbols = sorted(s for s in get_enabled_symbols_set(db) if is_supported(s))
 
     print(f"Verifying source '{source}'  {start:%Y-%m-%d} -> {end:%Y-%m-%d}\n")
 

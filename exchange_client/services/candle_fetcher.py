@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from services import indicators as ind
+from utils.symbols import CANONICAL_QUOTE
 
 log = logging.getLogger(__name__)
 
@@ -92,36 +93,117 @@ def get_quote() -> str:
     return os.getenv("BINANCE_QUOTE", "USDT").strip().upper()
 
 
-# Base assets keyed by the internal Backpack symbol. The quote is appended at
-# lookup time so the whole map follows get_quote().
-SYMBOL_BASES: Dict[str, str] = {
-    "BTC_USDC": "BTC",
-    "ETH_USDC": "ETH",
-    "SOL_USDC": "SOL",
-    "XRP_USDC": "XRP",
-    "BNB_USDC": "BNB",
-    "ZEC_USDC": "ZEC",
-    # expansion candidates (see Tools/check_market_depth.py)
-    "SUI_USDC": "SUI",
-    "DOGE_USDC": "DOGE",
-    "JUP_USDC": "JUP",
-    "APT_USDC": "APT",
-    "SEI_USDC": "SEI",
-    "PAXG_USDC": "PAXG",
-}
+# Overrides for the rare case where the venue's base asset is spelled
+# differently from the internal symbol's prefix. Empty by design: every symbol
+# traded so far is just "<BASE>_USDC" -> "<BASE>", which base_asset_for()
+# derives without help. This used to be an exhaustive hand-maintained map that
+# doubled as the allowlist, which meant adding a symbol to monitored_symbols
+# silently fetched nothing until someone also shipped a code change. The venue
+# itself is now the source of truth for what is listed (see listed_symbols()).
+SYMBOL_BASE_OVERRIDES: Dict[str, str] = {}
+
+# How long a venue listing snapshot stays valid. Listings change on the order of
+# days, so this only needs to be short enough that a newly-listed asset is
+# picked up the same day.
+_LISTING_TTL_SEC = 6 * 3600
+_listing_cache: Dict[str, Tuple[float, frozenset]] = {}
+
+# Failures are cached too, briefly. resolve_symbols() asks is_supported() once
+# per monitored symbol, so without this a venue outage would fire one
+# exchangeInfo request (times its own retries) per symbol per cycle. Short
+# enough that recovery is picked up within a cycle or two.
+_LISTING_FAIL_TTL_SEC = 60
+_listing_fail: Dict[str, float] = {}
+
+
+def base_asset_for(symbol: str) -> Optional[str]:
+    """Internal symbol -> base asset, e.g. SOL_USDC -> SOL."""
+    if not symbol:
+        return None
+    s = symbol.strip().upper()
+    if s in SYMBOL_BASE_OVERRIDES:
+        return SYMBOL_BASE_OVERRIDES[s]
+    base = s.split("_", 1)[0] if "_" in s else None
+    return base or None
+
+
+def listed_symbols(quote: Optional[str] = None) -> Optional[frozenset]:
+    """Venue symbols currently trading against `quote`, or None if unknown.
+
+    None means "could not ask" (network/venue error) and is deliberately
+    distinct from an empty set. Callers treat None as "do not block" so a
+    transient exchangeInfo failure can never stop the whole fetch loop — a
+    symbol that genuinely is not listed then fails its own kline request, which
+    is logged and retried next cycle, rather than taking every symbol down.
+    """
+    q = (quote or get_quote()).upper()
+    now = time.time()
+    hit = _listing_cache.get(q)
+    if hit and now - hit[0] < _LISTING_TTL_SEC:
+        return hit[1]
+    failed_at = _listing_fail.get(q)
+    if failed_at is not None and now - failed_at < _LISTING_FAIL_TTL_SEC:
+        return hit[1] if hit else None
+    try:
+        info = _http_get(f"{BINANCE_BASE}/api/v3/exchangeInfo", {"permissions": "SPOT"})
+        syms = frozenset(
+            s["symbol"] for s in info.get("symbols", [])
+            if s.get("quoteAsset") == q and s.get("status") == "TRADING"
+            and s.get("isSpotTradingAllowed")
+        )
+        if not syms:
+            _listing_fail[q] = now
+            return hit[1] if hit else None
+        _listing_cache[q] = (now, syms)
+        _listing_fail.pop(q, None)
+        return syms
+    except Exception as e:  # noqa: BLE001 — never let a listing check break a fetch
+        _listing_fail[q] = now
+        log.warning(f"Could not read {BINANCE_BASE} exchangeInfo: {e}")
+        return hit[1] if hit else None
 
 
 def source_symbol_for(symbol: str) -> Optional[str]:
     """Internal symbol -> venue symbol, e.g. SOL_USDC -> SOLUSDT."""
-    base = SYMBOL_BASES.get(symbol)
+    base = base_asset_for(symbol)
     return f"{base}{get_quote()}" if base else None
 
 
+def is_supported(symbol: str) -> bool:
+    """Whether `symbol` can be fetched from the source venue right now.
+
+    Unknown listings (venue unreachable) count as supported — see
+    listed_symbols() for why blocking on that would be worse than allowing it.
+    """
+    src = source_symbol_for(symbol)
+    if not src:
+        return False
+    listed = listed_symbols()
+    return True if listed is None else src in listed
+
+
+def _internal_symbols() -> List[str]:
+    """Every internal symbol the source venue can currently serve.
+
+    Derived from the venue listing rather than a local list, so it answers
+    "what could I fetch" instead of "what did someone remember to add".
+    Empty when the listing is unavailable — callers that need a membership
+    test should use `in SYMBOL_MAP` (which fails open) rather than this.
+    """
+    listed = listed_symbols()
+    if not listed:
+        return []
+    q = get_quote()
+    return sorted(f"{s[:-len(q)]}_{CANONICAL_QUOTE}" for s in listed if s.endswith(q))
+
+
 class _SymbolMap(dict):
-    """Live view of SYMBOL_BASES resolved against the current quote.
+    """Live view of the venue's symbols resolved against the current quote.
 
     Behaves as a dict for membership tests and lookups, but re-resolves on each
-    access so a settings change takes effect without a restart.
+    access so a settings change or a new venue listing takes effect without a
+    restart. Membership follows is_supported(), so it fails open when the venue
+    listing cannot be read.
     """
 
     def __getitem__(self, key):
@@ -134,19 +216,19 @@ class _SymbolMap(dict):
         return source_symbol_for(key) or default
 
     def __contains__(self, key):
-        return key in SYMBOL_BASES
+        return is_supported(key)
 
     def __iter__(self):
-        return iter(SYMBOL_BASES)
+        return iter(_internal_symbols())
 
     def __len__(self):
-        return len(SYMBOL_BASES)
+        return len(_internal_symbols())
 
     def keys(self):
-        return SYMBOL_BASES.keys()
+        return _internal_symbols()
 
     def items(self):
-        return ((k, source_symbol_for(k)) for k in SYMBOL_BASES)
+        return ((k, source_symbol_for(k)) for k in _internal_symbols())
 
 
 SYMBOL_MAP: Dict[str, str] = _SymbolMap()

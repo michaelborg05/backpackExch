@@ -26,7 +26,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from db.utils import get_db_session
-from services.candle_fetcher import SYMBOL_MAP, fetch_and_store, fetch_and_store_paths
+from services.candle_fetcher import (fetch_and_store, fetch_and_store_paths,
+                                     is_supported, source_symbol_for)
 
 DEFAULT_SYMBOLS = ["SOL_USDC", "ETH_USDC", "BTC_USDC", 
                    "BNB_USDC", "XRP_USDC", "ZEC_USDC","DOGE_USDC","SEI_USDC","SUI_USDC"]
@@ -40,7 +41,8 @@ def main():
                     help="paths = backfill 1m OHLC into price_path_shadow for the "
                          "intra-candle fill model (see --tick-source path1m)")
     ap.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS,
-                    help=f"default: the 7 live symbols. Known: {', '.join(sorted(SYMBOL_MAP))}")
+                    help="default: the 9 originally-live symbols. Any symbol the source "
+                         "venue lists is accepted — validated against exchangeInfo at run time.")
     ap.add_argument("--timeframes", nargs="+", default=DEFAULT_TFS)
     ap.add_argument("--days", type=int, default=365, help="backfill window")
     ap.add_argument("--lookback-hours", type=int, default=6, help="live window")
@@ -52,10 +54,11 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    unknown = [s for s in args.symbols if s not in SYMBOL_MAP]
+    unknown = [s for s in args.symbols if not is_supported(s)]
     if unknown:
-        print(f"ERROR: no Binance mapping for {unknown}. Add them to "
-              f"services/candle_fetcher.SYMBOL_MAP first.")
+        print(f"ERROR: the candle source does not list {unknown} "
+              f"({[source_symbol_for(s) for s in unknown]}). Check the spelling, "
+              f"or the pair genuinely is not traded there.")
         return 1
 
     end = datetime.now(tz=timezone.utc)
