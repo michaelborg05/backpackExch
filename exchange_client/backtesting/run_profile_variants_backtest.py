@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS, MANUAL_DIP_VARIANTS, DIP_V5_OPT_VARIANTS, run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS, MANUAL_DIP_VARIANTS, DIP_V5_OPT_VARIANTS, BTC_REGIME_VARIANTS, DAILY_GATE_VARIANTS, TF15_VARIANTS, H1_DISCOVERY_VARIANTS, run_all_variants
 from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBreaker
 from backtesting.period import DAYS_HELP, parse_period, print_period
 from db.utils import get_db_session
@@ -15,7 +15,11 @@ parser.add_argument("--days",    default="0-90",  #Can now give a range. 0-30, 6
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override, e.g. SOL_USDC (default: all 4)")
-parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy", "manual_dip", "dip_v5_opt"],
+parser.add_argument("--symbols", nargs="+", default=None,
+                    help="Multi-symbol override, e.g. --symbols TRX_USDC LINK_USDC. "
+                         "Use EXPANDED for the 14 symbols added 2026-08-22, or ALL for "
+                         "those plus the original 9.")
+parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy", "manual_dip", "dip_v5_opt", "btc_regime", "daily_gate", "tf15", "h1_disc"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
@@ -51,11 +55,13 @@ print(f"fill model: {args.price_source}   |   price mode: {args.price_mode}")
 VARIANT_SETS = {
     "trend": (TREND_VARIANTS,  ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
     "dip_buy":     (DIP_BUY_VARIANTS,          ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
-    # manual_dip mirrors dip_buy's universe. Note price_path_shadow currently
-    # covers 7 of these 9 (SEI/SUI have no 1m paths yet), so --price-source
-    # ticks will fall back to candle fills on those two.
+    # manual_dip mirrors dip_buy's universe.
     "manual_dip":  (MANUAL_DIP_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
     "dip_v5_opt":  (DIP_V5_OPT_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    "btc_regime":  (BTC_REGIME_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    "daily_gate":  (DAILY_GATE_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    "tf15":        (TF15_VARIANTS,             ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    "h1_disc":     (H1_DISCOVERY_VARIANTS,     ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
 
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
@@ -80,7 +86,23 @@ if args.profile:
         sys.exit(1)
     sets_to_run = filtered
 
-symbols_override = [args.symbol] if args.symbol else None
+ORIGINAL_9 = ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC",
+              "SUI_USDC", "DOGE_USDC", "SEI_USDC", "XRP_USDC"]
+EXPANDED_14 = ["TRX_USDC", "LINK_USDC", "UNI_USDC", "LDO_USDC", "SHIB_USDC",
+               "AAVE_USDC", "RAY_USDC", "PEPE_USDC", "WLD_USDC", "JTO_USDC",
+               "BONK_USDC", "PYTH_USDC", "STRK_USDC", "W_USDC"]
+
+if args.symbols:
+    if args.symbols == ["EXPANDED"]:
+        symbols_override = EXPANDED_14
+    elif args.symbols == ["ALL"]:
+        symbols_override = ORIGINAL_9 + EXPANDED_14
+    else:
+        symbols_override = args.symbols
+elif args.symbol:
+    symbols_override = [args.symbol]
+else:
+    symbols_override = None
 
 csv_path = None
 if args.csv and args.trades:
@@ -142,21 +164,29 @@ with get_db_session() as db:
                     float(config.get("consecutive_sl_lock_hours", 24) or 24),
                 )
 
+        # An explicit --symbols/--symbol is a deliberate request to run THESE
+        # symbols, so the per-variant `symbols` pin is ignored rather than
+        # intersected — otherwise variants pinned to the original roster match
+        # nothing and the run silently does no work.
+        ignore_variant_symbol_pins = symbols_override is not None
+
         # Warn about profile-level symbols that won't be visited (not in default set)
-        default_symbols_set = set(symbols)
-        for name, config in variants.items():
-            prof_syms = config.get("symbols")
-            if prof_syms:
-                for s in prof_syms:
-                    if s not in default_symbols_set:
-                        print(f"  WARNING: '{name}' lists symbol '{s}' which is not in the default set for '{set_name}' — skipped")
+        if not ignore_variant_symbol_pins:
+            default_symbols_set = set(symbols)
+            for name, config in variants.items():
+                prof_syms = config.get("symbols")
+                if prof_syms:
+                    for s in prof_syms:
+                        if s not in default_symbols_set:
+                            print(f"  WARNING: '{name}' lists symbol '{s}' which is not in the default set for '{set_name}' — skipped")
 
         for symbol in symbols:
 
             # Filter to variants that have no symbol restriction, or explicitly include this symbol
             active_variants = {
                 name: config for name, config in variants.items()
-                if not config.get("symbols") or symbol in config["symbols"]
+                if ignore_variant_symbol_pins
+                or not config.get("symbols") or symbol in config["symbols"]
             }
             if not active_variants:
                 continue

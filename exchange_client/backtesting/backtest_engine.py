@@ -59,7 +59,10 @@ from sqlalchemy import func
 # Bars of history to replay into the cache *before* the requested window so
 # that history-dependent indicators are live on the very first evaluated bar.
 # 100 matches ReplayTrendCache's candle-history cap — feeding more is wasted.
-WARMUP_BARS = 100
+WARMUP_BARS = 220   # was 100 — must exceed the largest indicator lookback, and a 1h
+                    # entry timeframe now allows distance_from_high/low up to 168 bars
+                    # (7 days). Too small means those indicators start the window
+                    # unprimed, and distance_from_high PASSES when short of history.
 
 
 def _as_utc(ts: datetime) -> datetime:
@@ -143,8 +146,10 @@ class ReplayTrendCache:
                 "ema20": trend_data.ema20,
                 "ema50": trend_data.ema50,
             })
-            if len(ehist) > 5:
-                self._ema_history[key] = ehist[-5:]
+            # Keep 12 — ema_slope supports lookback_bars up to 11. Mirrors the
+            # retention bump in cache/trend_cache.py.
+            if len(ehist) > 12:
+                self._ema_history[key] = ehist[-12:]
 
             # Update BB history for lookback breach checks
             if trend_data.bb is not None and trend_data.bb.bb_lower is not None:
@@ -192,8 +197,12 @@ class ReplayTrendCache:
                         # atr_regime indicator needs period+1 (15), and
                         # distance_from_high needs lookback_bars (e.g. 60 for a
                         # 10-day rolling high off 4h candles).
-                        if len(self._candle_history[key]) > 100:
-                            self._candle_history[key] = self._candle_history[key][-100:]
+                        # Raised 100 -> 200: distance_from_high/low on a 1h entry
+                        # timeframe wants up to 168 bars (7 days). Anything above
+                        # the cap is SILENTLY truncated to whatever is retained,
+                        # which reads as a shorter lookback rather than an error.
+                        if len(self._candle_history[key]) > 200:
+                            self._candle_history[key] = self._candle_history[key][-200:]
             
 
 
@@ -278,13 +287,17 @@ class ReplayTrendCache:
             abs(new.rsi   - old.rsi)   > RSI_THRESHOLD
         )
 
-    def _get_ema_slope(self, symbol: str, timeframe: str, ema_type: str = "ema20"):
+    def _get_ema_slope(self, symbol: str, timeframe: str, ema_type: str = "ema20",
+                       lookback_bars: int = 1):
+        # Mirrors TrendCache._get_ema_slope, including the multi-bar lookback.
+        # lookback_bars=1 is the original single-bar slope and the default.
         key = f"{symbol}_{timeframe}"
         hist = self._ema_history.get(key, [])
-        if len(hist) < 2:
+        lookback_bars = max(1, int(lookback_bars))
+        if len(hist) < lookback_bars + 1:
             return None, None
         current  = hist[-1][ema_type]
-        previous = hist[-2][ema_type]
+        previous = hist[-1 - lookback_bars][ema_type]
         slope_pct = ((current - previous) / previous) * 100 if previous else 0.0
         if slope_pct > 0.01:
             direction = "rising"
@@ -509,7 +522,8 @@ class ReplayTrendCache:
                 min_slope = params.get("min_slope_pct", 0.01)
                 max_slope = params.get("max_slope_pct", None)
                 ema_name  = f"ema{ema_type}"
-                slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name)
+                slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name,
+                                                   int(params.get("lookback_bars", 1)))
                 if slope_pct is None:
                     is_bull = False
                     msg     = f"EMA{ema_type} slope: ✗ (no data)"
@@ -1455,6 +1469,49 @@ class ReplayTrendCache:
                     msg = (f"Distance from low: {'✓' if is_bull else '✗'} "
                            f"({pct_above:.1f}% above {len(window)}-bar low {recent_low:.4f} "
                            f"— need {min_pct_above}-{max_pct_above}%{age_note}{truncated})")
+
+
+            elif indicator_type == "reference_symbol_vs_ema":
+                # Gate on ANOTHER symbol's position relative to its own EMA —
+                # e.g. "only buy this dip while BTC is >=3.78% BELOW its daily
+                # EMA50". Cross-symbol, unlike every other indicator here.
+                #
+                # Evidence: a screen over 3,400 qualifying dip bars (2yr, 7
+                # symbols) found BTC-below-its-daily-EMA50 took the mean from
+                # -0.58% to +1.44%/trade and the <-5% tail from 17.2% to 10.9%.
+                # That is a BAR-LEVEL screen; the per-symbol analogue of the
+                # same idea looked just as good and then lost at strategy level.
+                #
+                # Bounds are on the SIGNED gap (price - ema)/ema*100, so
+                # "below" is expressed with negative numbers:
+                #   min_gap_pct -25, max_gap_pct -3.78  =>  3.78%..25% BELOW
+                #   min_gap_pct 0,   max_gap_pct None   =>  at or above
+                # params: { reference_symbol, timeframe, ema, min_gap_pct, max_gap_pct }
+                ref_symbol = params.get("reference_symbol")
+                ref_tf     = str(params.get("timeframe", "1D"))
+                ema_type   = int(params.get("ema", 50))
+                lo         = params.get("min_gap_pct", None)
+                hi         = params.get("max_gap_pct", None)
+                ref = self.get(ref_symbol, ref_tf) if ref_symbol else None
+                ref_ema = None
+                if ref is not None:
+                    ref_ema = ref.ema20 if ema_type == 20 else ref.ema50
+                if ref is None or not ref_ema or ref.price is None:
+                    # FAIL OPEN, deliberately — this gate REMOVES trades, so no
+                    # data must degrade to "behave as if the gate is absent"
+                    # rather than halting the profile. The engine prints a loud
+                    # warning at load time when the series is missing entirely.
+                    is_bull = True
+                    msg = f"Ref {ref_symbol}/{ref_tf} vs EMA{ema_type}: PASS (no data — gate inactive)"
+                else:
+                    gap = (float(ref.price) - float(ref_ema)) / float(ref_ema) * 100
+                    is_bull = ((lo is None or gap >= float(lo))
+                                 and (hi is None or gap <= float(hi)))
+                    _lo = "-inf" if lo is None else f"{float(lo):g}"
+                    _hi = "+inf" if hi is None else f"{float(hi):g}"
+                    _ok = "OK" if is_bull else "NO"
+                    msg = (f"Ref {ref_symbol}/{ref_tf} vs EMA{ema_type}: {_ok} "
+                           f"(gap {gap:+.2f}%, need {_lo}..{_hi}%)")
 
             else:
                 is_bull = False
@@ -2552,6 +2609,36 @@ class BacktestEngine:
             if src:
                 _q = _q.filter(CandleModel.source == src)
             all_rows.extend(_q.all())
+        # ── Reference symbols ────────────────────────────────────────────────
+        # A profile can gate on ANOTHER symbol's state via a
+        # reference_symbol_vs_ema indicator (e.g. "only enter while BTC is
+        # below its own daily EMA50"). Those series are not part of the symbol
+        # under replay, so load them here and merge into the same stream —
+        # ReplayTrendCache is keyed by f"{symbol}_{timeframe}" so they coexist
+        # without collision. The loop's symbol guards keep them out of the
+        # signal/ATR path.
+        for ref_sym, ref_tf in sorted(self._reference_series()):
+            if ref_sym == symbol and ref_tf in needed_timeframes:
+                continue  # already loaded above
+            ref_start = start - timedelta(minutes=_tf_to_minutes(ref_tf) * WARMUP_BARS)
+            ref_rows = (
+                self.db.query(CandleModel)
+                .filter(
+                    CandleModel.symbol    == ref_sym,
+                    CandleModel.timeframe == ref_tf,
+                    CandleModel.timestamp >= ref_start,
+                    CandleModel.timestamp <= end,
+                )
+                .all()
+            )
+            if not ref_rows:
+                # Fails OPEN at evaluation time (see the indicator), but that is
+                # invisible in aggregate results, so say so loudly here.
+                print(f"[Backtest] WARNING: reference series {ref_sym}/{ref_tf} has NO data "
+                      f"in {ref_start:%Y-%m-%d}..{end:%Y-%m-%d} — the gate that uses it will "
+                      f"pass every bar, i.e. this run does NOT test it.")
+            all_rows.extend(ref_rows)
+
         all_rows.sort(key=lambda r: (r.timestamp, r.timeframe))
 
         if not all_rows:
@@ -2645,8 +2732,15 @@ class BacktestEngine:
             cache.feed(td)
             result.rows_processed += 1
 
-            # Only run signal logic on entry_timeframe candles
-            if row.timeframe != self.profile.entry_timeframe:
+            # Only run signal logic on the PRIMARY symbol's entry_timeframe
+            # candles. The symbol guard is load-bearing once a reference symbol
+            # is being fed (reference_symbol_vs_ema): without it a reference bar
+            # landing on the entry timeframe would run the whole entry/exit and
+            # ATR path using the REFERENCE's price against the primary symbol's
+            # position. Reference series are normally loaded on a timeframe the
+            # profile does not trade (e.g. 1D), which hides the bug rather than
+            # preventing it.
+            if row.symbol != symbol or row.timeframe != self.profile.entry_timeframe:
                 continue
 
             # Update rolling ATR14 (entry-TF) BEFORE any entry this candle, so the
@@ -3356,11 +3450,38 @@ class BacktestEngine:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _reference_series(self) -> set:
+        """{(symbol, timeframe)} referenced by reference_symbol_vs_ema indicators.
+
+        Scans trend/entry/exit indicator lists so the engine knows which extra
+        series to load before the replay starts.
+        """
+        out = set()
+        for attr in ("trend_indicators", "entry_indicators", "exit_indicators"):
+            for ind in (getattr(self.profile, attr, None) or []):
+                if not isinstance(ind, dict):
+                    continue
+                if ind.get("type") != "reference_symbol_vs_ema":
+                    continue
+                params = ind.get("params") or {}
+                ref_sym = params.get("reference_symbol")
+                if not ref_sym:
+                    continue
+                out.add((ref_sym, str(params.get("timeframe", "1D"))))
+        return out
+
     def _find_prev_same_tf(self, rows: list, idx: int):
-        """Return the previous row with the same timeframe, or None."""
-        current_tf = rows[idx].timeframe
+        """Return the previous row with the same SYMBOL and timeframe, or None.
+
+        The symbol check matters once a profile pulls in a reference symbol
+        (reference_symbol_vs_ema): all_rows then interleaves two symbols, and
+        matching on timeframe alone would hand a SOL bar the previous BTC bar
+        as its "previous candle", corrupting every prev_close-derived value.
+        """
+        current_tf  = rows[idx].timeframe
+        current_sym = rows[idx].symbol
         for i in range(idx - 1, -1, -1):
-            if rows[i].timeframe == current_tf:
+            if rows[i].timeframe == current_tf and rows[i].symbol == current_sym:
                 return rows[i]
         return None
 

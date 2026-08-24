@@ -36,6 +36,10 @@ parser.add_argument("--days",    default="14",
                     help=DAYS_HELP)
 parser.add_argument("--symbol",  default=None,
                     help="Single symbol override applied to all profiles, e.g. SOL_USDC")
+parser.add_argument("--symbols", nargs="+", default=None,
+                    help="Multi-symbol override applied to all profiles. Use EXPANDED for "
+                         "the 14 symbols added 2026-08-22 (true out-of-sample — no profile "
+                         "was ever fitted to them), or ALL for those plus the original 9.")
 parser.add_argument("--profile", default=None,
                     help="Run only one prod profile by name, e.g. prod_mean_rev")
 parser.add_argument("--trades",  action="store_true", default=True,
@@ -81,7 +85,23 @@ if args.profile:
 else:
     profiles_to_run = PROD_PROFILES
 
-symbols_override = [args.symbol] if args.symbol else None
+ORIGINAL_9 = ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC",
+              "SUI_USDC", "DOGE_USDC", "SEI_USDC", "XRP_USDC"]
+EXPANDED_14 = ["TRX_USDC", "LINK_USDC", "UNI_USDC", "LDO_USDC", "SHIB_USDC",
+               "AAVE_USDC", "RAY_USDC", "PEPE_USDC", "WLD_USDC", "JTO_USDC",
+               "BONK_USDC", "PYTH_USDC", "STRK_USDC", "W_USDC"]
+
+if args.symbols:
+    if args.symbols == ["EXPANDED"]:
+        symbols_override = EXPANDED_14
+    elif args.symbols == ["ALL"]:
+        symbols_override = ORIGINAL_9 + EXPANDED_14
+    else:
+        symbols_override = args.symbols
+elif args.symbol:
+    symbols_override = [args.symbol]
+else:
+    symbols_override = None
 
 # ---------------------------------------------------------------------------
 # CSV setup

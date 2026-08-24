@@ -103,8 +103,11 @@ class TrendCache:
             })
             
             # Keep last 3 significant changes for slope (need 2-3 points)
-            if len(self._ema_history[key]) > 3:
-                self._ema_history[key] = self._ema_history[key][-3:]
+            # Keep 12: _get_ema_slope supports a multi-bar lookback (an
+            # ema_slope indicator may ask for lookback_bars up to 11). Was 3,
+            # which capped the slope at a single bar.
+            if len(self._ema_history[key]) > 12:
+                self._ema_history[key] = self._ema_history[key][-12:]
             
             # Update BB history for lookback breach checks
             if trend_data.bb is not None and trend_data.bb.bb_lower is not None:
@@ -156,8 +159,12 @@ class TrendCache:
                         # ATR14 volatility gate needs period+1 (15), and
                         # distance_from_high needs lookback_bars (e.g. 60 for a
                         # 10-day rolling high off 4h candles).
-                        if len(self._candle_history[key]) > 100:
-                            self._candle_history[key] = self._candle_history[key][-100:]
+                        # Raised 100 -> 200: distance_from_high/low on a 1h entry
+                        # timeframe wants up to 168 bars (7 days). Anything above
+                        # the cap is SILENTLY truncated to whatever is retained,
+                        # which reads as a shorter lookback rather than an error.
+                        if len(self._candle_history[key]) > 200:
+                            self._candle_history[key] = self._candle_history[key][-200:]
             
             # Persist to database if enabled
             if persist_to_db:
@@ -243,7 +250,8 @@ class TrendCache:
                 f"{', '.join(changes)}"
             )
     
-    def _get_ema_slope(self, symbol: str, timeframe: str, ema_type: str = 'ema20') -> Tuple[Optional[float], Optional[str]]:
+    def _get_ema_slope(self, symbol: str, timeframe: str, ema_type: str = 'ema20',
+                       lookback_bars: int = 1) -> Tuple[Optional[float], Optional[str]]:
         """
         Calculate EMA slope (rate of change)
         
@@ -254,14 +262,19 @@ class TrendCache:
         """
         key = f"{symbol}_{timeframe}"
         
-        if key not in self._ema_history or len(self._ema_history[key]) < 2:
+        lookback_bars = max(1, int(lookback_bars))
+        if key not in self._ema_history or len(self._ema_history[key]) < lookback_bars + 1:
             return None, None
-        
+
         history = self._ema_history[key]
-        
-        # Get current and previous EMA values
+
+        # Compare against the EMA `lookback_bars` bars ago. lookback_bars=1 is
+        # the original single-bar slope and is the default, so callers that do
+        # not pass it are unaffected. Longer lookbacks are markedly less noisy
+        # on slow timeframes — on 1D the 1-bar slope is close to coin-flip
+        # while the 5-bar version separates cleanly.
         current = history[-1][ema_type]
-        previous = history[-2][ema_type]
+        previous = history[-1 - lookback_bars][ema_type]
         
         # Calculate percentage change
         slope_pct = ((current - previous) / previous) * 100
@@ -753,14 +766,15 @@ class TrendCache:
             
             elif indicator_type == "ema_slope":
                 # Check if EMA is rising/falling/flat
-                # params: {ema: 20|50, direction: "rising"|"falling"|"not_falling"|"not_rising"|"flat", slope_threshold: 0.01, max_slope_pct: None}
+                # params: {ema: 20|50, direction: "rising"|"falling"|"not_falling"|"not_rising"|"flat", min_slope_pct: 0.01, max_slope_pct: None, lookback_bars: 1}
                 ema_type = params.get("ema", 20)
                 required_direction = params.get("direction", "rising")
                 min_slope_pct = params.get("min_slope_pct", 0.01)
                 max_slope_pct = params.get("max_slope_pct", None)
 
                 ema_name = f"ema{ema_type}"
-                slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name)
+                slope_pct, _ = self._get_ema_slope(symbol, timeframe, ema_name,
+                                                   int(params.get("lookback_bars", 1)))
 
                 if slope_pct is None:
                     is_bullish = False
@@ -2169,6 +2183,49 @@ class TrendCache:
                     msg = (f"Distance from low: {'✓' if is_bullish else '✗'} "
                            f"({pct_above:.1f}% above {len(window)}-bar low {recent_low:.4f} "
                            f"— need {min_pct_above}-{max_pct_above}%{age_note}{truncated})")
+
+
+            elif indicator_type == "reference_symbol_vs_ema":
+                # Gate on ANOTHER symbol's position relative to its own EMA —
+                # e.g. "only buy this dip while BTC is >=3.78% BELOW its daily
+                # EMA50". Cross-symbol, unlike every other indicator here.
+                #
+                # Evidence: a screen over 3,400 qualifying dip bars (2yr, 7
+                # symbols) found BTC-below-its-daily-EMA50 took the mean from
+                # -0.58% to +1.44%/trade and the <-5% tail from 17.2% to 10.9%.
+                # That is a BAR-LEVEL screen; the per-symbol analogue of the
+                # same idea looked just as good and then lost at strategy level.
+                #
+                # Bounds are on the SIGNED gap (price - ema)/ema*100, so
+                # "below" is expressed with negative numbers:
+                #   min_gap_pct -25, max_gap_pct -3.78  =>  3.78%..25% BELOW
+                #   min_gap_pct 0,   max_gap_pct None   =>  at or above
+                # params: { reference_symbol, timeframe, ema, min_gap_pct, max_gap_pct }
+                ref_symbol = params.get("reference_symbol")
+                ref_tf     = str(params.get("timeframe", "1D"))
+                ema_type   = int(params.get("ema", 50))
+                lo         = params.get("min_gap_pct", None)
+                hi         = params.get("max_gap_pct", None)
+                ref = self.get(ref_symbol, ref_tf) if ref_symbol else None
+                ref_ema = None
+                if ref is not None:
+                    ref_ema = ref.ema20 if ema_type == 20 else ref.ema50
+                if ref is None or not ref_ema or ref.price is None:
+                    # FAIL OPEN, deliberately — this gate REMOVES trades, so no
+                    # data must degrade to "behave as if the gate is absent"
+                    # rather than halting the profile. The engine prints a loud
+                    # warning at load time when the series is missing entirely.
+                    is_bullish = True
+                    msg = f"Ref {ref_symbol}/{ref_tf} vs EMA{ema_type}: PASS (no data — gate inactive)"
+                else:
+                    gap = (float(ref.price) - float(ref_ema)) / float(ref_ema) * 100
+                    is_bullish = ((lo is None or gap >= float(lo))
+                                 and (hi is None or gap <= float(hi)))
+                    _lo = "-inf" if lo is None else f"{float(lo):g}"
+                    _hi = "+inf" if hi is None else f"{float(hi):g}"
+                    _ok = "OK" if is_bullish else "NO"
+                    msg = (f"Ref {ref_symbol}/{ref_tf} vs EMA{ema_type}: {_ok} "
+                           f"(gap {gap:+.2f}%, need {_lo}..{_hi}%)")
 
             results.append((is_bullish, msg))
             indicator_groups_list.append(indicator_group)
