@@ -547,11 +547,13 @@
               <span style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--txd)" id="sym-p-label">—</span>
               <span style="flex:1"></span>
               <span id="sym-count-label" style="font-size:10px;color:var(--txd)"></span>
+              <span id="sym-sel-label" style="font-size:10px;color:var(--acc)"></span>
+              <button class="btn-new" id="sym-bulk-btn" style="display:none" onclick="openBulkSymModal()">Bulk Edit</button>
               <button class="btn-new" onclick="openAddSymbol()">+ Add Symbol</button>
             </div>
             <table class="dt">
-              <thead><tr><th>Symbol</th><th>Order Size (USDC)</th><th>Max Position %</th><th>Enabled</th><th>Updated</th><th></th></tr></thead>
-              <tbody id="sym-tbody"><tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody>
+              <thead><tr><th style="width:28px;text-align:center"><input type="checkbox" id="sym-sel-all" onchange="toggleAllSymSel(this.checked)" style="cursor:pointer" title="Select all"></th><th>Symbol</th><th>Order Size (USDC)</th><th>Max Position %</th><th>Enabled</th><th>Updated</th><th></th></tr></thead>
+              <tbody id="sym-tbody"><tr><td colspan="7" style="text-align:center;color:var(--txd);padding:24px">Loading...</td></tr></tbody>
             </table>
           </div>
 
@@ -718,6 +720,33 @@
           <button class="mbtn sec" onclick="closeSymModalP()">Cancel</button>
           <button class="mbtn dng" id="smp-del-btn" style="display:none" onclick="deleteSymP()">Delete</button>
           <button class="mbtn" onclick="saveSymP()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Bulk Symbol Edit Modal ───────────────────────────────────────── -->
+    <div class="modal-overlay" id="bulk-sym-modal" style="display:none" onclick="if(event.target===this&&_mdTarget===this)closeBulkSymModal()">
+      <div class="modal-box" style="max-width:460px">
+        <div class="modal-header"><span class="modal-title">Bulk Edit Symbol Configs</span><button class="modal-close" onclick="closeBulkSymModal()">×</button></div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--txd);margin-bottom:12px">Applying to <strong id="bulk-sym-list" style="color:var(--tx)">—</strong></div>
+          <div style="font-size:11px;color:var(--txd);margin-bottom:14px">Leave a field blank to keep each symbol's current value.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-row" style="margin-bottom:0"><label>Order Size (USDC)</label><input type="number" step="0.01" id="bsm-size" placeholder="unchanged"></div>
+            <div class="form-row" style="margin-bottom:0"><label>Max Position %</label><input type="number" step="0.1" id="bsm-maxpos" placeholder="unchanged"></div>
+          </div>
+          <div class="form-row" style="margin-top:12px"><label>Enabled</label>
+            <select id="bsm-enabled" style="width:100%;background:var(--bg3);border:1px solid var(--brd);color:var(--tx);padding:6px 10px;font-family:'Space Mono';font-size:12px;outline:none">
+              <option value="">— unchanged —</option>
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </div>
+          <div class="form-err" id="bsm-err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="mbtn sec" onclick="closeBulkSymModal()">Cancel</button>
+          <button class="mbtn" onclick="saveBulkSymP()">Apply</button>
         </div>
       </div>
     </div>
@@ -2093,6 +2122,7 @@ let _currentProfile = null;
 let _allProfiles = [];
 let _symDataP = [];
 let _symEditId = null;
+let _symSelP = new Set();   // symbols ticked for bulk edit
 let _indDataP = [];
 let _indCatP = 'all';
 let _indEditId = null;
@@ -2872,6 +2902,7 @@ async function toggleProfileActive() {
 
 async function loadSymbolsP() {
   if (!_currentProfile) return;
+  _symSelP.clear();   // selection is per-load: profile switch or post-mutation refresh
   const data = await api('/config/symbols/' + _currentProfile.name).catch(() => null);
   _symDataP = data ?? { configs: [] };
   renderSymTableP();
@@ -2882,12 +2913,14 @@ function renderSymTableP() {
   const configs = _symDataP.configs ?? [];
   document.getElementById('sym-count-label').textContent = configs.length + ' symbol(s)';
   if (!configs.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--txd);padding:24px">No symbol configs</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--txd);padding:24px">No symbol configs</td></tr>';
+    updateSymSelUI();
     return;
   }
   tbody.innerHTML = configs.map(s => {
     const en = !!s.enabled;
     return `<tr>
+      <td style="text-align:center"><input type="checkbox" class="sym-sel" data-symbol="${s.symbol}" ${_symSelP.has(s.symbol) ? 'checked' : ''} onchange="toggleSymSel('${s.symbol}',this.checked)" style="cursor:pointer"></td>
       <td style="color:var(--txb);font-weight:700">${s.symbol}</td>
       <td>$${parseFloat(s.order_size_usdc || 0).toFixed(2)}</td>
       <td>${s.max_position_size_pct != null ? parseFloat(s.max_position_size_pct).toFixed(1) + '%' : '—'}</td>
@@ -2896,6 +2929,71 @@ function renderSymTableP() {
       <td style="text-align:right;white-space:nowrap"><button class="btn-new" style="font-size:10px" onclick='openEditSymP(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button><button class="btn-new" style="font-size:10px;margin-left:6px;border-color:var(--red);color:var(--red)" onclick="deleteSymRowP('${s.symbol}')">Delete</button></td>
     </tr>`;
   }).join('');
+  updateSymSelUI();
+}
+
+// ── Symbol bulk selection ────────────────────────────────────────────────────
+
+function toggleSymSel(symbol, on) {
+  if (on) _symSelP.add(symbol); else _symSelP.delete(symbol);
+  updateSymSelUI();
+}
+
+function toggleAllSymSel(on) {
+  _symSelP.clear();
+  if (on) (_symDataP.configs ?? []).forEach(s => _symSelP.add(s.symbol));
+  document.querySelectorAll('#sym-tbody .sym-sel').forEach(cb => { cb.checked = on; });
+  updateSymSelUI();
+}
+
+function updateSymSelUI() {
+  const n = _symSelP.size;
+  const total = (_symDataP.configs ?? []).length;
+  const label = document.getElementById('sym-sel-label');
+  const btn = document.getElementById('sym-bulk-btn');
+  const all = document.getElementById('sym-sel-all');
+  if (label) label.textContent = n ? n + ' selected' : '';
+  if (btn) btn.style.display = n ? '' : 'none';
+  if (all) { all.checked = total > 0 && n === total; all.indeterminate = n > 0 && n < total; }
+}
+
+function openBulkSymModal() {
+  if (!_symSelP.size) return;
+  const syms = [..._symSelP];
+  document.getElementById('bulk-sym-list').textContent =
+    syms.length + ' symbol(s): ' + (syms.length > 6 ? syms.slice(0, 6).join(', ') + ' +' + (syms.length - 6) + ' more' : syms.join(', '));
+  document.getElementById('bsm-size').value = '';
+  document.getElementById('bsm-maxpos').value = '';
+  document.getElementById('bsm-enabled').value = '';
+  document.getElementById('bsm-err').textContent = '';
+  document.getElementById('bulk-sym-modal').style.display = 'flex';
+}
+
+function closeBulkSymModal() { document.getElementById('bulk-sym-modal').style.display = 'none'; }
+
+async function saveBulkSymP() {
+  const prof = _currentProfile?.name;
+  const errEl = document.getElementById('bsm-err');
+  if (!prof || !_symSelP.size) { errEl.textContent = 'Nothing selected'; return; }
+
+  const sz = document.getElementById('bsm-size').value.trim();
+  const maxpos = document.getElementById('bsm-maxpos').value.trim();
+  const en = document.getElementById('bsm-enabled').value;
+  if (!sz && !maxpos && en === '') { errEl.textContent = 'Set at least one field'; return; }
+  if (sz && !(parseFloat(sz) > 0)) { errEl.textContent = 'Order size must be greater than 0'; return; }
+  if (maxpos && !(parseFloat(maxpos) > 0)) { errEl.textContent = 'Max position % must be greater than 0'; return; }
+
+  const body = { symbols: [..._symSelP] };
+  if (sz) body.order_size_usdc = parseFloat(sz);
+  if (maxpos) body.max_position_size_pct = parseFloat(maxpos);
+  if (en !== '') body.enabled = (en === 'true');
+
+  errEl.textContent = 'Applying...';
+  const res = await api('/config/symbols/' + prof + '/bulk', { method: 'POST', body: JSON.stringify(body) });
+  if (!res?.success) { errEl.textContent = 'Bulk update failed — see console'; return; }
+  closeBulkSymModal();
+  loadSymbolsP();
+  showToast(res.message);
 }
 
 function openAddSymbol() {

@@ -12,7 +12,7 @@ from models.webhook import TradingViewAlert, WebhookResponse
 from models.ticker import TickerRequest, UpdateTickersRequest
 from models.trade import OrderRequest
 from models.webhook import TrendUpdateAlert, TrendData
-from models.symbol import SymbolConfigRequest
+from models.symbol import SymbolConfigRequest, BulkSymbolConfigRequest
 from models.ai_prompt import AIPromptCreate, AIPromptUpdate
 from models.indicator_config import IndicatorCreate, IndicatorUpdate, IndicatorOut
 from models.trading_profile import CircuitBreakerUpdateRequest, ProfileCredentialsRequest, ProfileCreateRequest, ProfileUpdateRequest, TradingHoursEntry, RiskGroup
@@ -1685,6 +1685,99 @@ async def set_symbol_config(
     
     except Exception as e:
         apiserver_logger.error(f"Error setting symbol config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/config/symbols/{profile_name}/bulk", dependencies=[Depends(require_admin_permission)])
+async def bulk_set_symbol_configs(
+    profile_name: str,
+    payload: BulkSymbolConfigRequest
+):
+    """
+    Apply the same field(s) to several symbol configs in one call.
+
+    Only the fields present in the body are written; omitted fields keep each
+    symbol's existing value. Symbols without an existing config are skipped and
+    listed in `skipped` (create them individually first — a new config needs an
+    order size).
+
+    Example:
+    POST /config/symbols/default/bulk
+    {
+        "symbols": ["SOL_USDC", "ETH_USDC"],
+        "order_size_usdc": 150.0
+    }
+    """
+    from db.utils import get_db_session
+    from db.crud import get_symbol_config, upsert_symbol_config
+    from cache.symbol_cache import get_symbol_cache
+
+    # Validate profile exists
+    profile_manager = get_profile_manager()
+    if not profile_manager.has_profile(profile_name):
+        raise HTTPException(status_code=404, detail=f"Profile {profile_name} not found")
+
+    symbols = [s.strip().upper() for s in payload.symbols if s and s.strip()]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="No symbols supplied")
+
+    if payload.order_size_usdc is None and payload.max_position_size_pct is None and payload.enabled is None:
+        raise HTTPException(status_code=400, detail="Nothing to update — supply at least one field")
+
+    if payload.order_size_usdc is not None and payload.order_size_usdc <= 0:
+        raise HTTPException(status_code=400, detail="order_size_usdc must be greater than 0")
+
+    if payload.max_position_size_pct is not None and payload.max_position_size_pct <= 0:
+        raise HTTPException(status_code=400, detail="max_position_size_pct must be greater than 0")
+
+    try:
+        updated, skipped = [], []
+        with get_db_session() as db:
+            for symbol in symbols:
+                existing = get_symbol_config(db, profile_name, symbol, return_all=True)
+                if not existing:
+                    skipped.append(symbol)
+                    continue
+
+                # Merge: an omitted field keeps the symbol's current value.
+                order_size = (
+                    payload.order_size_usdc
+                    if payload.order_size_usdc is not None
+                    else float(existing.order_size_usdc)
+                )
+                max_pos = payload.max_position_size_pct
+                if max_pos is None:
+                    max_pos = float(existing.max_position_size_pct) if existing.max_position_size_pct is not None else None
+                enabled = payload.enabled if payload.enabled is not None else existing.enabled
+
+                upsert_symbol_config(
+                    db,
+                    profile_name=profile_name,
+                    symbol=symbol,
+                    order_size_usdc=order_size,
+                    max_position_size_pct=max_pos,
+                    enabled=enabled
+                )
+                updated.append(symbol)
+
+            get_symbol_cache().refresh(db)
+
+        msg = f"Updated {len(updated)} symbol config(s)"
+        if skipped:
+            msg += f" — skipped {len(skipped)} with no existing config: {', '.join(skipped)}"
+
+        return {
+            "success": True,
+            "message": msg,
+            "profile": profile_name,
+            "updated": updated,
+            "skipped": skipped
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        apiserver_logger.error(f"Error bulk-updating symbol configs: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
