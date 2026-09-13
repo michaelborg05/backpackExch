@@ -41,9 +41,18 @@ class PriceCache:
             except Exception as e:
                 self.logger.error(f"Error updating price for {symbol}: {e}")
 
-    def update_ticker(self, symbol: str, price: str, change_percent=None, high=None, low=None, volume=None):
-        """Update price plus optional 24h ticker metadata.
+    def update_ticker(self, symbol: str, price: str, change_percent=None, high=None, low=None,
+                      volume=None, bid=None, ask=None, spread_pct=None, price_source=None,
+                      last_trade_price=None):
+        """Update price plus optional 24h ticker and order-book metadata.
+
         change_percent should be the raw decimal from the API (e.g. -0.0229); it is stored as a percentage (e.g. -2.29).
+
+        *price* is the reference price chosen by utils.price_resolution — normally
+        the book midpoint, not the last fill. bid/ask/spread_pct/price_source and
+        last_trade_price record where it came from, so a surprising valuation can
+        be traced without re-querying the exchange. A side-aware valuation (bid
+        for a long exit) can be built from bid/ask without another request.
         """
         self.update_price(symbol, price)
         with self._lock:
@@ -52,6 +61,11 @@ class PriceCache:
                 "high": float(high) if high is not None else None,
                 "low": float(low) if low is not None else None,
                 "volume": float(volume) if volume is not None else None,
+                "bid": float(bid) if bid is not None else None,
+                "ask": float(ask) if ask is not None else None,
+                "spread_pct": float(spread_pct) if spread_pct is not None else None,
+                "price_source": price_source,
+                "last_trade_price": float(last_trade_price) if last_trade_price is not None else None,
             }
 
     def get_ticker(self, symbol: str) -> Optional[dict]:

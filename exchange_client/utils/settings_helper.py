@@ -139,6 +139,21 @@ class SettingsHelper:
         return self._get_int('orderbook_depth', 20)
 
     @property
+    def max_book_spread_pct(self) -> float:
+        """Widest top-of-book spread still trusted for a midpoint reference price.
+
+        Above this the book is treated as broken/abandoned and the last fill is
+        used instead. Measured worst case across the live roster was 0.18%, so 2%
+        only trips on something genuinely wrong.
+        """
+        return self._get_float('max_book_spread_pct', 2.0)
+
+    @property
+    def price_stale_warn_pct(self) -> float:
+        """How far the last fill may drift from the book mid before it is logged."""
+        return self._get_float('price_stale_warn_pct', 1.0)
+
+    @property
     def cooldown_take_profit_mins(self) -> int:
         """cooldown in minutes after take profit for same symbol"""
         return self._get_int('cooldown_take_profit_mins', 35)

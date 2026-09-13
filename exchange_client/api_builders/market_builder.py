@@ -1,10 +1,10 @@
 import time
 from typing import Dict, Optional, Any
 from utils.config import Config
-from models import BackpackTicker, TickerDepth, BalanceReader
+from models import BackpackTicker
 from utils.logging import log_manager
 from utils.endpoints import APIEndpoints
-from utils import data_converters
+from utils.price_resolution import BookTop, book_top
 from services.client import api_request
 from cache.market_info_cache import get_market_info_cache
 
@@ -45,27 +45,52 @@ def check_ticker(endpoint: str) -> BackpackTicker:
         timestamp=int(time.time())
     )
 
-def get_depth(symbol: str) -> Optional[TickerDepth]:
-    url = APIEndpoints.backpack_depth(symbol, "5")
-    headers=data_converters.build_authorisation_header(
-        api_key=config.api_key,
-        secret=config.secret,
-        query_params={},
-        body=None,
-        instruction="balanceQuery",
-        window=60000
-    )
+def fetch_all_tickers(interval: str = "1d") -> Dict[str, dict]:
+    """Every market's 24h ticker in one request, keyed by symbol.
 
-    balances = api_request(url, headers)
-    
-    if balances:
-        market_logger.debug("API call for balances completed successfully")
-        return BalanceReader(balances)
-        #active_assets = balancelist.get_non_zero_balances()
-        #print(balancelist.summary())
-    else:
-        market_logger.error("API call for balances failed")
-    return None
+    Replaces one /ticker call per monitored symbol (23 requests per loop became
+    one). Returns {} on failure so the caller can fall back to the book alone.
+    """
+    rows = api_request(APIEndpoints.tickers(interval))
+    if not rows or not isinstance(rows, list):
+        market_logger.error("API call for /tickers failed or returned no rows")
+        return {}
+    return {row["symbol"]: row for row in rows if isinstance(row, dict) and row.get("symbol")}
+
+
+def get_depth(symbol: str, limit: str = "5") -> Optional[dict]:
+    """Raw order book for *symbol*: {"bids": [[price, qty]...], "asks": [...], "timestamp"}.
+
+    Public endpoint — no auth headers needed. Bids come back ascending, so use
+    utils.price_resolution.book_top rather than indexing the lists.
+    """
+    depth = api_request(APIEndpoints.depth(symbol, limit))
+    if not depth:
+        market_logger.warning(f"API call for depth({symbol}) returned nothing")
+        return None
+    return depth
+
+
+def fetch_book_top(symbol: str, limit: str = "5") -> Optional[BookTop]:
+    """Best bid/ask/mid for *symbol*, or None when the book is missing or broken."""
+    try:
+        return book_top(get_depth(symbol, limit))
+    except Exception as e:
+        market_logger.error(f"fetch_book_top({symbol}) failed: {e}")
+        return None
+
+
+def get_last_trade(symbol: str) -> Optional[dict]:
+    """Most recent fill for *symbol*, including its millisecond timestamp.
+
+    /ticker has no timestamp field, so this is the only way to ask the REST API
+    how old `lastPrice` actually is. Not on the monitoring hot path — the book
+    already answers the freshness question — but useful for diagnostics.
+    """
+    trades = api_request(APIEndpoints.trades(symbol, limit=1))
+    if not trades or not isinstance(trades, list):
+        return None
+    return trades[0] if isinstance(trades[0], dict) else None
 
 def get_price(symbol: str, profile=None) -> Optional[float]:
     """Get the latest price for *symbol*.

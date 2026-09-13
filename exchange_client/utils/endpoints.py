@@ -20,6 +20,16 @@ class BackpackEndpoints:
         return f"{cls.BASE}/api/v1/ticker?symbol={symbol}&interval={interval}"
 
     @classmethod
+    def tickers(cls, interval: str = "1d") -> str:
+        """Every market's 24h ticker in one call — ~140 markets, ~31KB."""
+        return f"{cls.BASE}/api/v1/tickers?interval={interval}"
+
+    @classmethod
+    def trades(cls, symbol: str, limit: int = 1) -> str:
+        """Recent fills, newest first. Unlike /ticker these carry a timestamp (ms)."""
+        return f"{cls.BASE}/api/v1/trades?symbol={symbol}&limit={limit}"
+
+    @classmethod
     def balances(cls) -> str:
         return f"{cls.BASE}/api/v1/capital"
 

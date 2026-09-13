@@ -9,7 +9,12 @@ from utils.config import Config
 from utils.constants import MessagePriority, OrderStatus
 from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 from api_builders.account_builder import get_balances
-from api_builders.market_builder import get_price, get_market_info, check_ticker
+from api_builders.market_builder import (
+    get_market_info,
+    fetch_all_tickers,
+    fetch_book_top,
+)
+from utils.price_resolution import resolve_reference_price, deviation_pct
 from api_builders.factory import get_adapter
 from api_builders.dust_conversion import get_dust_converter
 from cache.balance_cache import get_balance_cache
@@ -290,21 +295,69 @@ class MonitoringService:
         self.logger.info("Monitoring loop exited")
     
     def _monitor_prices(self):
-        """Monitor prices for all tickers"""
-        from utils.endpoints import APIEndpoints
+        """Refresh the price cache from the order book, not the last fill.
+
+        One /tickers call covers every market's 24h stats (was one /ticker per
+        symbol), and the saved requests are spent on one depth call per symbol so
+        the cached price is the live book midpoint. `lastPrice` on a thin market
+        can be hours stale — see utils.price_resolution for the measurements —
+        and it feeds TP/SL, trailing stops and circuit-breaker marks.
+
+        Failure modes, worst to best: both sources down leaves the entry
+        untouched (it ages out of the TTL and HealthAlertingService raises it);
+        no book falls back to the last fill; no /tickers keeps the book price and
+        drops only the 24h metadata.
+        """
+        all_tickers = fetch_all_tickers()
+        if not all_tickers:
+            self.logger.warning(
+                "Bulk /tickers call failed — falling back to book-only prices this cycle"
+            )
+
+        max_spread = self.settings.max_book_spread_pct
+        warn_pct = self.settings.price_stale_warn_pct
+
         for ticker in self.tickers:
             try:
-                url = APIEndpoints.backpack_ticker(ticker, "1d")
-                tk = check_ticker(url)
-                if tk and tk.last_price:
-                    print(tk.simple_summary())
-                    self.price_cache.update_ticker(
-                        ticker,
-                        str(tk.last_price),
-                        change_percent=tk.price_change_percent,
-                        high=tk.high,
-                        low=tk.low,
-                        volume=tk.volume,
+                row = all_tickers.get(ticker) or {}
+                last_price = row.get("lastPrice")
+                top = fetch_book_top(ticker)
+                quote = resolve_reference_price(last_price, top, max_spread)
+
+                if quote.price is None:
+                    self.logger.error(
+                        f"No usable price for {ticker} (no book, no last fill) — "
+                        f"leaving cached price to go stale"
+                    )
+                    continue
+
+                self.price_cache.update_ticker(
+                    ticker,
+                    str(quote.price),
+                    change_percent=row.get("priceChangePercent"),
+                    high=row.get("high"),
+                    low=row.get("low"),
+                    volume=row.get("volume"),
+                    bid=quote.bid,
+                    ask=quote.ask,
+                    spread_pct=quote.spread_pct,
+                    price_source=quote.source,
+                    last_trade_price=last_price,
+                )
+
+                # A big last-vs-book gap is exactly the bug this path fixes, so make
+                # it visible rather than silently correcting it.
+                drift = deviation_pct(last_price, quote.price)
+                spread = "n/a" if quote.spread_pct is None else f"{quote.spread_pct:.3f}%"
+                if drift is not None and abs(drift) >= warn_pct:
+                    self.logger.info(
+                        f"{ticker}: last fill {last_price} is {drift:+.2f}% off the "
+                        f"book — using {quote.source} {quote.price} (spread {spread})"
+                    )
+                else:
+                    self.logger.debug(
+                        f"{ticker}: {quote.source} {quote.price} "
+                        f"(bid {quote.bid} / ask {quote.ask}, spread {spread})"
                     )
             except Exception as e:
                 self.logger.error(f"Error getting price for {ticker}: {e}")
