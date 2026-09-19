@@ -1,11 +1,13 @@
 """Unit tests for the fetcher's 418/429 handling.
 
-Binance escalates a rate-limit ban — 2 minutes to 3 days — for every request
-that arrives while the ban is in force. The old retry loop treated a 418 as a
-transient error and answered it with four more requests per series, across 23
-symbols x 2 timeframes, which is how a two-minute ban turns into a day. These
-tests pin the opposite behaviour: a ban is never retried, it parks the whole
-process until it lifts, and nothing else is transmitted in the meantime.
+Binance escalates a rate-limit ban for every request that arrives while it is
+in force. The old retry loop treated a 418 as transient and answered it with
+four more requests per series: in the 2026-09-19 prod logs, an 18-request
+boundary cycle met a 2-minute ban with 72 requests and a 279-second outage.
+
+These tests pin the replacement. A rate-limited host is dropped, not retried;
+the request fails over to the mirror; the feed only gives up when every host is
+banned; and the retry ladder still covers the 5xx case it was written for.
 
 No DB, no network — urlopen is stubbed.
 """
@@ -21,9 +23,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from services import candle_fetcher as cf
 
 
+PRIMARY = cf.BINANCE_BASE
+MIRROR = cf.BINANCE_FALLBACK_BASE
+URL = f"{PRIMARY}/api/v3/klines"
+
+
 def _clear_ban():
-    cf._ban_until = 0.0
-    cf._last_used_weight = 0
+    cf._ban_until.clear()
+    cf._used_weight.clear()
 
 
 def _http_error(code: int, msg: str = "", headers: dict = None):
@@ -61,18 +68,47 @@ def _raising_urlopen(code, msg="", headers=None, calls=None):
     return _urlopen
 
 
-def test_418_is_not_retried():
-    """One request, not four — every extra one lengthens the ban."""
+def test_418_costs_one_request_per_host():
+    """Never four to the same host — every extra one lengthens the ban."""
     _clear_ban()
     calls = []
     with mock.patch.object(cf.urllib.request, "urlopen",
                            _raising_urlopen(418, calls=calls)):
         try:
-            cf._http_get("https://x/api", {"symbol": "BTCUSDT"})
+            cf._http_get(URL, {"symbol": "BTCUSDT"})
             assert False, "expected BinanceRateLimited"
         except cf.BinanceRateLimited:
             pass
-    assert len(calls) == 1, f"sent {len(calls)} requests into an active ban"
+    # One to the primary, one to the mirror — and no retry on either.
+    assert len(calls) == 2, f"sent {len(calls)} requests into an active ban"
+    assert sorted({cf._host_of(c) for c in calls}) == sorted(
+        {cf._host_of(PRIMARY), cf._host_of(MIRROR)})
+
+
+def test_a_banned_host_fails_over_to_the_mirror():
+    """A ban on one edge must not stop the feed — the other still answers."""
+    _clear_ban()
+    calls = []
+
+    def _urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        if cf._host_of(req.full_url) == cf._host_of(PRIMARY):
+            err, body = _http_error(418, "")
+            err.read = lambda: body
+            raise err
+        return _Resp()
+
+    with mock.patch.object(cf.urllib.request, "urlopen", _urlopen):
+        assert cf._http_get(URL, {"symbol": "BTCUSDT"}) == []
+
+    assert len(calls) == 2
+    assert cf._host_of(calls[1]) == cf._host_of(MIRROR)
+    # The primary stays out of rotation; the mirror is untouched.
+    assert cf.banned_until(cf._host_of(PRIMARY)) > time.time()
+    assert cf.banned_until(cf._host_of(MIRROR)) == 0.0
+    # The feed as a whole is still healthy — a usable host remains.
+    assert cf.banned_until() == 0.0
+    _clear_ban()
 
 
 def test_ban_timestamp_is_read_from_the_body():
@@ -83,12 +119,12 @@ def test_ban_timestamp_is_read_from_the_body():
     with mock.patch.object(cf.urllib.request, "urlopen",
                            _raising_urlopen(418, msg=msg)):
         try:
-            cf._http_get("https://x/api", {})
+            cf._http_get(URL, {})
             assert False, "expected BinanceRateLimited"
         except cf.BinanceRateLimited as e:
             assert abs(e.until - until_ms / 1000.0) < 1
 
-    assert abs(cf.banned_until() - until_ms / 1000.0) < 1
+    assert abs(cf.banned_until(cf._host_of(PRIMARY)) - until_ms / 1000.0) < 1
 
 
 def test_retry_after_header_is_honoured():
@@ -96,16 +132,17 @@ def test_retry_after_header_is_honoured():
     with mock.patch.object(cf.urllib.request, "urlopen",
                            _raising_urlopen(429, headers={"Retry-After": "30"})):
         try:
-            cf._http_get("https://x/api", {})
+            cf._http_get(URL, {})
             assert False, "expected BinanceRateLimited"
         except cf.BinanceRateLimited as e:
             assert 25 <= e.until - time.time() <= 31
 
 
-def test_an_active_ban_suppresses_every_later_request():
-    """The gate is process-wide: the next series must not open a socket."""
+def test_every_host_banned_opens_no_socket_at_all():
+    """With nowhere to ask, the next series must not touch the network."""
     _clear_ban()
-    cf._ban_until = time.time() + 300
+    for base in (PRIMARY, MIRROR):
+        cf._ban_until[cf._host_of(base)] = time.time() + 300
     calls = []
 
     def _urlopen(req, timeout=None):
@@ -114,19 +151,20 @@ def test_an_active_ban_suppresses_every_later_request():
 
     with mock.patch.object(cf.urllib.request, "urlopen", _urlopen):
         try:
-            cf._http_get("https://x/api", {"symbol": "ETHUSDT"})
+            cf._http_get(URL, {"symbol": "ETHUSDT"})
             assert False, "expected BinanceRateLimited"
         except cf.BinanceRateLimited:
             pass
     assert calls == []
+    assert cf.banned_until() > time.time()
     _clear_ban()
 
 
 def test_expired_ban_lets_requests_through():
     _clear_ban()
-    cf._ban_until = time.time() - 1
+    cf._ban_until[cf._host_of(PRIMARY)] = time.time() - 1
     with mock.patch.object(cf.urllib.request, "urlopen", lambda req, timeout=None: _Resp()):
-        assert cf._http_get("https://x/api", {}) == []
+        assert cf._http_get(URL, {}) == []
     assert cf.banned_until() == 0.0
 
 
@@ -137,7 +175,7 @@ def test_permanent_status_is_not_retried():
     with mock.patch.object(cf.urllib.request, "urlopen",
                            _raising_urlopen(451, calls=calls)):
         try:
-            cf._http_get("https://x/api", {})
+            cf._http_get(URL, {})
             assert False, "expected RuntimeError"
         except cf.BinanceRateLimited:
             assert False, "451 must not be treated as a ban"
@@ -154,11 +192,12 @@ def test_server_error_still_retries():
                            _raising_urlopen(502, calls=calls)), \
             mock.patch.object(cf.time, "sleep"):
         try:
-            cf._http_get("https://x/api", {}, retries=3)
+            cf._http_get(URL, {}, retries=3)
             assert False, "expected RuntimeError"
         except RuntimeError:
             pass
-    assert len(calls) == 3
+    # Three attempts against each of the two hosts.
+    assert len(calls) == 6
 
 
 def test_used_weight_near_the_cap_pauses_before_the_429():
@@ -168,9 +207,9 @@ def test_used_weight_near_the_cap_pauses_before_the_429():
     resp = _Resp({"X-MBX-USED-WEIGHT-1M": str(cf._WEIGHT_SOFT_LIMIT + 1)})
     with mock.patch.object(cf.urllib.request, "urlopen", lambda req, timeout=None: resp), \
             mock.patch.object(cf.time, "sleep", side_effect=lambda s: slept.append(s)):
-        assert cf._http_get("https://x/api", {}) == []
+        assert cf._http_get(URL, {}) == []
     assert slept and 0 < slept[0] <= 60
-    assert cf.last_used_weight() == cf._WEIGHT_SOFT_LIMIT + 1
+    assert cf.last_used_weight(cf._host_of(PRIMARY)) == cf._WEIGHT_SOFT_LIMIT + 1
     _clear_ban()
 
 
@@ -180,16 +219,17 @@ def test_normal_weight_does_not_pause():
     resp = _Resp({"X-MBX-USED-WEIGHT-1M": "22"})
     with mock.patch.object(cf.urllib.request, "urlopen", lambda req, timeout=None: resp), \
             mock.patch.object(cf.time, "sleep", side_effect=lambda s: slept.append(s)):
-        assert cf._http_get("https://x/api", {}) == []
+        assert cf._http_get(URL, {}) == []
     assert slept == []
-    assert cf.last_used_weight() == 22
+    assert cf.last_used_weight(cf._host_of(PRIMARY)) == 22
 
 
 if __name__ == "__main__":
-    for fn in [test_418_is_not_retried,
+    for fn in [test_418_costs_one_request_per_host,
+               test_a_banned_host_fails_over_to_the_mirror,
                test_ban_timestamp_is_read_from_the_body,
                test_retry_after_header_is_honoured,
-               test_an_active_ban_suppresses_every_later_request,
+               test_every_host_banned_opens_no_socket_at_all,
                test_expired_ban_lets_requests_through,
                test_permanent_status_is_not_retried,
                test_server_error_still_retries,
