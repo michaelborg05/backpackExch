@@ -220,3 +220,31 @@ for _fam, _entry, _exit in (("v7", _V7_ENTRY, _V7_EXIT), ("v5", _V5_ENTRY, None)
 # genuinely too noisy to be useful on daily bars, and now longer lookbacks are
 # at least expressible for future work.
 # =============================================================================
+
+
+# =============================================================================
+# ATTACK SIX — AN UPPER CAP ON THE SAME GATE. (2026-09-17)
+#
+# The five attacks above all asked "is there a better LOWER bound / a different
+# formulation of 'the daily trend is up'". None asked the opposite question:
+# the gate is `gap >= 0` with NO ceiling, so a dip-buy is allowed when daily
+# price is 50%+ above its own EMA50. Michael's observation from the live book:
+# the entries that went and stayed red looked very stretched at entry.
+#
+# `price_vs_ema` already supports max_gap_pct in BOTH engines (a 0 value means
+# "no cap", so the live config is unchanged), which makes this a pure param
+# sweep with no engine change.
+#
+# This is a PLATEAU question, exactly like the slope lookback: a real ceiling
+# effect should degrade smoothly as the cap tightens, and the removed trades
+# must be worse than the kept ones at every cap that looks good.
+# =============================================================================
+
+def _lvl_cap(cap):
+    return {"type": "price_vs_ema",
+            "params": {"ema": 50, "min_gap_pct": 0, "max_gap_pct": cap, "hard_stop": True}}
+
+for _fam, _entry, _exit in (("v7", _V7_ENTRY, _V7_EXIT), ("v5", _V5_ENTRY, None)):
+    for _cap in (5, 8, 10, 12, 15, 20, 25, 30, 40):
+        DAILY_GATE_VARIANTS[f"c_{_fam}_cap{_cap}"] = _v(
+            f"c_{_fam}_cap{_cap}", _entry, [_lvl_cap(_cap)], _exit)

@@ -30,7 +30,10 @@ import gzip
 import json
 import logging
 import os
+import re
+import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -42,7 +45,122 @@ from utils.symbols import CANONICAL_QUOTE
 
 log = logging.getLogger(__name__)
 
-BINANCE_BASE = "https://api.binance.com"
+# data-api.binance.vision is Binance's own market-data-only mirror: it serves
+# /api/v3/klines and /api/v3/exchangeInfo with identical schemas (verified,
+# including ?permissions=SPOT) and no account endpoints, and it keeps its
+# request-weight accounting separate from the trading host that the order path
+# uses. Both matter here — a candle backfill must never be able to spend the
+# weight budget that order placement needs, and a ban earned by market-data
+# polling must not land on the host we trade through. Set BINANCE_API_BASE to
+# https://api.binance.com to go back to the trading host.
+BINANCE_BASE = os.getenv("BINANCE_API_BASE", "https://data-api.binance.vision").rstrip("/")
+
+# Binance answers 429 once a minute's request weight is spent, and 418 after it
+# has auto-banned the IP for continuing to send requests through a 429. The ban
+# escalates — 2 minutes to 3 days — with every request that arrives while it is
+# in force, so the one thing we must never do on these two statuses is retry.
+# The unban time comes back two ways: a Retry-After header (seconds), and an
+# "IP banned until <epoch ms>" in the -1003 JSON body.
+#
+# The gate is process-wide because the caller iterates symbols x timeframes
+# (23 x 2 today). Without it, a single ban would be met by ~46 series each
+# burning its own retry ladder, i.e. hundreds of requests into an active ban —
+# which is precisely how a 2-minute ban becomes a multi-day one.
+_RATE_LIMIT_STATUSES = frozenset({418, 429})
+# 4xx that will not become a 2xx by asking again: geo-restriction and WAF
+# blocks. Retrying these only burns the backoff ladder.
+_PERMANENT_STATUSES = frozenset({401, 403, 451})
+_BAN_FALLBACK_SEC = 120        # ban length Binance starts at, when it tells us nothing
+_ban_until = 0.0               # epoch seconds; 0 = not banned
+_ban_lock = threading.Lock()
+
+# Per-IP weight budget is 6000/min. Back off before spending it so a backfill
+# never walks into the 429 that starts the escalation in the first place.
+_WEIGHT_LIMIT = int(os.getenv("BINANCE_WEIGHT_LIMIT", "6000"))
+_WEIGHT_SOFT_LIMIT = int(_WEIGHT_LIMIT * 0.8)
+_last_used_weight = 0
+
+
+class BinanceRateLimited(RuntimeError):
+    """Raised for 418/429 — carries the epoch second the ban lifts."""
+
+    def __init__(self, message: str, until: float):
+        super().__init__(message)
+        self.until = until
+
+
+def banned_until() -> float:
+    """Epoch seconds until which requests are suppressed (0 = not banned)."""
+    with _ban_lock:
+        return _ban_until if _ban_until > time.time() else 0.0
+
+
+def last_used_weight() -> int:
+    """Most recent X-MBX-USED-WEIGHT-1M value seen, for health reporting."""
+    return _last_used_weight
+
+
+def _parse_ban_until(status: int, headers, body: bytes) -> float:
+    """Best-effort unban instant from a 418/429 response.
+
+    Prefers the body's explicit timestamp, falls back to Retry-After, then to
+    the 2-minute floor Binance starts bans at.
+    """
+    now = time.time()
+    try:
+        msg = json.loads(body.decode() or "{}").get("msg", "")
+        m = re.search(r"banned until (\d+)", msg)
+        if m:
+            # Epoch milliseconds in the -1003 message.
+            return int(m.group(1)) / 1000.0
+    except Exception:  # noqa: BLE001 — body may be empty or HTML from a proxy
+        pass
+    try:
+        retry_after = float((headers or {}).get("Retry-After") or 0)
+        if retry_after > 0:
+            return now + retry_after
+    except (TypeError, ValueError):
+        pass
+    # A 429 is a warning, not yet a ban: a short pause is the documented fix.
+    return now + (_BAN_FALLBACK_SEC if status == 418 else 60)
+
+
+def _note_ban(status: int, headers, body: bytes) -> BinanceRateLimited:
+    global _ban_until
+    until = _parse_ban_until(status, headers, body)
+    with _ban_lock:
+        _ban_until = max(_ban_until, until)
+    wait = max(0.0, until - time.time())
+    label = "IP BANNED" if status == 418 else "rate limit hit"
+    log.error(
+        "Binance %s (HTTP %d) — suppressing all requests for %.0fs "
+        "(until %s). Used weight was %d/%d.",
+        label, status, wait,
+        datetime.fromtimestamp(until, tz=timezone.utc).isoformat(timespec="seconds"),
+        _last_used_weight, _WEIGHT_LIMIT,
+    )
+    return BinanceRateLimited(f"HTTP {status} from Binance; banned for {wait:.0f}s", until)
+
+
+def _track_weight(headers) -> None:
+    """Record used weight and pause if this minute is nearly spent."""
+    global _last_used_weight
+    try:
+        used = int((headers or {}).get("X-MBX-USED-WEIGHT-1M") or 0)
+    except (TypeError, ValueError):
+        return
+    if used <= 0:
+        return
+    _last_used_weight = used
+    if used >= _WEIGHT_SOFT_LIMIT:
+        # Weight counters reset on the wall-clock minute, so waiting out the
+        # remainder of this one clears the whole budget.
+        pause = 60 - (time.time() % 60)
+        log.warning(
+            "Binance used weight %d/%d — pausing %.1fs for the counter reset",
+            used, _WEIGHT_LIMIT, pause,
+        )
+        time.sleep(pause)
 
 TF_TO_BINANCE = {"1": "1m", "5": "5m", "15": "15m", "30": "30m",
                  "60": "1h", "240": "4h", "1D": "1d"}
@@ -282,6 +400,17 @@ class FetchReport:
 def _http_get(url: str, params: dict, retries: int = 4) -> list:
     qs = urllib.parse.urlencode(params)
     full = f"{url}?{qs}"
+
+    # Cheapest possible behaviour under a ban: no socket at all. Every request
+    # that reaches Binance while banned extends the ban.
+    until = banned_until()
+    if until:
+        raise BinanceRateLimited(
+            f"skipped GET {url} — Binance ban active for another "
+            f"{until - time.time():.0f}s",
+            until,
+        )
+
     last = None
     for attempt in range(retries):
         try:
@@ -296,12 +425,28 @@ def _http_get(url: str, params: dict, retries: int = 4) -> list:
                 raw = r.read()
                 if r.headers.get("Content-Encoding") == "gzip":
                     raw = gzip.decompress(raw)
+                _track_weight(r.headers)
                 return json.loads(raw.decode())
-        except Exception as e:  # noqa: BLE001 — transient network/rate-limit
+        except urllib.error.HTTPError as e:
+            body = b""
+            try:
+                body = e.read()
+            except Exception:  # noqa: BLE001 — body is optional context
+                pass
+            if e.code in _RATE_LIMIT_STATUSES:
+                raise _note_ban(e.code, e.headers, body) from e
+            if e.code in _PERMANENT_STATUSES:
+                raise RuntimeError(
+                    f"GET {full} rejected with HTTP {e.code} (not retryable): "
+                    f"{body[:200].decode(errors='replace')}"
+                ) from e
             last = e
-            sleep = 2 ** attempt
-            log.warning("fetch failed (%s), retry %d/%d in %ds", e, attempt + 1, retries, sleep)
-            time.sleep(sleep)
+            _track_weight(e.headers)
+        except Exception as e:  # noqa: BLE001 — transient network error
+            last = e
+        sleep = 2 ** attempt
+        log.warning("fetch failed (%s), retry %d/%d in %ds", last, attempt + 1, retries, sleep)
+        time.sleep(sleep)
     raise RuntimeError(f"GET {full} failed after {retries} attempts: {last}")
 
 

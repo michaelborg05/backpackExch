@@ -27,6 +27,7 @@ from db.crud_monitored_symbols import get_enabled_symbols_set
 from db.crud_trend import get_latest_trend_timestamp, get_trend_rows_after, load_trend_data_from_history
 from db.utils import get_db_session
 from services.candle_fetcher import (REPAIR_BARS, SYMBOL_MAP, TF_MINUTES,
+                                     BinanceRateLimited, banned_until,
                                      fetch_and_store, get_quote)
 from utils.logging import log_manager
 from utils.symbols import normalize_symbol
@@ -281,6 +282,14 @@ class CandleFetcherService:
         self.logger.info("Candle fetch loop exited")
 
     def _fetch_once(self) -> None:
+        ban_ends = banned_until()
+        if ban_ends:
+            self.logger.warning(
+                f"Skipping candle fetch cycle — Binance rate-limit ban active "
+                f"for another {ban_ends - time.time():.0f}s"
+            )
+            return
+
         symbols = self.resolve_symbols()
         if not symbols:
             self.logger.warning("No fetchable symbols this cycle — skipping")
@@ -290,6 +299,7 @@ class CandleFetcherService:
         end = datetime.now(tz=timezone.utc)
         start = end - timedelta(hours=self.lookback_hours)
         total, gapped, failed = 0, [], []
+        banned: Optional[BinanceRateLimited] = None
         trend_cache = get_trend_cache()
         cache_updates = 0
         skipped = 0
@@ -355,8 +365,18 @@ class CandleFetcherService:
                             self._last_ts[key] = (
                                 new_rows[-1].timestamp if new_rows else report.newest
                             )
+                    except BinanceRateLimited as e:
+                        # A ban is an IP-wide condition, not a per-symbol one:
+                        # every remaining series would hit the same wall, and
+                        # each request that lands during a ban extends it. Give
+                        # up on the whole cycle and let the loop retry later.
+                        banned = e
+                        failed.append(f"{symbol}/{tf}: {e}")
+                        break
                     except Exception as e:  # noqa: BLE001 — one symbol must not stop the rest
                         failed.append(f"{symbol}/{tf}: {e}")
+                if banned is not None:
+                    break
 
         self._last_run_ts = time.time()
         self._last_rows = total
@@ -370,6 +390,11 @@ class CandleFetcherService:
             self.logger.warning(f"Gaps detected in {len(gapped)} series: {'; '.join(gapped[:5])}")
         if failed:
             self.logger.error(f"{len(failed)} series failed: {'; '.join(failed[:5])}")
+        if banned is not None:
+            self.logger.error(
+                f"Cycle aborted on a Binance rate-limit ban; no further requests "
+                f"until {datetime.fromtimestamp(banned.until, tz=timezone.utc).isoformat(timespec='seconds')}"
+            )
 
 
 _service: Optional[CandleFetcherService] = None
