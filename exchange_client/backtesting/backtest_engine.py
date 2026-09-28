@@ -2002,6 +2002,25 @@ class BacktestProfile:
         # resizes the stop). None = no volatility gate.
         "max_entry_atr_pct":          None,
         "min_entry_atr_pct":          None,
+        # --- Runner tranche (opt-in; 0 reproduces the old behaviour exactly) --
+        # When the trailing stop fires, close only (1 - runner_fraction) of the
+        # position and leave the rest running under a WIDER trail. Motivated by
+        # dip_exit_structure.py: a single trail width cannot serve both the
+        # modal +3.5% dip bounce and the occasional +30% run, and the danger
+        # that killed "remove the logical exit" lives entirely in trades that
+        # NEVER ARM — which a runner, by construction, never touches.
+        #
+        # The trade is reported as ONE blended row so `n` and avg_pnl_pct stay
+        # comparable with the control:
+        #     pnl = (1-f) * pnl(main exit) + f * pnl(runner exit)
+        # with the components recorded in exit_details.
+        "runner_fraction":                  0.0,    # 0 = disabled
+        "runner_trailing_stop_pct":         None,   # None = inherit trailing_stop_pct
+        "runner_take_profit_pct":           None,   # None = inherit take_profit_pct
+        # The hypothesis under test: the runner ignores the logical exit that
+        # closes the main tranche. Bounded to runner_fraction of a trade that
+        # has ALREADY reached a trailing exit, unlike the refuted global switch.
+        "runner_exempt_trend_invalidation": True,
     }
 
     def __init__(self, name: str, config: dict):
@@ -2771,22 +2790,46 @@ class BacktestEngine:
                     candle_ticks    = self._get_candle_ticks(tick_times, tick_prices, candle_start_ts, candle_end_ts)
                     if candle_ticks:
                         exit_result = self._check_exit_from_prices(open_pos, candle_ticks)
+                        # A trailing exit may convert the position into a runner
+                        # rather than closing it; the runner must then face the
+                        # REST of this candle under its wider trail. Converts at
+                        # most once, so this loops at most twice.
+                        while exit_result and self._maybe_start_runner(open_pos, exit_result):
+                            exit_result = self._check_exit_from_prices(
+                                open_pos, candle_ticks, start_idx=exit_result["idx"] + 1)
                         if exit_result is None:
                             # Tick path skips _check_exit, so run the stale check here
                             exit_result = self._check_stale_exit(open_pos, row, row_time)
                     else:
                         exit_result = self._check_exit(open_pos, row)  # fallback: no ticks for this candle
+                        if exit_result and self._maybe_start_runner(open_pos, exit_result):
+                            exit_result = None
                 else:
                     exit_result = self._check_exit(open_pos, row)
+                    if exit_result and self._maybe_start_runner(open_pos, exit_result):
+                        exit_result = None
 
                 if exit_result:
                     pnl = self._net_pnl(open_pos["entry_price"], exit_result["price"], is_short)
+                    reason = exit_result["reason"]
+                    if open_pos.get("is_runner"):
+                        pnl, main_pnl, reason = self._blend_runner_pnl(
+                            open_pos, exit_result["price"], reason, is_short)
                     open_pos["trade"].exit_price   = exit_result["price"]
                     open_pos["trade"].exit_time    = row_time
-                    open_pos["trade"].exit_reason  = exit_result["reason"]
+                    open_pos["trade"].exit_reason  = reason
                     open_pos["trade"].pnl_pct      = pnl
                     open_pos["trade"].won          = pnl > 0
                     open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_result["price"])
+                    if open_pos.get("is_runner"):
+                        open_pos["trade"].exit_details.update({
+                            "runner_fraction":   open_pos["runner_fraction"],
+                            "main_exit_price":   open_pos["main_exit_price"],
+                            "main_exit_reason":  open_pos["main_exit_reason"],
+                            "main_pnl_pct":      round(main_pnl, 4),
+                            "runner_pnl_pct":    round(self._net_pnl(
+                                open_pos["entry_price"], exit_result["price"], is_short), 4),
+                        })
                     if effective_cap and open_pos["cap_idx"] is not None:
                         effective_cap.record_exit(open_pos["cap_idx"], row_time)
                     if effective_sl_breaker:
@@ -2815,6 +2858,12 @@ class BacktestEngine:
 
                     # Trend invalidation: exit if the chosen indicator set flips negative
                     use_ti = getattr(self.profile, "use_trend_invalidation_exit", True)
+                    # A running tranche can be exempted from the logical exit —
+                    # the hypothesis in dip_exit_structure.py, bounded here to
+                    # runner_fraction of a trade that has already trailed out.
+                    if (use_ti and open_pos.get("is_runner")
+                            and getattr(self.profile, "runner_exempt_trend_invalidation", True)):
+                        use_ti = False
                     if use_ti:
                         min_age_mins = getattr(self.profile, "min_position_age_for_trend_check", 0)
                         position_age_mins = (row_time - open_pos["entry_time"]).total_seconds() / 60
@@ -2884,9 +2933,13 @@ class BacktestEngine:
                                 if not trend_still_ok:
                                     exit_price = float(row.close)
                                     pnl = self._net_pnl(open_pos["entry_price"], exit_price, is_short)
+                                    ti_reason_label = "trend_invalidation"
+                                    if open_pos.get("is_runner"):
+                                        pnl, _main_pnl, ti_reason_label = self._blend_runner_pnl(
+                                            open_pos, exit_price, "trend_invalidation", is_short)
                                     open_pos["trade"].exit_price   = exit_price
                                     open_pos["trade"].exit_time    = row_time
-                                    open_pos["trade"].exit_reason  = "trend_invalidation"
+                                    open_pos["trade"].exit_reason  = ti_reason_label
                                     open_pos["trade"].pnl_pct      = pnl
                                     open_pos["trade"].won          = pnl > 0
                                     open_pos["trade"].exit_details = self._indicator_snapshot(cache, symbol, price=exit_price)
@@ -3117,6 +3170,10 @@ class BacktestEngine:
                 "entry_time":      row_time,
                 "is_short":        is_short,
                 "cap_idx":         cap_idx,
+                # Runner tranche state — set by _maybe_start_runner()
+                "is_runner":       False,
+                "main_exit_price": None,
+                "main_exit_reason": None,
             }
 
             # Fire cooldown: block re-signalling the same symbol too soon after a buy
@@ -3398,20 +3455,70 @@ class BacktestEngine:
         # Trend / default: last tick ≈ candle close
         return candle_ticks[-1], len(candle_ticks) - 1
 
+    def _maybe_start_runner(self, pos: dict, exit_result: dict) -> bool:
+        """Convert a trailing exit into a partial close plus a running tranche.
+
+        Returns True when the position was converted (and so must NOT be
+        closed by the caller), False when it should exit normally.
+
+        Only a `trailing_stop` exit converts. Every other reason — stop_loss,
+        take_profit, trend_invalidation, stale_position — closes the whole
+        position as before. That is the point: the runner is reachable only
+        from a trade that has already armed and trailed, so it cannot touch
+        the never-armed population that dip_exit_structure.py showed is where
+        all the tail risk lives.
+        """
+        frac = float(getattr(self.profile, "runner_fraction", 0.0) or 0.0)
+        if frac <= 0 or pos.get("is_runner") or exit_result["reason"] != "trailing_stop":
+            return False
+
+        pos["is_runner"]        = True
+        pos["runner_fraction"]  = frac
+        pos["main_exit_price"]  = exit_result["price"]
+        pos["main_exit_reason"] = exit_result["reason"]
+
+        runner_trail = getattr(self.profile, "runner_trailing_stop_pct", None)
+        if runner_trail is not None:
+            pos["eff_trail_pct"] = float(runner_trail)
+
+        runner_tp = getattr(self.profile, "runner_take_profit_pct", None)
+        if runner_tp is not None:
+            entry = pos["entry_price"]
+            pos["tp_price"] = (entry * (1 - float(runner_tp) / 100)
+                               if pos.get("is_short") else
+                               entry * (1 + float(runner_tp) / 100))
+        return True
+
+    def _blend_runner_pnl(self, pos: dict, final_price: float, final_reason: str,
+                          is_short: bool) -> Tuple[float, float, str]:
+        """(blended_pnl_pct, main_pnl_pct, combined_reason) for a runner trade."""
+        frac      = pos["runner_fraction"]
+        main_pnl  = self._net_pnl(pos["entry_price"], pos["main_exit_price"], is_short)
+        run_pnl   = self._net_pnl(pos["entry_price"], final_price, is_short)
+        blended   = (1 - frac) * main_pnl + frac * run_pnl
+        return blended, main_pnl, f"{pos['main_exit_reason']}+runner_{final_reason}"
+
     def _check_exit_from_prices(
-        self, pos: dict, prices: List[float]
+        self, pos: dict, prices: List[float], start_idx: int = 0
     ) -> Optional[dict]:
         """
         Iterate tick prices in chronological order.
         Updates trailing stop water mark as a side effect (mutates pos).
-        Returns {"price": float, "reason": str} on first trigger, else None.
+        Returns {"price": float, "reason": str, "idx": int} on first trigger,
+        else None.
+
+        `start_idx` resumes partway through a candle. That matters when a
+        trailing exit converts the position into a runner tranche: the runner
+        must be exposed to the REST of the same candle under its new (wider)
+        trail, otherwise it gets a free pass until the next bar.
         """
         is_short  = pos.get("is_short", False)
         use_ts    = self.profile.use_trailing_stop
         arm_pct   = float(pos.get("eff_arm_pct", self.profile.arm_trailing_stop_pct)) / 100
         trail_pct = float(pos.get("eff_trail_pct", self.profile.trailing_stop_pct)) / 100
 
-        for price in prices:
+        for idx in range(start_idx, len(prices)):
+            price = prices[idx]
             # --- update water mark ---
             if use_ts:
                 if is_short:
@@ -3428,22 +3535,22 @@ class BacktestEngine:
             # --- check exits ---
             if is_short:
                 if price >= pos["sl_price"]:
-                    return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss"}
+                    return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss", "idx": idx}
                 if price <= pos["tp_price"]:
-                    return {"price": pos["tp_price"], "reason": "take_profit"}
+                    return {"price": pos["tp_price"], "reason": "take_profit", "idx": idx}
                 if use_ts and pos["trailing_armed"]:
                     trail_sl = pos["lowest_price"] * (1 + trail_pct)
                     if price >= trail_sl:
-                        return {"price": trail_sl, "reason": "trailing_stop"}
+                        return {"price": trail_sl, "reason": "trailing_stop", "idx": idx}
             else:
                 if price <= pos["sl_price"]:
-                    return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss"}
+                    return {"price": self._slipped_sl_fill(pos), "reason": "stop_loss", "idx": idx}
                 if price >= pos["tp_price"]:
-                    return {"price": pos["tp_price"], "reason": "take_profit"}
+                    return {"price": pos["tp_price"], "reason": "take_profit", "idx": idx}
                 if use_ts and pos["trailing_armed"]:
                     trail_sl = pos["highest_price"] * (1 - trail_pct)
                     if price <= trail_sl:
-                        return {"price": trail_sl, "reason": "trailing_stop"}
+                        return {"price": trail_sl, "reason": "trailing_stop", "idx": idx}
 
         return None
 
