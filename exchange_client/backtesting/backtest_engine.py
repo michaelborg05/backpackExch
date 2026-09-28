@@ -3467,6 +3467,14 @@ class BacktestEngine:
         from a trade that has already armed and trailed, so it cannot touch
         the never-armed population that dip_exit_structure.py showed is where
         all the tail risk lives.
+
+        KNOWN GAP: the same-candle entry+exit path (the `_check_exit_from_prices`
+        call right after a fill, which handles a stop being hit inside the entry
+        candle) does NOT create a runner — such a trade closes in full. Harmless
+        at runner_fraction=0, and rare for these dip profiles since it needs a
+        >arm% round trip inside one entry candle, but it biases a runner backtest
+        slightly PESSIMISTIC. Wire it up before trusting a runner result that
+        turns on a small margin.
         """
         frac = float(getattr(self.profile, "runner_fraction", 0.0) or 0.0)
         if frac <= 0 or pos.get("is_runner") or exit_result["reason"] != "trailing_stop":
