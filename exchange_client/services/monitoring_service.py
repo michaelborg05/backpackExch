@@ -1771,12 +1771,23 @@ class MonitoringService:
             self._stamp_signal_snapshot_on_trade(
                 order.exchange_order_id, profile.name, (thesis or {}).get("snapshot")
             )
+            # Price the fill was booked at (the resting limit); fall back to the
+            # order's limit price if the adapter didn't report one.
+            fill_price = (outcome or {}).get("executed_price") or getattr(order, "price", None)
+            try:
+                price_line = f"Price: ${float(fill_price):.4f}\n" if fill_price else ""
+            except (TypeError, ValueError):
+                price_line = ""
+            fill_qty = (outcome or {}).get("executed_qty") or getattr(order, "quantity", None)
+            qty_line = f"Quantity: {fill_qty}\n" if fill_qty else ""
             self._send_telegram(
                 f"🅼 Maker entry filled [{profile.display_name or profile.name}]\n"
                 f"Symbol: {order.symbol}\n"
                 + self._thesis_header_lines(thesis)
+                + price_line
                 + f"Fill: Maker\n"
-                f"Position opened from resting limit."
+                + qty_line
+                + f"Position opened from resting limit."
                 + self._thesis_reasons_block(thesis),
                 MessagePriority.NORMAL,
             )

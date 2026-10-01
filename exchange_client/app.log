@@ -1,0 +1,48 @@
+2026-10-01 11:35:42,507 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 1/4 in 1s
+2026-10-01 11:35:43,798 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 2/4 in 2s
+2026-10-01 11:35:46,106 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 3/4 in 4s
+2026-10-01 11:35:50,391 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 4/4 in 8s
+2026-10-01 11:35:58,699 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 1/4 in 1s
+2026-10-01 11:36:00,037 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 2/4 in 2s
+2026-10-01 11:36:02,337 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 3/4 in 4s
+2026-10-01 11:36:06,653 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 4/4 in 8s
+2026-10-01 11:36:14,653 - services.candle_fetcher - WARNING - Could not read https://data-api.binance.vision exchangeInfo: GET https://data-api.binance.vision/api/v3/exchangeInfo failed after 4 attempts per host: <urlopen error Tunnel connection failed: 403 Forbidden>
+2026-10-01 11:36:14,716 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on data-api.binance.vision — no further requests to it for 120s (until 2026-10-01T11:38:14+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:14,716 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on api.binance.com — no further requests to it for 120s (until 2026-10-01T11:38:14+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:14,717 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on data-api.binance.vision — no further requests to it for 120s (until 2026-10-01T11:38:14+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:14,718 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on data-api.binance.vision — no further requests to it for 3600s (until 2026-10-01T12:36:14+00:00). Used weight was 0/6000. Body: {"code": -1003, "msg": "Way too much request weight used; IP banned until 1790858174717."}
+2026-10-01 11:36:14,718 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on api.binance.com — no further requests to it for 3600s (until 2026-10-01T12:36:14+00:00). Used weight was 0/6000. Body: {"code": -1003, "msg": "Way too much request weight used; IP banned until 1790858174717."}
+2026-10-01 11:36:14,718 - services.candle_fetcher - ERROR - Binance rate limit hit (HTTP 429) on data-api.binance.vision — no further requests to it for 30s (until 2026-10-01T11:36:44+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:14,719 - services.candle_fetcher - ERROR - Binance rate limit hit (HTTP 429) on api.binance.com — no further requests to it for 30s (until 2026-10-01T11:36:44+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:14,721 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (HTTP Error 502: err), retry 1/3 in 1s
+2026-10-01 11:36:14,721 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (HTTP Error 502: err), retry 2/3 in 2s
+2026-10-01 11:36:14,721 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (HTTP Error 502: err), retry 3/3 in 4s
+2026-10-01 11:36:14,721 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (HTTP Error 502: err), retry 1/3 in 1s
+2026-10-01 11:36:14,721 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (HTTP Error 502: err), retry 2/3 in 2s
+2026-10-01 11:36:14,722 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (HTTP Error 502: err), retry 3/3 in 4s
+2026-10-01 11:36:14,722 - services.candle_fetcher - WARNING - Binance used weight 4801/6000 on data-api.binance.vision — pausing 45.3s for the counter reset
+2026-10-01 11:36:14,733 - SymbolConfigCache - ERROR - SymbolConfigCache refresh failed, keeping previous: neon down
+2026-10-01 11:36:27,099 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 1/4 in 1s
+2026-10-01 11:36:28,424 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 2/4 in 2s
+2026-10-01 11:36:30,740 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 3/4 in 4s
+2026-10-01 11:36:35,051 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 4/4 in 8s
+2026-10-01 11:36:43,430 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 1/4 in 1s
+2026-10-01 11:36:44,744 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 2/4 in 2s
+2026-10-01 11:36:47,028 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 3/4 in 4s
+2026-10-01 11:36:51,331 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (<urlopen error Tunnel connection failed: 403 Forbidden>), retry 4/4 in 8s
+2026-10-01 11:36:59,332 - services.candle_fetcher - WARNING - Could not read https://data-api.binance.vision exchangeInfo: GET https://data-api.binance.vision/api/v3/exchangeInfo failed after 4 attempts per host: <urlopen error Tunnel connection failed: 403 Forbidden>
+2026-10-01 11:36:59,356 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on data-api.binance.vision — no further requests to it for 120s (until 2026-10-01T11:38:59+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:59,356 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on api.binance.com — no further requests to it for 120s (until 2026-10-01T11:38:59+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:59,357 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on data-api.binance.vision — no further requests to it for 120s (until 2026-10-01T11:38:59+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:59,358 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on data-api.binance.vision — no further requests to it for 3600s (until 2026-10-01T12:36:59+00:00). Used weight was 0/6000. Body: {"code": -1003, "msg": "Way too much request weight used; IP banned until 1790858219358."}
+2026-10-01 11:36:59,358 - services.candle_fetcher - ERROR - Binance IP BANNED (HTTP 418) on api.binance.com — no further requests to it for 3600s (until 2026-10-01T12:36:59+00:00). Used weight was 0/6000. Body: {"code": -1003, "msg": "Way too much request weight used; IP banned until 1790858219358."}
+2026-10-01 11:36:59,359 - services.candle_fetcher - ERROR - Binance rate limit hit (HTTP 429) on data-api.binance.vision — no further requests to it for 30s (until 2026-10-01T11:37:29+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:59,359 - services.candle_fetcher - ERROR - Binance rate limit hit (HTTP 429) on api.binance.com — no further requests to it for 30s (until 2026-10-01T11:37:29+00:00). Used weight was 0/6000. Body: <empty>
+2026-10-01 11:36:59,361 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (HTTP Error 502: err), retry 1/3 in 1s
+2026-10-01 11:36:59,362 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (HTTP Error 502: err), retry 2/3 in 2s
+2026-10-01 11:36:59,362 - services.candle_fetcher - WARNING - fetch failed on data-api.binance.vision (HTTP Error 502: err), retry 3/3 in 4s
+2026-10-01 11:36:59,362 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (HTTP Error 502: err), retry 1/3 in 1s
+2026-10-01 11:36:59,362 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (HTTP Error 502: err), retry 2/3 in 2s
+2026-10-01 11:36:59,362 - services.candle_fetcher - WARNING - fetch failed on api.binance.com (HTTP Error 502: err), retry 3/3 in 4s
+2026-10-01 11:36:59,363 - services.candle_fetcher - WARNING - Binance used weight 4801/6000 on data-api.binance.vision — pausing 0.6s for the counter reset
+2026-10-01 11:36:59,375 - SymbolConfigCache - ERROR - SymbolConfigCache refresh failed, keeping previous: neon down

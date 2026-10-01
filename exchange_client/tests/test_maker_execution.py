@@ -74,10 +74,12 @@ def _reconcile_fixture(status, thesis_snapshot):
     import services.monitoring_service as ms
     from services.monitoring_service import MonitoringService
 
-    calls = {"order_kwargs": None, "stamped": None}
+    calls = {"order_kwargs": None, "stamped": None, "telegram": []}
 
     class FakeAdapter:
         def reconcile_entry_order(self, order):
+            if status == "filled":
+                return {"status": status, "executed_price": "412.37", "executed_qty": "1"}
             return {"status": status}
 
         def cancel_order(self, order_id, symbol):
@@ -99,8 +101,8 @@ def _reconcile_fixture(status, thesis_snapshot):
         def _stamp_fill_type_on_position(self, *a, **k):
             return None
 
-        def _send_telegram(self, *a, **k):
-            return None
+        def _send_telegram(self, message, *a, **k):
+            calls["telegram"].append(message)
 
         def _stamp_signal_snapshot_on_trade(self, order_id, profile_name, snapshot):
             calls["stamped"] = snapshot
@@ -145,6 +147,16 @@ def test_maker_fill_stamps_signal_snapshot():
     assert calls["stamped"] == snap, "maker fill did not stamp the snapshot onto the trade"
     assert fake._pending_maker_theses == {}, "thesis not popped"
     print("  ok maker fill stamps the signal snapshot onto the trade")
+
+
+def test_fill_notifications_include_executed_price():
+    # Maker fill: price comes from the reconciled trade.
+    _, calls = _reconcile_fixture("filled", None)
+    assert "Price: $412.3700" in calls["telegram"][-1], calls["telegram"]
+    # Maker -> taker fallback: price from the market order (100 quote / 1 qty).
+    _, calls = _reconcile_fixture("resting", None)
+    assert "Price: $100.0000" in calls["telegram"][-1], calls["telegram"]
+    print("  ok maker and maker->taker fill messages include the executed price")
 
 
 def test_missing_thesis_still_trades():
