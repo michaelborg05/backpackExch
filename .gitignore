@@ -4,3 +4,6 @@ logs/
 *.pyc
 .env
 exchange_client/.vscode/launch.json
+# Runtime logs. `logs/` only covers the configured LOG_LOCATION; app.log also
+# lands next to whatever directory the app was started from.
+*.log

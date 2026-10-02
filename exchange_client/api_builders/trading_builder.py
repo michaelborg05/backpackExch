@@ -1174,7 +1174,8 @@ class TradingService:
         """Reconcile a resting ENTRY order against the exchange.
 
         Returns {"status": "resting"|"filled"|"gone", "position_id": int|None,
-                 "executed_qty": Decimal}. On a fill, opens the position (+TP).
+                 "executed_qty": Decimal, "executed_price": Decimal|None}.
+        On a fill, opens the position (+TP).
         Called each cycle from MonitoringService._monitor_orders for ENTRY orders.
         """
         from decimal import Decimal as _D
@@ -1214,7 +1215,8 @@ class TradingService:
                     )
                 position = self._open_position_from_entry_fill(db, saved_trade, side_upper)
                 update_order(db, self.profile.name, order.exchange_order_id, status=OrderStatus.FILLED)
-                result.update(status="filled", position_id=position.id)
+                result.update(status="filled", position_id=position.id,
+                              executed_price=getattr(saved_trade, "price", None))
                 return result
 
             if status in ("Cancelled", "Expired", "Rejected"):

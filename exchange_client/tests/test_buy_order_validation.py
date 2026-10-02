@@ -105,11 +105,15 @@ def test_genuine_dust_shortfall_raises_rather_than_placing():
 
 def test_small_shortfall_still_shaves():
     # A fee/rounding-sized shortfall is the legitimate downsize case and must
-    # keep working — only gutting the order is refused.
+    # keep working — only gutting the order is refused. Bound derived from the
+    # constant so retuning MIN_BUY_DOWNSIZE_RATIO doesn't make this vacuous.
     fake = _fake_self(_FakeBalanceCache("450.00"))
-    order = _validate(fake, "0.34")
+    requested = Decimal("0.34")
+    order = _validate(fake, requested)
     qty = Decimal(order.quantity)
-    assert Decimal("0.17") < qty < Decimal("0.34"), f"expected a shave, got {qty}"
+    assert requested * TradingService.MIN_BUY_DOWNSIZE_RATIO <= qty < requested, (
+        f"expected a shave above the dust floor, got {qty}"
+    )
     print(f"  ok small shortfall shaves 0.34 -> {qty}")
 
 
