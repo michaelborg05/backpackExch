@@ -61,11 +61,13 @@ def test_expiry():
     print("  ok expiry boundary")
 
 
-def _reconcile_fixture(status, thesis_snapshot):
+def _reconcile_fixture(status, thesis_snapshot, order_result="fill"):
     """Drive _reconcile_maker_entry against fakes: no exchange, no DB, no Telegram.
 
     Returns (fake_self, adapter, calls) after one reconcile of a maker entry order
-    that the adapter reports as `status` ("filled" or "resting" -> timed out).
+    that the adapter reports as `status` ("filled", "resting" -> timed out, or
+    "gone"). `order_result` controls what the taker fallback does: "fill",
+    "no_fill" (returns None) or "raise".
     """
     import contextlib
     from datetime import datetime, timedelta, timezone
@@ -74,17 +76,23 @@ def _reconcile_fixture(status, thesis_snapshot):
     import services.monitoring_service as ms
     from services.monitoring_service import MonitoringService
 
-    calls = {"order_kwargs": None, "stamped": None}
+    calls = {"order_kwargs": None, "stamped": None, "order_seq": []}
 
     class FakeAdapter:
         def reconcile_entry_order(self, order):
             return {"status": status}
 
         def cancel_order(self, order_id, symbol):
+            calls["order_seq"].append("cancel")
             return None
 
         def order_buy(self, **kwargs):
             calls["order_kwargs"] = kwargs
+            calls["order_seq"].append("order_buy")
+            if order_result == "no_fill":
+                return None
+            if order_result == "raise":
+                raise RuntimeError("Quantity rounded to zero due to step size 0.01")
             return SimpleNamespace(executed_quantity="1", executed_quote_quantity="100")
 
     class FakeSelf:
@@ -92,9 +100,17 @@ def _reconcile_fixture(status, thesis_snapshot):
                                  error=lambda *a, **k: None, debug=lambda *a, **k: None)
         _thesis_header_lines = staticmethod(MonitoringService._thesis_header_lines)
         _thesis_reasons_block = staticmethod(MonitoringService._thesis_reasons_block)
+        # Real implementations: these two are what the regression tests below check.
+        _clear_signal_cooldown = MonitoringService._clear_signal_cooldown
 
         def __init__(self):
             self._pending_maker_theses = {}
+            # Pre-stamped as it would be at maker placement (a resting order
+            # counts as acted-on), so the tests can watch it get released.
+            self._last_signals = {"profile10_ZEC_USDC": 1_000.0}
+
+        def _refresh_balances_after_cancel(self, profile):
+            calls["order_seq"].append("balance_refresh")
 
         def _stamp_fill_type_on_position(self, *a, **k):
             return None
@@ -145,6 +161,39 @@ def test_maker_fill_stamps_signal_snapshot():
     assert calls["stamped"] == snap, "maker fill did not stamp the snapshot onto the trade"
     assert fake._pending_maker_theses == {}, "thesis not popped"
     print("  ok maker fill stamps the signal snapshot onto the trade")
+
+
+def test_taker_fallback_refreshes_balance_after_cancel():
+    """Regression (live, 2026-10-02): the fallback cancelled a ~$475 resting maker
+    buy and then sized the taker order against BalanceCache, which still showed the
+    cancelled order's USDC locked (available $3.76). The order was downsized to
+    0.0027 ZEC, rounded to zero by the 0.01 step, and the entry was lost. The
+    balance has to be re-read between the cancel and the order."""
+    fake, calls = _reconcile_fixture("resting", None)
+    seq = calls["order_seq"]
+    assert "balance_refresh" in seq, "no balance refresh after cancelling the maker order"
+    assert seq.index("cancel") < seq.index("balance_refresh") < seq.index("order_buy"), (
+        f"refresh must sit between cancel and order: {seq}"
+    )
+    print("  ok balance is re-read between the maker cancel and the taker order")
+
+
+def test_failed_fallback_releases_cooldown():
+    """Regression (live, 2026-10-02): the cooldown is stamped when the maker order
+    rests, but when the fallback failed the stamp stayed — blinding ZEC for the rest
+    of the cooldown over a trade that never happened."""
+    for result in ("no_fill", "raise"):
+        fake, _ = _reconcile_fixture("resting", None, order_result=result)
+        assert fake._last_signals == {}, (
+            f"cooldown not released when the fallback {result}d: {fake._last_signals}"
+        )
+    # A fallback that DID fill must keep the cooldown — a position is open.
+    fake, _ = _reconcile_fixture("resting", None, order_result="fill")
+    assert "profile10_ZEC_USDC" in fake._last_signals, "cooldown wrongly cleared after a fill"
+    # Terminal-unfilled (cancelled at the venue / expired) is also a no-entry.
+    fake, _ = _reconcile_fixture("gone", None)
+    assert fake._last_signals == {}, "cooldown not released on a terminal unfilled order"
+    print("  ok cooldown released when no entry opened, kept when one did")
 
 
 def test_missing_thesis_still_trades():
@@ -236,6 +285,8 @@ if __name__ == "__main__":
                test_best_maker_price_none_on_bad_book,
                test_expiry, test_normalize_status_and_qty,
                test_taker_fallback_passes_signal_snapshot,
+               test_taker_fallback_refreshes_balance_after_cancel,
+               test_failed_fallback_releases_cooldown,
                test_maker_fill_stamps_signal_snapshot,
                test_missing_thesis_still_trades,
                test_limit_exit_fill_stamps_close_snapshot]:

@@ -1783,7 +1783,11 @@ class MonitoringService:
             return
 
         if status == "gone":
+            # Terminal with nothing executed (cancelled at the venue, expired,
+            # rejected, or vanished): no entry was opened, so release the cooldown
+            # the resting order claimed.
             self._pending_maker_theses.pop(str(order.exchange_order_id), None)
+            self._clear_signal_cooldown(profile, order.symbol, "maker order terminal, unfilled")
             return  # order already terminal; nothing to do
 
         # Still resting — enforce the timeout, then taker-fall back.
@@ -1827,6 +1831,12 @@ class MonitoringService:
         except Exception:  # noqa: BLE001
             pass
         is_long = str(order.side).upper() == "BID"
+        # Release the cancelled order's margin/quote hold in our own view of the
+        # balance before sizing the fallback. The venue frees it asynchronously and
+        # BalanceCache is only written on the monitoring cycle, so the taker order
+        # would otherwise be validated against a balance that still shows the
+        # maker order's funds locked — and get downsized to dust or rejected.
+        self._refresh_balances_after_cancel(profile)
         # Pop the thesis BEFORE ordering: the fallback trade is booked inside the
         # order call, so the snapshot has to be passed down with it — the taker
         # path here would otherwise write a null snapshot the entry can't be
@@ -1861,17 +1871,49 @@ class MonitoringService:
                     MessagePriority.NORMAL,
                 )
             else:
+                self._clear_signal_cooldown(profile, order.symbol, "fallback returned no fill")
                 self._send_telegram(
                     f"⚠️ Maker→Taker fallback returned no fill [{profile.display_name or profile.name}]\n"
                     f"Symbol: {order.symbol}\nEntry NOT opened — check the exchange.",
                     MessagePriority.HIGH,
                 )
         except Exception as e:  # noqa: BLE001
+            self._clear_signal_cooldown(profile, order.symbol, f"fallback raised: {e}")
             self.logger.error(f"[{profile.name}] taker fallback failed for {order.symbol}: {e}")
             self._send_telegram(
                 f"❌ Maker→Taker fallback FAILED [{profile.display_name or profile.name}]\n"
                 f"Symbol: {order.symbol}\nError: {e}",
                 MessagePriority.HIGH,
+            )
+
+    def _clear_signal_cooldown(self, profile, symbol: str, why: str) -> None:
+        """Drop the per-symbol signal cooldown stamped when a maker entry rested.
+
+        The cooldown is stamped at placement (a resting order counts as acted-on),
+        but if the order neither fills nor converts to a taker entry then nothing
+        was acted on at all — leaving the stamp would blind the symbol for the rest
+        of the cooldown over a trade that never happened.
+        """
+        cooldown_key = f"{profile.name}_{symbol}"
+        if self._last_signals.pop(cooldown_key, None) is not None:
+            self.logger.info(
+                f"[{profile.name}] cleared signal cooldown for {symbol} — {why}; "
+                f"no entry was opened, so the symbol can signal again next cycle"
+            )
+
+    def _refresh_balances_after_cancel(self, profile) -> None:
+        """Re-read balances into BalanceCache after cancelling a resting order.
+
+        Best-effort: a stale cache only costs us the fallback order, and the
+        TradingService buy/sell validation re-fetches on a shortfall too.
+        """
+        try:
+            time.sleep(1)  # let the venue release the cancelled order's hold
+            get_balances(source="MonitoringService", profile=profile, update_cache=True)
+        except Exception as e:  # noqa: BLE001
+            self.logger.warning(
+                f"[{profile.name}] balance refresh after cancel failed: {e} — "
+                f"fallback order will size against the cached balance"
             )
 
     @staticmethod

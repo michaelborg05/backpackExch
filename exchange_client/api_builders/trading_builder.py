@@ -30,6 +30,12 @@ from db.crud import save_trade, open_position, close_position, save_order, save_
 from utils.position_calculator import PositionCalculator
 
 class TradingService:
+    # Smallest fraction of a requested BUY quantity we'll still place when the
+    # quote balance falls short. Above it, treat the shortfall as a fee/rounding
+    # shave and downsize; below it, raise InsufficientBalanceError instead of
+    # opening a dust position.
+    MIN_BUY_DOWNSIZE_RATIO = Decimal("0.15")
+
     def __init__(self, profile: TradingProfile):
         self.config = Config()
 
@@ -238,22 +244,57 @@ class TradingService:
         else:
             # Check if we have enough quote asset to buy requested quantity
             required_quote = order_qty * price
-            
+
             if required_quote > available_quote:
                 self.logger.warning(
                     f"Insufficient {quote_asset} for buy order. "
                     f"Required: {required_quote}, Available: {available_quote}"
                 )
-                
+
+                # The cache is only written on the monitoring cycle, so anything
+                # that just released a hold — a cancelled resting maker order,
+                # most of all — still reads as locked here. Re-fetch once before
+                # downsizing: the sell path already does this after cancelling its
+                # open orders, and the buy path shrinking a real order to dust off
+                # a stale read is the failure that motivated it.
+                self._refresh_balance_cache_after_trade()
+                refreshed = self.balance_cache.get_available_balance(
+                    profile_name=self.profile.name, asset=quote_asset
+                )
+                if refreshed is not None and refreshed > available_quote:
+                    self.logger.info(
+                        f"Balance after refresh: {refreshed} {quote_asset} "
+                        f"(was {available_quote} — stale cache)"
+                    )
+                    available_quote = refreshed
+
+            if required_quote > available_quote:
                 # Calculate max we can buy
                 max_base_qty = available_quote / price
                 adjusted_qty = self._apply_buffer_and_round(max_base_qty, price)
-                
+
+                # Only shave the order, never gut it. A downsize to a small
+                # fraction of the intended size means the balance read is wrong or
+                # the funds genuinely aren't there; placing a dust position (with
+                # its own TP/SL and fees, holding the symbol open) is worse than
+                # failing loudly.
+                if adjusted_qty < order_qty * self.MIN_BUY_DOWNSIZE_RATIO:
+                    raise InsufficientBalanceError(
+                        f"Insufficient {quote_asset} for buy order: can only afford "
+                        f"{adjusted_qty} of {order_qty} {base_asset} "
+                        f"({required_quote} required, {available_quote} available) — "
+                        f"refusing to place a dust order",
+                        required=required_quote,
+                        available=available_quote,
+                        asset=quote_asset,
+                        symbol=order.symbol,
+                    )
+
                 self.logger.info(
                     f"Adjusted buy quantity from {order_qty} to {adjusted_qty} {base_asset}"
                 )
                 order.quantity = str(adjusted_qty)
-        
+
         return order
 
     def _get_profile_orders(self, symbol: str) -> List:
@@ -944,21 +985,26 @@ class TradingService:
             raise ExchangeAPIError(f"Trading service error: {str(e)}")
         
         
-    def _refresh_balance_cache_after_trade(self, order_response: OrderResponse):
+    def _refresh_balance_cache_after_trade(self, order_response: Optional[OrderResponse] = None):
         """
-        Refresh balance cache after a successful trade to ensure 
+        Refresh balance cache after a successful trade to ensure
         subsequent orders have up-to-date balance information
-        
+
         Args:
-            order_response: The executed order response
+            order_response: The executed order response, or None when the refresh
+                follows something other than a fill (an order cancel, a stale-read
+                recheck). Must stay None-tolerant: callers pass None and the whole
+                body is caught below, so touching an attribute on it turns the
+                refresh into a silent no-op.
         """
         try:
             from api_builders.account_builder import get_balances
-            
+
+            trigger = getattr(order_response, "side", None) or "cancel/recheck"
             self.logger.info(
-                f"Refreshing balance cache after {order_response.side} order for {self.profile.name}"
+                f"Refreshing balance cache after {trigger} for {self.profile.name}"
             )
-            
+
             # Fetch fresh balances for this profile and update cache
             get_balances(
                 source="TradingService",
