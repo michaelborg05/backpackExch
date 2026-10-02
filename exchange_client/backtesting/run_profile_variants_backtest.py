@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS, MANUAL_DIP_VARIANTS, DIP_V5_OPT_VARIANTS, BTC_REGIME_VARIANTS, DAILY_GATE_VARIANTS, TF15_VARIANTS, H1_DISCOVERY_VARIANTS, run_all_variants
+from backtesting.profile_variants import RANGE_VARIANTS, MEAN_REV_VARIANTS, TREND_VARIANTS, SWING_VARIANTS, MEAN_REV_SHORT_VARIANTS, MEAN_REV_SHORT_EXPERIMENTS, TREND_SHORT_VARIANTS, FADE_SHORT_VARIANTS, DIP_BUY_VARIANTS, MANUAL_DIP_VARIANTS, DIP_V5_OPT_VARIANTS, BTC_REGIME_VARIANTS, DAILY_GATE_VARIANTS, TF15_VARIANTS, H1_DISCOVERY_VARIANTS, DIP_EXIT_VARIANTS, DIP_RUNNER_VARIANTS, run_all_variants
 from backtesting.backtest_engine import ProfileOpenPositionCap, ConsecutiveSLBreaker
 from backtesting.period import DAYS_HELP, parse_period, print_period
 from db.utils import get_db_session
@@ -19,7 +19,7 @@ parser.add_argument("--symbols", nargs="+", default=None,
                     help="Multi-symbol override, e.g. --symbols TRX_USDC LINK_USDC. "
                          "Use EXPANDED for the 14 symbols added 2026-08-22, or ALL for "
                          "those plus the original 9.")
-parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy", "manual_dip", "dip_v5_opt", "btc_regime", "daily_gate", "tf15", "h1_disc"],
+parser.add_argument("--set",     default="dip_buy", choices=["all", "range", "mr", "trend", "4hr_swing", "mr_short", "trend_short", "mrs_exp", "fade_short", "dip_buy", "manual_dip", "dip_v5_opt", "btc_regime", "daily_gate", "tf15", "h1_disc", "dip_exit", "dip_runner"],
                     help="Which variant set to run (default: all)")
 parser.add_argument("--trades",  action="store_true", default=True,
                     help="Print per-trade breakdown table under each variant")
@@ -62,6 +62,10 @@ VARIANT_SETS = {
     "daily_gate":  (DAILY_GATE_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
     "tf15":        (TF15_VARIANTS,             ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
     "h1_disc":     (H1_DISCOVERY_VARIANTS,     ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    # dip_exit is deliberately run with --symbols ALL; the 9 here are only a fallback.
+    "dip_exit":    (DIP_EXIT_VARIANTS,         ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
+    # dip_runner is likewise run with --symbols ALL.
+    "dip_runner":  (DIP_RUNNER_VARIANTS,       ["SOL_USDC", "ZEC_USDC", "BTC_USDC", "ETH_USDC", "BNB_USDC","SUI_USDC","DOGE_USDC","SEI_USDC","XRP_USDC"]),
 
     "range": (RANGE_VARIANTS,    ["SOL_USDC", "BTC_USDC","ZEC_USDC","BNB_USDC","XRP_USDC","ETH_USDC"]),
     "mr":    (MEAN_REV_VARIANTS,  ["SOL_USDC", "ETH_USDC", "BTC_USDC","ZEC_USDC","XRP_USDC","BNB_USDC"]),
