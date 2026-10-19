@@ -102,6 +102,12 @@ def resolve_reference_price(
     last fill, which at least was a real trade. If neither is available the price
     is None and the caller should leave the cache entry alone: going stale is
     safer than valuing a position off a made-up number.
+
+    A wide book with no last fill is "neither": its midpoint is not a price.
+    2026-10-18, RAY_USDC: no trade for 24h dropped lastPrice from /tickers, the
+    near asks were pulled, and the mid of bid 1.77 / ask 2.97 (2.37, +33%, zero
+    trades) armed two underwater trailing stops that then market-sold at -7%
+    and -20% when the asks came back.
     """
     try:
         last = Decimal(str(last_price)) if last_price is not None else None
@@ -117,7 +123,7 @@ def resolve_reference_price(
     if top.spread_pct > Decimal(str(max_spread_pct)):
         if last is not None:
             return PriceQuote(last, "last_wide_book", top.bid, top.ask, top.spread_pct)
-        return PriceQuote(top.mid, "book_mid_wide", top.bid, top.ask, top.spread_pct)
+        return PriceQuote(None, "unavailable_wide_book", top.bid, top.ask, top.spread_pct)
 
     return PriceQuote(top.mid, "book_mid", top.bid, top.ask, top.spread_pct)
 
