@@ -33,6 +33,13 @@ UNI_BOOK = {
     "timestamp": 1789214477734524,
 }
 
+# RAY_USDC, 2026-10-18 22:32 UTC: near asks pulled, only the standing 2.97 ask
+# left. Midpoint 2.36865 — 33% above a market that had not traded in 24h.
+RAY_PULLED_ASKS = {
+    "bids": [["1.6612", "6020"], ["1.7600", "560"], ["1.7673", "167"]],
+    "asks": [["2.97", "499"]],
+}
+
 
 # ── book_top ────────────────────────────────────────────────────────────────
 
@@ -101,11 +108,12 @@ def test_wide_book_falls_back_to_the_last_fill():
     assert quote.spread_pct is not None   # still reported for diagnostics
 
 
-def test_wide_book_with_no_last_fill_uses_the_mid_and_says_so():
-    wide = {"bids": [["90", "1"]], "asks": [["110", "1"]]}
-    quote = resolve_reference_price(None, book_top(wide), max_spread_pct=2.0)
-    assert quote.source == "book_mid_wide"
-    assert quote.price == Decimal("100")
+def test_wide_book_with_no_last_fill_yields_no_price():
+    """The 2026-10-18 RAY case: mid of bid 1.7673 / ask 2.97 read as 2.36865."""
+    quote = resolve_reference_price(None, book_top(RAY_PULLED_ASKS), max_spread_pct=2.0)
+    assert quote.price is None
+    assert quote.source == "unavailable_wide_book"
+    assert quote.ask == Decimal("2.97")   # still reported for diagnostics
 
 
 def test_no_book_falls_back_to_the_last_fill():
@@ -197,7 +205,8 @@ def test_cache_receives_the_mid_plus_book_provenance():
 def test_bulk_failure_still_prices_off_the_book():
     svc = _service()
     with mock.patch("services.monitoring_service.fetch_all_tickers") as bulk, \
-         mock.patch("services.monitoring_service.fetch_book_top") as depth:
+         mock.patch("services.monitoring_service.fetch_book_top") as depth, \
+         mock.patch("services.monitoring_service.get_last_trade", return_value=None):
         bulk.return_value = {}
         depth.return_value = book_top(UNI_BOOK)
         svc._monitor_prices()
@@ -212,13 +221,60 @@ def test_both_sources_down_leaves_the_cache_untouched():
     """Going stale beats valuing positions off an invented price."""
     svc = _service()
     with mock.patch("services.monitoring_service.fetch_all_tickers") as bulk, \
-         mock.patch("services.monitoring_service.fetch_book_top") as depth:
+         mock.patch("services.monitoring_service.fetch_book_top") as depth, \
+         mock.patch("services.monitoring_service.get_last_trade", return_value=None):
         bulk.return_value = {}
         depth.return_value = None
         svc._monitor_prices()
 
     svc.price_cache.update_ticker.assert_not_called()
     assert svc.logger.error.call_count == len(TICKERS)
+
+
+def _rows_without_ray_last_price():
+    """/tickers is a 24h window: a symbol with no fill in 24h has no lastPrice."""
+    rows = _bulk_rows()
+    rows["RAY_USDC"] = {"symbol": "RAY_USDC", "lastPrice": None, "volume": "0"}
+    return rows
+
+
+def _ray_only_wide(symbol):
+    return book_top(RAY_PULLED_ASKS) if symbol == "RAY_USDC" else book_top(UNI_BOOK)
+
+
+def test_missing_last_price_is_fetched_from_trades_and_rescues_a_wide_book():
+    svc = _service()
+    with mock.patch("services.monitoring_service.fetch_all_tickers") as bulk, \
+         mock.patch("services.monitoring_service.fetch_book_top") as depth, \
+         mock.patch("services.monitoring_service.get_last_trade") as trades:
+        bulk.return_value = _rows_without_ray_last_price()
+        depth.side_effect = _ray_only_wide
+        trades.return_value = {"price": "1.8228", "timestamp": 1792276140000}
+        svc._monitor_prices()
+
+    # Only the symbol missing from /tickers costs an extra request.
+    assert [c.args[0] for c in trades.call_args_list] == ["RAY_USDC"]
+    ray = [c for c in svc.price_cache.update_ticker.call_args_list
+           if c.args[0] == "RAY_USDC"]
+    assert len(ray) == 1
+    assert ray[0].args[1] == "1.8228"                      # not the 2.36865 mid
+    assert ray[0].kwargs["price_source"] == "last_wide_book"
+
+
+def test_wide_book_with_no_trade_anywhere_leaves_the_cache_alone():
+    """Going stale skips the TP/SL/trailing checks; a phantom price arms them."""
+    svc = _service()
+    with mock.patch("services.monitoring_service.fetch_all_tickers") as bulk, \
+         mock.patch("services.monitoring_service.fetch_book_top") as depth, \
+         mock.patch("services.monitoring_service.get_last_trade", return_value=None):
+        bulk.return_value = _rows_without_ray_last_price()
+        depth.side_effect = _ray_only_wide
+        svc._monitor_prices()
+
+    updated = [c.args[0] for c in svc.price_cache.update_ticker.call_args_list]
+    assert updated == ["BTC_USDC", "UNI_USDC"]
+    message = svc.logger.error.call_args.args[0]
+    assert "RAY_USDC" in message and "too wide" in message
 
 
 def test_one_symbol_failing_does_not_stop_the_rest():
@@ -244,7 +300,7 @@ if __name__ == "__main__":
                test_stale_last_fill_loses_to_the_book,
                test_fresh_last_fill_still_yields_the_mid,
                test_wide_book_falls_back_to_the_last_fill,
-               test_wide_book_with_no_last_fill_uses_the_mid_and_says_so,
+               test_wide_book_with_no_last_fill_yields_no_price,
                test_no_book_falls_back_to_the_last_fill,
                test_no_book_and_no_last_fill_yields_no_price,
                test_nonsense_last_price_is_treated_as_absent,
@@ -253,6 +309,8 @@ if __name__ == "__main__":
                test_cache_receives_the_mid_plus_book_provenance,
                test_bulk_failure_still_prices_off_the_book,
                test_both_sources_down_leaves_the_cache_untouched,
+               test_missing_last_price_is_fetched_from_trades_and_rescues_a_wide_book,
+               test_wide_book_with_no_trade_anywhere_leaves_the_cache_alone,
                test_one_symbol_failing_does_not_stop_the_rest]:
         fn()
         print(f"  ok  {fn.__name__}")

@@ -13,6 +13,7 @@ from api_builders.market_builder import (
     get_market_info,
     fetch_all_tickers,
     fetch_book_top,
+    get_last_trade,
 )
 from utils.price_resolution import resolve_reference_price, deviation_pct
 from api_builders.factory import get_adapter
@@ -321,12 +322,23 @@ class MonitoringService:
             try:
                 row = all_tickers.get(ticker) or {}
                 last_price = row.get("lastPrice")
+                if not last_price:
+                    # /tickers is a 24h window: a symbol with no fill in 24h has
+                    # no lastPrice there, which silently removes the wide-book
+                    # fallback. /trades has no window — ask it directly.
+                    trade = get_last_trade(ticker)
+                    last_price = trade.get("price") if trade else None
                 top = fetch_book_top(ticker)
                 quote = resolve_reference_price(last_price, top, max_spread)
 
                 if quote.price is None:
+                    book = (
+                        "no book" if top is None
+                        else f"book too wide to trust (bid {top.bid} / ask {top.ask}, "
+                             f"spread {top.spread_pct:.2f}%)"
+                    )
                     self.logger.error(
-                        f"No usable price for {ticker} (no book, no last fill) — "
+                        f"No usable price for {ticker} ({book}, no last fill) — "
                         f"leaving cached price to go stale"
                     )
                     continue
