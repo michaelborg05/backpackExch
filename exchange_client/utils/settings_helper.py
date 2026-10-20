@@ -143,10 +143,21 @@ class SettingsHelper:
         """Widest top-of-book spread still trusted for a midpoint reference price.
 
         Above this the book is treated as broken/abandoned and the last fill is
-        used instead. Measured worst case across the live roster was 0.18%, so 2%
-        only trips on something genuinely wrong.
+        used instead — but only a fresh one (see max_last_fill_age_secs). Measured
+        worst case across the live roster was 0.18%, so 2% only trips on something
+        genuinely wrong.
         """
         return self._get_float('max_book_spread_pct', 2.0)
+
+    @property
+    def max_last_fill_age_secs(self) -> int:
+        """Oldest fill still trusted as a fallback when the book is missing or wide.
+
+        Older than this, there is no price and the cache entry goes stale. On
+        2026-10-20 a 27h-old RAY fill (1.9078, Binance at 2.007) fired a trailing
+        stop through this fallback.
+        """
+        return self._get_int('max_last_fill_age_secs', 300)
 
     @property
     def price_stale_warn_pct(self) -> float:
