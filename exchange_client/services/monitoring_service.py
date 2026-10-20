@@ -2,6 +2,7 @@ import json
 import time
 import threading
 from collections import defaultdict
+from decimal import Decimal
 from typing import List,  Dict,Optional
 from services.position_manager import get_position_manager
 from utils.logging import log_manager
@@ -15,7 +16,11 @@ from api_builders.market_builder import (
     fetch_book_top,
     get_last_trade,
 )
-from utils.price_resolution import resolve_reference_price, deviation_pct
+from utils.price_resolution import (
+    deviation_pct,
+    fresh_trade_price,
+    resolve_reference_price,
+)
 from api_builders.factory import get_adapter
 from api_builders.dust_conversion import get_dust_converter
 from cache.balance_cache import get_balance_cache
@@ -304,10 +309,11 @@ class MonitoringService:
         can be hours stale — see utils.price_resolution for the measurements —
         and it feeds TP/SL, trailing stops and circuit-breaker marks.
 
-        Failure modes, worst to best: both sources down leaves the entry
-        untouched (it ages out of the TTL and HealthAlertingService raises it);
-        no book falls back to the last fill; no /tickers keeps the book price and
-        drops only the 24h metadata.
+        Failure modes, worst to best: no usable book and no fresh fill leaves the
+        entry untouched (it ages out of the TTL and HealthAlertingService raises
+        it); a missing or wide book falls back to a fill no older than
+        max_last_fill_age_secs; no /tickers keeps the book price and drops only
+        the 24h metadata.
         """
         all_tickers = fetch_all_tickers()
         if not all_tickers:
@@ -317,19 +323,22 @@ class MonitoringService:
 
         max_spread = self.settings.max_book_spread_pct
         warn_pct = self.settings.price_stale_warn_pct
+        max_fill_age = self.settings.max_last_fill_age_secs
 
         for ticker in self.tickers:
             try:
                 row = all_tickers.get(ticker) or {}
+                # /tickers lastPrice has no timestamp and can be a day old on a
+                # thin market: drift logging only, never a fallback price.
                 last_price = row.get("lastPrice")
-                if not last_price:
-                    # /tickers is a 24h window: a symbol with no fill in 24h has
-                    # no lastPrice there, which silently removes the wide-book
-                    # fallback. /trades has no window — ask it directly.
-                    trade = get_last_trade(ticker)
-                    last_price = trade.get("price") if trade else None
                 top = fetch_book_top(ticker)
-                quote = resolve_reference_price(last_price, top, max_spread)
+
+                fresh_fill = None
+                if top is None or top.spread_pct > Decimal(str(max_spread)):
+                    fresh_fill = fresh_trade_price(
+                        get_last_trade(ticker), int(time.time() * 1000), max_fill_age
+                    )
+                quote = resolve_reference_price(fresh_fill, top, max_spread)
 
                 if quote.price is None:
                     book = (
@@ -338,8 +347,8 @@ class MonitoringService:
                              f"spread {top.spread_pct:.2f}%)"
                     )
                     self.logger.error(
-                        f"No usable price for {ticker} ({book}, no last fill) — "
-                        f"leaving cached price to go stale"
+                        f"No usable price for {ticker} ({book}, no fill in the last "
+                        f"{max_fill_age}s) — leaving cached price to go stale"
                     )
                     continue
 
@@ -354,7 +363,7 @@ class MonitoringService:
                     ask=quote.ask,
                     spread_pct=quote.spread_pct,
                     price_source=quote.source,
-                    last_trade_price=last_price,
+                    last_trade_price=fresh_fill or last_price,
                 )
 
                 # A big last-vs-book gap is exactly the bug this path fixes, so make

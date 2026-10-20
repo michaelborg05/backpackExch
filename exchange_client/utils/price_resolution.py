@@ -89,6 +89,29 @@ def book_top(depth: Optional[Dict[str, Any]]) -> Optional[BookTop]:
                    timestamp_us=timestamp_us)
 
 
+def fresh_trade_price(
+    trade: Optional[Dict[str, Any]],
+    now_ms: int,
+    max_age_secs: float,
+) -> Optional[str]:
+    """The price of a /trades fill if it happened within *max_age_secs*, else None.
+
+    A last fill is only a stand-in for the current price while it is recent. On
+    a thin market it can be a day old: 2026-10-20, RAY_USDC's last fill was 27h
+    old at 1.9078 while Binance traded 2.007 — used as the fallback, it fired a
+    trailing stop that market-sold into a hollow book at 1.8686.
+    """
+    if not isinstance(trade, dict):
+        return None
+    try:
+        age_ms = now_ms - int(trade["timestamp"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if age_ms > max_age_secs * 1000:
+        return None
+    return trade.get("price")
+
+
 def resolve_reference_price(
     last_price: Optional[Any],
     top: Optional[BookTop],
@@ -98,16 +121,17 @@ def resolve_reference_price(
 
     The book midpoint wins whenever the book is usable and its spread is sane.
     A spread wider than *max_spread_pct* means a broken or abandoned book — the
-    measured worst case on the live roster was 0.18% — so that falls back to the
-    last fill, which at least was a real trade. If neither is available the price
-    is None and the caller should leave the cache entry alone: going stale is
-    safer than valuing a position off a made-up number.
+    measured worst case on the live roster was 0.18% — so that falls back to
+    *last_price*, which must be a FRESH fill (see fresh_trade_price): /tickers'
+    lastPrice carries no timestamp and can be a day old, so it never qualifies.
+    If neither is available the price is None and the caller should leave the
+    cache entry alone: going stale is safer than valuing a position off a
+    made-up number.
 
-    A wide book with no last fill is "neither": its midpoint is not a price.
-    2026-10-18, RAY_USDC: no trade for 24h dropped lastPrice from /tickers, the
-    near asks were pulled, and the mid of bid 1.77 / ask 2.97 (2.37, +33%, zero
-    trades) armed two underwater trailing stops that then market-sold at -7%
-    and -20% when the asks came back.
+    A wide book with no fresh fill is "neither": its midpoint is not a price.
+    2026-10-18, RAY_USDC: no trade for 24h, the near asks were pulled, and the
+    mid of bid 1.77 / ask 2.97 (2.37, +33%, zero trades) armed two underwater
+    trailing stops that then market-sold at -7% and -20% when the asks came back.
     """
     try:
         last = Decimal(str(last_price)) if last_price is not None else None
