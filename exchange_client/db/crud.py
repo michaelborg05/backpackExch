@@ -15,8 +15,9 @@ def save_trade(db: Session, order: OrderResponse, profile_name: str, reason: str
     if isinstance(signal_snapshot, (SignalSnapshot, TradeSignalSnapshot)):
         signal_snapshot = signal_snapshot.model_dump()
 
-    if order.price is None or order.price == "0":
-        # Calculate average price from executed values
+    # The average fill, whenever anything filled: an IOC limit exit fills at or
+    # better than its limit price, so the limit price would understate it.
+    if Decimal(str(order.executed_quantity or 0)) > 0:
         unit_price = Decimal(order.executed_quote_quantity) / Decimal(order.executed_quantity)
     else:
         unit_price = Decimal(str(order.price))
@@ -177,6 +178,12 @@ def close_position(
     if not position:
         raise ValueError(f"Position {position_id} not found")
     
+    # Profit on what is left, plus anything realised by earlier partial exits
+    # (reduce_position). For a position never partially closed this is the
+    # same as pricing the full quantity at this exit.
+    closing_qty = position.remaining_quantity or position.quantity
+    position.profit = (position.profit or 0) + _leg_profit(position, sell_trade.price, closing_qty)
+
     position.exit_trade_id = sell_trade.id
     position.status = "CLOSED"
     position.close_reason = reason
@@ -184,13 +191,38 @@ def close_position(
     position.exit_price = sell_trade.price
     position.remaining_quantity = 0
 
-    # Calculate profit (direction-aware)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+def _leg_profit(position: Position, exit_price, quantity) -> Decimal:
+    """Direction-aware P/L of closing *quantity* of *position* at *exit_price*."""
     is_long = (position.direction or "LONG") != "SHORT"
-    if is_long:
-        position.profit = (position.exit_price - position.entry_price) * position.quantity
-    else:
-        position.profit = (position.entry_price - position.exit_price) * position.quantity
-    
+    move = (Decimal(exit_price) - position.entry_price) if is_long \
+        else (position.entry_price - Decimal(exit_price))
+    return move * Decimal(quantity)
+
+
+def reduce_position(
+    db: Session,
+    position_id: int,
+    sell_trade: Trade,
+) -> Position:
+    """Record a partial exit: shrink remaining_quantity and bank its P/L.
+
+    The position stays OPEN so the exit that triggered it is retried on the
+    rest next cycle. Used when an IOC limit exit only part-fills against a
+    thin book. close_position adds the banked profit to the final leg.
+    """
+    position = db.query(Position).filter(Position.id == position_id).first()
+    if not position:
+        raise ValueError(f"Position {position_id} not found")
+
+    filled = Decimal(sell_trade.quantity)
+    position.profit = (position.profit or 0) + _leg_profit(position, sell_trade.price, filled)
+    position.remaining_quantity = max(Decimal("0"), position.remaining_quantity - filled)
+
     db.commit()
     db.refresh(position)
     return position

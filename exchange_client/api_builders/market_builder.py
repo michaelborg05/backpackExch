@@ -1,5 +1,8 @@
+import json
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Optional, Any
+from urllib.parse import quote
 from utils.config import Config
 from models import BackpackTicker
 from utils.logging import log_manager
@@ -56,6 +59,63 @@ def fetch_all_tickers(interval: str = "1d") -> Dict[str, dict]:
         market_logger.error("API call for /tickers failed or returned no rows")
         return {}
     return {row["symbol"]: row for row in rows if isinstance(row, dict) and row.get("symbol")}
+
+
+BINANCE_PRICES_URL = "https://data-api.binance.vision/api/v3/ticker/price"
+
+
+def _to_binance_symbol(symbol: str) -> str:
+    """"RAY_USDC" -> "RAYUSDT": Binance's deep USDT book prices the same asset."""
+    base, _, _ = symbol.partition("_")
+    return f"{base.upper()}USDT"
+
+
+def fetch_reference_prices(symbols) -> Dict[str, Decimal]:
+    """Binance spot prices for *symbols* (Backpack format), keyed by Backpack symbol.
+
+    An independent sanity check for the Backpack book, whose thin markets can
+    quote a price nobody trades at (RAY_USDC: +33% on 2026-10-18, -5% on
+    2026-10-20, Binance unmoved both times). Uses the public market-data host,
+    which is not geo-blocked like api.binance.com.
+
+    One request for the whole roster. Binance rejects the whole batch if any
+    symbol is unknown, so that falls back to the full price list. Returns {}
+    on failure — callers must treat a missing reference as "can't check",
+    never as "check failed".
+    """
+    wanted = {_to_binance_symbol(s): s for s in symbols}
+    if not wanted:
+        return {}
+
+    def _get(url):
+        # api_request raises on HTTP errors (Binance's 400 for an unknown
+        # symbol); this must never take the price loop down with it.
+        try:
+            return api_request(url, timeout=5)
+        except Exception as e:
+            market_logger.debug(f"Binance price request failed: {e}")
+            return None
+
+    batch = json.dumps(sorted(wanted), separators=(",", ":"))
+    rows = _get(f"{BINANCE_PRICES_URL}?symbols={quote(batch)}")
+    if not isinstance(rows, list):
+        rows = _get(BINANCE_PRICES_URL)
+    if not isinstance(rows, list):
+        market_logger.warning("Binance reference prices unavailable this cycle")
+        return {}
+
+    prices = {}
+    for row in rows:
+        ours = wanted.get(row.get("symbol")) if isinstance(row, dict) else None
+        if ours is None:
+            continue
+        try:
+            price = Decimal(str(row["price"]))
+        except (InvalidOperation, KeyError, TypeError):
+            continue
+        if price > 0:
+            prices[ours] = price
+    return prices
 
 
 def get_depth(symbol: str, limit: str = "5") -> Optional[dict]:

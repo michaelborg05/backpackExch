@@ -776,7 +776,19 @@ class TradingService:
             
             if order_response is None:
                 return None
-            
+
+            # An IOC limit exit that found no bids at or above its floor fills
+            # nothing. Record nothing: the position stays open and the exit is
+            # retried next cycle. (Market orders always fill.)
+            executed = Decimal(str(order_response.executed_quantity or 0))
+            if executed <= 0:
+                self.logger.warning(
+                    f"{order.symbol} {order.order_type} order {order_response.id} "
+                    f"filled nothing (status {order_response.status}, limit {order.price})"
+                )
+                return order_response
+            part_filled = order.quantity is not None and executed < Decimal(str(order.quantity))
+
             # Determine direction: no position_id = opening trade; position_id = closing trade
             side_upper = order_response.side.upper()
             is_opening = position_id is None
@@ -863,7 +875,16 @@ class TradingService:
 
             else:  # Closing trade (ASK closes LONG, BID closes SHORT)
                 from db.crud import close_positions_fifo
-                if position_id:
+                if position_id and part_filled:
+                    from db.crud import reduce_position
+                    reduced = reduce_position(db, int(position_id), saved_trade)
+                    self.logger.info(
+                        f"Partially closed position {position_id}: {reduced.symbol} "
+                        f"{executed} of {order.quantity} @ {saved_trade.price}, "
+                        f"{reduced.remaining_quantity} left open for the next cycle"
+                    )
+                    closed_positions = []
+                elif position_id:
                     try:
                         position_id_int = int(position_id)
                         closed_position = close_position(
@@ -918,9 +939,10 @@ class TradingService:
                     )
                                             
                 if not closed_positions:
-                    self.logger.warning(
-                        f"No open positions found for {saved_trade.symbol} to close"
-                    )
+                    if not (position_id and part_filled):
+                        self.logger.warning(
+                            f"No open positions found for {saved_trade.symbol} to close"
+                        )
                 else:
                     # Log details of closed positions
                     total_profit = sum(p['profit'] for p in closed_positions)
