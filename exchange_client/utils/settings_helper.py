@@ -160,6 +160,28 @@ class SettingsHelper:
         return self._get_int('max_last_fill_age_secs', 300)
 
     @property
+    def max_reference_deviation_pct(self) -> float:
+        """Furthest the Backpack price may sit from Binance before it is rejected.
+
+        Measured 2026-10-21 across the roster: -0.05% to -0.11% (USDC/USDT basis).
+        The two RAY phantom prices were +33% and -5%. A rejected price is not
+        cached, so the entry goes stale rather than firing TP/SL/trailing stops.
+        0 disables the check.
+        """
+        return self._get_float('max_reference_deviation_pct', 1.5)
+
+    @property
+    def exit_max_slippage_pct(self) -> float:
+        """Worst fill an automated long exit accepts, as % below the cached price.
+
+        Exits go out as IOC limit orders at this floor instead of market orders,
+        so a hollow bid side can't fill them far below the market (2026-10-20:
+        RAY market-sold at 1.8686 with Binance at 2.007). Unfilled quantity is
+        retried next cycle. 0 reverts to market orders.
+        """
+        return self._get_float('exit_max_slippage_pct', 1.0)
+
+    @property
     def price_stale_warn_pct(self) -> float:
         """How far the last fill may drift from the book mid before it is logged."""
         return self._get_float('price_stale_warn_pct', 1.0)

@@ -7,13 +7,14 @@ from typing import List,  Dict,Optional
 from services.position_manager import get_position_manager
 from utils.logging import log_manager
 from utils.config import Config
-from utils.constants import MessagePriority, OrderStatus
+from utils.constants import MessagePriority, OrderStatus, TimeInForce
 from utils.exceptions import InvalidQuantityError, InsufficientBalanceError, TradingException
 from api_builders.account_builder import get_balances
 from api_builders.market_builder import (
     get_market_info,
     fetch_all_tickers,
     fetch_book_top,
+    fetch_reference_prices,
     get_last_trade,
 )
 from utils.price_resolution import (
@@ -80,6 +81,7 @@ class MonitoringService:
         #self.tickers = tickers or ["SOL_USDC", "ETH_USDC", "SUI_USDC"]
         self._symbol_cache = get_symbol_cache()
         self._last_signals: Dict[str, float] = {}  # Track last signal time per symbol
+        self._unfilled_exit_alerts: Dict[int, float] = {}  # position id -> last Telegram alert
 
         with get_db_session() as db:
                 self._symbol_cache.refresh(db)
@@ -309,11 +311,15 @@ class MonitoringService:
         can be hours stale — see utils.price_resolution for the measurements —
         and it feeds TP/SL, trailing stops and circuit-breaker marks.
 
-        Failure modes, worst to best: no usable book and no fresh fill leaves the
-        entry untouched (it ages out of the TTL and HealthAlertingService raises
-        it); a missing or wide book falls back to a fill no older than
-        max_last_fill_age_secs; no /tickers keeps the book price and drops only
-        the 24h metadata.
+        Every price is then checked against Binance, and one more than
+        max_reference_deviation_pct away is not cached.
+
+        Failure modes, worst to best: no usable book and no fresh fill, or a
+        price Binance disagrees with, leaves the entry untouched (it ages out of
+        the TTL and HealthAlertingService raises it); a missing or wide book
+        falls back to a fill no older than max_last_fill_age_secs; no Binance
+        skips the cross-check for the cycle; no /tickers keeps the book price
+        and drops only the 24h metadata.
         """
         all_tickers = fetch_all_tickers()
         if not all_tickers:
@@ -324,6 +330,8 @@ class MonitoringService:
         max_spread = self.settings.max_book_spread_pct
         warn_pct = self.settings.price_stale_warn_pct
         max_fill_age = self.settings.max_last_fill_age_secs
+        max_ref_dev = self.settings.max_reference_deviation_pct
+        references = fetch_reference_prices(self.tickers) if max_ref_dev > 0 else {}
 
         for ticker in self.tickers:
             try:
@@ -349,6 +357,16 @@ class MonitoringService:
                     self.logger.error(
                         f"No usable price for {ticker} ({book}, no fill in the last "
                         f"{max_fill_age}s) — leaving cached price to go stale"
+                    )
+                    continue
+
+                reference = references.get(ticker)
+                ref_dev = deviation_pct(quote.price, reference)
+                if ref_dev is not None and abs(ref_dev) > max_ref_dev:
+                    self.logger.error(
+                        f"Rejected {ticker} price {quote.price} ({quote.source}, bid "
+                        f"{quote.bid} / ask {quote.ask}): {ref_dev:+.2f}% off Binance "
+                        f"{reference} — leaving cached price to go stale"
                     )
                     continue
 
@@ -816,7 +834,8 @@ class MonitoringService:
                         else:
                             profit = (entry_price - exit_price) * quantity
                             profit_pct = ((entry_price - exit_price) / entry_price) * 100
-                        position.profit = profit
+                        # Plus anything banked by earlier partial exits (reduce_position).
+                        position.profit = float(position.profit or 0) + profit
                         position.exit_price = exit_price
                         db.flush()
                         self.logger.info(
@@ -885,6 +904,45 @@ class MonitoringService:
                     f"⚠️ Closed invalid position for {symbol} - token was sold externally"
                 )
 
+    def _exit_floor_price(self, profile, symbol: str, is_long: bool) -> Optional[Decimal]:
+        """Lowest price an automated long exit will sell at, or None for a market order.
+
+        The cached price has already passed the Binance cross-check, so a
+        floor exit_max_slippage_pct below it stops a hollow bid side from
+        filling the exit far below the market (2026-10-20: RAY sold at 1.8686
+        with Binance at 2.007). Backpack spot longs only — shorts and other
+        exchanges keep market orders.
+        """
+        slippage = self.settings.exit_max_slippage_pct
+        exchange = getattr(profile, "exchange_type", "backpack") or "backpack"
+        if not is_long or exchange != "backpack" or slippage <= 0:
+            return None
+        reference = self.price_cache.get_price(symbol)
+        if not reference:
+            return None
+        return Decimal(str(reference)) * (1 - Decimal(str(slippage)) / 100)
+
+    def _alert_unfilled_exit(self, position, profile, reason: str, floor) -> None:
+        """An IOC exit found no bids at or above its floor: the position stays
+        open and the exit retries every cycle. Telegram at most every 30 min."""
+        self.logger.warning(
+            f"Exit not filled for {position.symbol} [{profile.name}] ({reason}): "
+            f"no bids at or above {floor} — retrying next cycle"
+        )
+        now = time.time()
+        if now - self._unfilled_exit_alerts.get(position.id, 0) < 1800:
+            return
+        self._unfilled_exit_alerts[position.id] = now
+        self._send_telegram(
+            f"⏸️ Exit held [{profile.display_name or profile.name}]\n"
+            f"Symbol: {position.symbol}\n"
+            f"Reason: {reason}\n"
+            f"No bids at or above ${float(floor or 0):.4f} "
+            f"({self.settings.exit_max_slippage_pct}% below the market). "
+            f"Position stays open; retrying every cycle.",
+            MessagePriority.HIGH
+        )
+
     def _execute_close(self, db, position, profile, reason: str):
         """
         Execute a close order for a position.
@@ -917,14 +975,21 @@ class MonitoringService:
                 position_id=str(position.id),
                 signal_snapshot=close_snapshot,
             )
+            exit_floor = self._exit_floor_price(profile, symbol, is_long)
+            if exit_floor is not None:
+                close_kwargs.update(price=str(exit_floor), time_in_force=TimeInForce.IOC)
             result = adapter.order_sell(**close_kwargs) if is_long else adapter.order_buy(**close_kwargs)
-            
+
+            if result and float(result.executed_quantity or 0) <= 0:
+                self._alert_unfilled_exit(position, profile, reason, exit_floor)
+                return
+
             if result:
                 self.logger.info(
                     f"Close order executed successfully: {result.id} "
                     f"[{profile.name}] Quantity: {result.executed_quantity}"
                 )
-                
+
                 # Calculate profit/loss (direction-aware)
                 entry_price = float(position.entry_trade.price)
                 exit_price = float(result.executed_quote_quantity) / float(result.executed_quantity)
@@ -936,6 +1001,22 @@ class MonitoringService:
                 else:
                     profit = (entry_price - exit_price) * quantity_sold
                     profit_pct = ((entry_price - exit_price) / entry_price) * 100
+
+                # An IOC exit can part-fill against a thin book. The rest stays
+                # open (TradingService.reduce_position) and is retried next
+                # cycle, so this is not a close: no cooldown, no breaker count.
+                if result.quantity and quantity_sold < float(result.quantity):
+                    self._send_telegram(
+                        f"⚠️ Partial exit [{profile.display_name or profile.name}]\n"
+                        f"Symbol: {symbol}\n"
+                        f"Reason: {reason}\n"
+                        f"Sold: {quantity_sold:.4f} of {float(result.quantity):.4f} "
+                        f"@ ${exit_price:.4f} (floor ${float(exit_floor or 0):.4f})\n"
+                        f"P/L on this part: ${profit:.2f} ({profit_pct:+.2f}%)\n"
+                        f"Rest retried next cycle",
+                        MessagePriority.NORMAL
+                    )
+                    return
 
                 # ← NEW: resolve the AI signal outcome if this position was
                 # opened from an AI_AGENT signal

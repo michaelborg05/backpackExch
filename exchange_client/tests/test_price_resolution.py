@@ -173,7 +173,8 @@ def _service():
     svc._symbol_cache.get_all_symbols.return_value = list(TICKERS)
     svc.price_cache = mock.MagicMock()
     svc.settings = SimpleNamespace(max_book_spread_pct=2.0, price_stale_warn_pct=1.0,
-                                   max_last_fill_age_secs=300)
+                                   max_last_fill_age_secs=300,
+                                   max_reference_deviation_pct=0)   # cross-check: test_exit_protection
     return svc
 
 
