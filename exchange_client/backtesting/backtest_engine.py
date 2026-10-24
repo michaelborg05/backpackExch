@@ -2021,6 +2021,15 @@ class BacktestProfile:
         # closes the main tranche. Bounded to runner_fraction of a trade that
         # has ALREADY reached a trailing exit, unlike the refuted global switch.
         "runner_exempt_trend_invalidation": True,
+        # --- Conditional trend invalidation (opt-in; None reproduces the old
+        # behaviour exactly). See profile_samples/dip_ti_conditional.py.
+        # Skip the logical exit while the raw price P&L sits in [lo, hi) —
+        # e.g. (-3, 0) holds a shallow loser; deeper losses still exit.
+        "ti_hold_pnl_range":                None,
+        # Once a position is this many hours old, evaluate the logical exit
+        # against ti_late_exit_indicators instead (e.g. a higher RSI cap).
+        "ti_late_after_hours":              None,
+        "ti_late_exit_indicators":          None,
     }
 
     def __init__(self, name: str, config: dict):
@@ -2917,6 +2926,11 @@ class BacktestEngine:
                                 # trend mode with the trend filter off — nothing to check.
                                 ti_inds, ti_min, ti_tf = None, 1, self.profile.trend_timeframe
 
+                            late_after = getattr(self.profile, "ti_late_after_hours", None)
+                            late_inds  = getattr(self.profile, "ti_late_exit_indicators", None)
+                            if late_after is not None and late_inds and position_age_mins >= late_after * 60:
+                                ti_inds = late_inds
+
                             if ti_inds:
                                 trend_still_ok, ti_reason = cache.is_bullish(
                                     symbol,
@@ -2930,6 +2944,13 @@ class BacktestEngine:
                                     groups_config=getattr(self.profile, "trend_indicator_groups", None),
                                     price_mode="close",
                                 )
+                                hold_range = getattr(self.profile, "ti_hold_pnl_range", None)
+                                if not trend_still_ok and hold_range is not None:
+                                    raw_pnl = (float(row.close) / open_pos["entry_price"] - 1) * 100
+                                    if is_short:
+                                        raw_pnl = -raw_pnl
+                                    if hold_range[0] <= raw_pnl < hold_range[1]:
+                                        trend_still_ok = True
                                 if not trend_still_ok:
                                     exit_price = float(row.close)
                                     pnl = self._net_pnl(open_pos["entry_price"], exit_price, is_short)
