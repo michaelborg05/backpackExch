@@ -43,10 +43,12 @@ from backtesting.profile_samples.tf15_variants import TF15_VARIANTS
 from backtesting.profile_samples.h1_discovery_variants import H1_DISCOVERY_VARIANTS
 from backtesting.profile_samples.dip_exit_structure import DIP_EXIT_VARIANTS
 from backtesting.profile_samples.dip_runner_tranche import DIP_RUNNER_VARIANTS
+from backtesting.profile_samples.dip_entry_review import DIP_ENTRY_VARIANTS
+from backtesting.profile_samples.dip_ti_conditional import DIP_TI_VARIANTS, DIP_TI_R2_VARIANTS, DIP_TI_R3_VARIANTS
 # =============================================================================
 # Convenience: all variants in one dict
 # =============================================================================
-ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS, **DIP_BUY_VARIANTS, **MANUAL_DIP_VARIANTS, **DIP_V5_OPT_VARIANTS, **BTC_REGIME_VARIANTS, **DAILY_GATE_VARIANTS, **TF15_VARIANTS, **H1_DISCOVERY_VARIANTS, **DIP_EXIT_VARIANTS, **DIP_RUNNER_VARIANTS}
+ALL_VARIANTS = {**RANGE_VARIANTS, **MEAN_REV_VARIANTS, **TREND_VARIANTS, **SWING_VARIANTS, **MEAN_REV_SHORT_VARIANTS, **TREND_SHORT_VARIANTS, **FADE_SHORT_VARIANTS, **DIP_BUY_VARIANTS, **MANUAL_DIP_VARIANTS, **DIP_V5_OPT_VARIANTS, **BTC_REGIME_VARIANTS, **DAILY_GATE_VARIANTS, **TF15_VARIANTS, **H1_DISCOVERY_VARIANTS, **DIP_EXIT_VARIANTS, **DIP_RUNNER_VARIANTS, **DIP_ENTRY_VARIANTS, **DIP_TI_VARIANTS, **DIP_TI_R2_VARIANTS, **DIP_TI_R3_VARIANTS}
 
 # =============================================================================
 # Quick sweep runner — use this to run all variants in one go
